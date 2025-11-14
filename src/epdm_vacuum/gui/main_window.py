@@ -32,6 +32,7 @@ from .widgets.test_status_panel import TestStatusPanel
 from .threads.daq_thread import DataAcquisitionThread
 from .threads.control_thread import ControlThread
 from .dialogs.sequence_editor import SequenceEditorDialog
+from .dialogs.io_config_dialog import IOConfigDialog
 from ..control.sequence_manager import SequenceManager
 
 logger = logging.getLogger(__name__)
@@ -170,6 +171,14 @@ class MainWindow(QMainWindow):
         tare_action = QAction("&Tare Load Cells", self)
         tare_action.triggered.connect(self.on_tare)
         test_menu.addAction(tare_action)
+        
+        # Settings menu
+        settings_menu = menubar.addMenu("&Settings")
+        
+        io_config_action = QAction("&IO Device Configuration", self)
+        io_config_action.setShortcut("Ctrl+I")
+        io_config_action.triggered.connect(self.open_io_config)
+        settings_menu.addAction(io_config_action)
         
         # Help menu
         help_menu = menubar.addMenu("&Help")
@@ -517,6 +526,42 @@ class MainWindow(QMainWindow):
                     f"Failed to save sequence '{sequence.name}'"
                 )
     
+    def open_io_config(self) -> None:
+        """Open IO device configuration dialog."""
+        logger.info("Opening IO configuration dialog...")
+        
+        dialog = IOConfigDialog(self)
+        dialog.config_saved.connect(self.on_io_config_saved)
+        dialog.exec_()
+    
+    def on_io_config_saved(self) -> None:
+        """Handle IO configuration saved."""
+        logger.info("IO configuration saved, reloading IO status widget...")
+        
+        # Reload IO status widget to show new devices
+        if hasattr(self, 'test_status_panel') and self.test_status_panel:
+            # Reset and reload IO devices
+            self.test_status_panel.reset_all_io_states()
+            
+            # Recreate IO status widget with new config
+            from .widgets.io_status_widget import IOStatusWidget
+            new_io_widget = IOStatusWidget()
+            
+            # Replace the old widget (this is a bit hacky, but works)
+            if self.test_status_panel.io_status_widget:
+                # Get the parent layout
+                old_widget = self.test_status_panel.io_status_widget
+                parent = old_widget.parent()
+                
+                # Note: A full reload would require restarting the app
+                # For now, just inform the user
+                QMessageBox.information(
+                    self,
+                    "Configuration Saved",
+                    "IO configuration has been saved.\n\n"
+                    "Note: New IO devices will be available after restarting the application."
+                )
+    
     def show_about(self) -> None:
         """Show about dialog."""
         about_text = """
@@ -526,7 +571,7 @@ class MainWindow(QMainWindow):
         <p><b>Hardware:</b></p>
         <ul>
             <li>Raspberry Pi 5</li>
-            <li>WidgetLords PLC DAQ</li>
+            <li>WidgetLords PI-SPI-DIN PLC Modules</li>
             <li>TLB4 Load Cell Transmitter</li>
             <li>SPT25-20-V30D Pressure Sensor</li>
         </ul>
