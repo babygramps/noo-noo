@@ -35,7 +35,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor
 
-from ...control.sequence import TestSequence, TestStage, SequenceMode, IOAction, IOActionType, IOActionTiming
+from ...control.sequence import TestSequence, TestStage, IOAction, IOActionType, IOActionTiming, PumpMode
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +73,8 @@ class SequenceEditorDialog(QDialog):
             self.sequence = TestSequence(
                 name="New Sequence",
                 description="",
-                mode=SequenceMode.SIMPLE,
             )
         
-        self.current_mode = self.sequence.mode
         self.modified = False
         
         # Load available I/O devices from config
@@ -90,7 +88,7 @@ class SequenceEditorDialog(QDialog):
     def init_ui(self) -> None:
         """Initialize the user interface."""
         self.setWindowTitle("Sequence Editor")
-        self.setMinimumSize(900, 700)
+        self.setMinimumSize(1000, 800)
         
         layout = QVBoxLayout(self)
         
@@ -98,22 +96,17 @@ class SequenceEditorDialog(QDialog):
         metadata_group = self.create_metadata_section()
         layout.addWidget(metadata_group)
         
-        # Mode selector
-        mode_layout = self.create_mode_selector()
-        layout.addLayout(mode_layout)
-        
         # Stages table
         stages_group = self.create_stages_section()
-        layout.addWidget(stages_group, stretch=1)
+        layout.addWidget(stages_group)
         
         # Stage controls
         controls_layout = self.create_stage_controls()
         layout.addLayout(controls_layout)
         
-        # I/O Actions section (shown only in advanced mode initially)
-        self.io_actions_group = self.create_io_actions_section()
-        layout.addWidget(self.io_actions_group)
-        self.update_io_section_visibility()
+        # Stage configuration panel (for selected stage)
+        self.stage_config_group = self.create_stage_config_section()
+        layout.addWidget(self.stage_config_group, stretch=1)
         
         # Status and duration preview
         status_layout = self.create_status_section()
@@ -146,21 +139,6 @@ class SequenceEditorDialog(QDialog):
         group.setLayout(layout)
         return group
     
-    def create_mode_selector(self) -> QHBoxLayout:
-        """Create mode selector buttons."""
-        layout = QHBoxLayout()
-        
-        layout.addWidget(QLabel("Mode:"))
-        
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItem("Simple (Vacuum + Hold Time)", SequenceMode.SIMPLE)
-        self.mode_combo.addItem("Advanced (Full Control)", SequenceMode.ADVANCED)
-        self.mode_combo.currentIndexChanged.connect(self.on_mode_changed)
-        layout.addWidget(self.mode_combo)
-        
-        layout.addStretch()
-        
-        return layout
     
     def create_stages_section(self) -> QGroupBox:
         """Create the stages table section."""
@@ -182,19 +160,10 @@ class SequenceEditorDialog(QDialog):
         return group
     
     def update_table_columns(self) -> None:
-        """Update table columns based on current mode."""
-        if self.current_mode == SequenceMode.SIMPLE:
-            columns = ["#", "Name", "Vacuum (bar)", "Hold Time (s)", "Est. Duration (s)"]
-            self.stages_table.setColumnCount(len(columns))
-            self.stages_table.setHorizontalHeaderLabels(columns)
-        else:
-            columns = [
-                "#", "Name", "Vacuum (bar)", "Hold Time (s)", 
-                "Ramp Rate (bar/s)", "Sample Rate (Hz)", 
-                "Delay (s)", "Max Force (kg)", "Est. Duration (s)"
-            ]
-            self.stages_table.setColumnCount(len(columns))
-            self.stages_table.setHorizontalHeaderLabels(columns)
+        """Update table columns."""
+        columns = ["#", "Name", "Setpoint (bar)", "Time Limit (s)", "Pump Mode", "Est. Duration (s)"]
+        self.stages_table.setColumnCount(len(columns))
+        self.stages_table.setHorizontalHeaderLabels(columns)
         
         # Set column widths
         header = self.stages_table.horizontalHeader()
@@ -240,15 +209,110 @@ class SequenceEditorDialog(QDialog):
         
         return layout
     
-    def create_io_actions_section(self) -> QGroupBox:
+    def create_stage_config_section(self) -> QGroupBox:
+        """Create the stage configuration panel."""
+        group = QGroupBox("Stage Configuration")
+        group.setEnabled(False)  # Disabled until a stage is selected
+        layout = QVBoxLayout()
+        
+        # Stage name
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel("Stage Name:"))
+        self.stage_name_edit = QLineEdit()
+        self.stage_name_edit.textChanged.connect(self.on_stage_config_changed)
+        name_layout.addWidget(self.stage_name_edit)
+        layout.addLayout(name_layout)
+        
+        # Completion conditions group
+        completion_group = QGroupBox("Completion Conditions (stage ends when FIRST condition is met)")
+        completion_layout = QGridLayout()
+        
+        # Vacuum setpoint
+        self.setpoint_enabled = QCheckBox("Vacuum Setpoint:")
+        self.setpoint_enabled.setChecked(True)
+        self.setpoint_enabled.stateChanged.connect(self.on_stage_config_changed)
+        completion_layout.addWidget(self.setpoint_enabled, 0, 0)
+        
+        self.setpoint_spinbox = QDoubleSpinBox()
+        self.setpoint_spinbox.setRange(0.0, 1.0)
+        self.setpoint_spinbox.setDecimals(3)
+        self.setpoint_spinbox.setSuffix(" bar")
+        self.setpoint_spinbox.setValue(0.5)
+        self.setpoint_spinbox.valueChanged.connect(self.on_stage_config_changed)
+        completion_layout.addWidget(self.setpoint_spinbox, 0, 1)
+        
+        # Time limit
+        self.time_enabled = QCheckBox("Time Limit:")
+        self.time_enabled.setChecked(True)
+        self.time_enabled.stateChanged.connect(self.on_stage_config_changed)
+        completion_layout.addWidget(self.time_enabled, 1, 0)
+        
+        self.time_spinbox = QDoubleSpinBox()
+        self.time_spinbox.setRange(0.0, 3600.0)
+        self.time_spinbox.setDecimals(1)
+        self.time_spinbox.setSuffix(" seconds")
+        self.time_spinbox.setValue(30.0)
+        self.time_spinbox.valueChanged.connect(self.on_stage_config_changed)
+        completion_layout.addWidget(self.time_spinbox, 1, 1)
+        
+        # Minimum time
+        self.min_time_enabled = QCheckBox("Minimum Time:")
+        self.min_time_enabled.setChecked(False)
+        self.min_time_enabled.stateChanged.connect(self.on_stage_config_changed)
+        completion_layout.addWidget(self.min_time_enabled, 2, 0)
+        
+        self.min_time_spinbox = QDoubleSpinBox()
+        self.min_time_spinbox.setRange(0.0, 600.0)
+        self.min_time_spinbox.setDecimals(1)
+        self.min_time_spinbox.setSuffix(" seconds")
+        self.min_time_spinbox.setValue(0.0)
+        self.min_time_spinbox.setEnabled(False)
+        self.min_time_spinbox.valueChanged.connect(self.on_stage_config_changed)
+        completion_layout.addWidget(self.min_time_spinbox, 2, 1)
+        
+        # Connect min time checkbox to enable/disable spinbox
+        self.min_time_enabled.stateChanged.connect(
+            lambda state: self.min_time_spinbox.setEnabled(state == Qt.Checked)
+        )
+        
+        completion_group.setLayout(completion_layout)
+        layout.addWidget(completion_group)
+        
+        # Pump control group
+        pump_group = QGroupBox("Pump Control Mode")
+        pump_layout = QVBoxLayout()
+        
+        self.pump_continuous_radio = QRadioButton("Continuous ON - Pump runs continuously during stage")
+        self.pump_continuous_radio.toggled.connect(self.on_stage_config_changed)
+        pump_layout.addWidget(self.pump_continuous_radio)
+        
+        self.pump_maintain_radio = QRadioButton("Maintain Vacuum - Pump cycles to maintain setpoint")
+        self.pump_maintain_radio.setChecked(True)
+        self.pump_maintain_radio.toggled.connect(self.on_stage_config_changed)
+        pump_layout.addWidget(self.pump_maintain_radio)
+        
+        self.pump_off_radio = QRadioButton("OFF - Pump stays off (for venting/manual stages)")
+        self.pump_off_radio.toggled.connect(self.on_stage_config_changed)
+        pump_layout.addWidget(self.pump_off_radio)
+        
+        pump_group.setLayout(pump_layout)
+        layout.addWidget(pump_group)
+        
+        # I/O Device States
+        io_group = self.create_io_control_panel()
+        layout.addWidget(io_group)
+        
+        group.setLayout(layout)
+        return group
+    
+    def create_io_control_panel(self) -> QGroupBox:
         """Create the I/O control panel section."""
-        group = QGroupBox("I/O Device States for Selected Stage")
+        group = QGroupBox("I/O Device States")
         layout = QVBoxLayout()
         
         # Info label with helpful guidance
         info_label = QLabel(
-            "ℹ️ Set the state of each I/O device during this stage. "
-            "Common setup: inlet_valve CLOSED, vent_valve CLOSED during vacuum, OPEN at end."
+            "ℹ️ Common setup: inlet_valve CLOSED, vent_valve CLOSED at start then OPEN at end."
         )
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
@@ -328,12 +392,6 @@ class SequenceEditorDialog(QDialog):
         self.name_edit.setText(self.sequence.name)
         self.description_edit.setPlainText(self.sequence.description)
         
-        # Set mode
-        if self.sequence.mode == SequenceMode.SIMPLE:
-            self.mode_combo.setCurrentIndex(0)
-        else:
-            self.mode_combo.setCurrentIndex(1)
-        
         # Populate stages
         self.refresh_stages_table()
         
@@ -368,38 +426,31 @@ class SequenceEditorDialog(QDialog):
         col += 1
         
         # Name
-        name = stage.name or f"Stage {row + 1}"
-        self.stages_table.setItem(row, col, QTableWidgetItem(name))
+        item = QTableWidgetItem(stage.name)
+        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+        self.stages_table.setItem(row, col, item)
         col += 1
         
-        # Vacuum
-        self.stages_table.setItem(row, col, QTableWidgetItem(f"{stage.target_vacuum_bar:.3f}"))
+        # Setpoint (vacuum)
+        vacuum_str = f"{stage.target_vacuum_bar:.3f}" if stage.target_vacuum_bar is not None else "—"
+        item = QTableWidgetItem(vacuum_str)
+        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+        self.stages_table.setItem(row, col, item)
         col += 1
         
-        # Hold time
-        self.stages_table.setItem(row, col, QTableWidgetItem(f"{stage.hold_time_seconds:.1f}"))
+        # Time limit
+        time_str = f"{stage.max_time_seconds:.0f}" if stage.max_time_seconds is not None else "—"
+        item = QTableWidgetItem(time_str)
+        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+        self.stages_table.setItem(row, col, item)
         col += 1
         
-        if self.current_mode == SequenceMode.ADVANCED:
-            # Ramp rate
-            ramp = stage.ramp_rate_bar_per_sec or 0.1
-            self.stages_table.setItem(row, col, QTableWidgetItem(f"{ramp:.3f}"))
-            col += 1
-            
-            # Sample rate
-            sample = stage.sample_rate_hz or 10.0
-            self.stages_table.setItem(row, col, QTableWidgetItem(f"{sample:.1f}"))
-            col += 1
-            
-            # Delay
-            delay = stage.delay_before_seconds or 0.0
-            self.stages_table.setItem(row, col, QTableWidgetItem(f"{delay:.1f}"))
-            col += 1
-            
-            # Max force
-            max_force = stage.max_force_kg or self.config_limits.get("max_force_kg", 800.0)
-            self.stages_table.setItem(row, col, QTableWidgetItem(f"{max_force:.0f}"))
-            col += 1
+        # Pump mode
+        pump_str = stage.pump_mode.value.title()
+        item = QTableWidgetItem(pump_str)
+        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+        self.stages_table.setItem(row, col, item)
+        col += 1
         
         # Estimated duration
         duration = stage.get_estimated_duration()
@@ -407,57 +458,20 @@ class SequenceEditorDialog(QDialog):
         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
         self.stages_table.setItem(row, col, item)
     
-    def on_mode_changed(self, index: int) -> None:
-        """Handle mode change."""
-        new_mode = self.mode_combo.itemData(index)
-        
-        if new_mode != self.current_mode:
-            # Confirm if stages exist
-            if len(self.sequence.stages) > 0:
-                reply = QMessageBox.question(
-                    self,
-                    "Change Mode",
-                    "Changing mode will update the table view but preserve your stages. Continue?",
-                    QMessageBox.Yes | QMessageBox.No
-                )
-                if reply == QMessageBox.No:
-                    # Revert combo box
-                    self.mode_combo.blockSignals(True)
-                    if self.current_mode == SequenceMode.SIMPLE:
-                        self.mode_combo.setCurrentIndex(0)
-                    else:
-                        self.mode_combo.setCurrentIndex(1)
-                    self.mode_combo.blockSignals(False)
-                    return
-            
-            self.current_mode = new_mode
-            self.sequence.mode = new_mode
-            self.update_table_columns()
-            self.refresh_stages_table()
-            self.update_io_section_visibility()
-            self.modified = True
-            
-            logger.info(f"Changed sequence mode to {new_mode.value}")
     
     def on_add_stage(self) -> None:
         """Add a new stage to the sequence."""
-        # Create default stage
-        if self.current_mode == SequenceMode.SIMPLE:
-            stage = TestStage(
-                target_vacuum_bar=0.5,
-                hold_time_seconds=30.0,
-            )
-        else:
-            stage = TestStage(
-                target_vacuum_bar=0.5,
-                hold_time_seconds=30.0,
-                ramp_rate_bar_per_sec=0.1,
-                sample_rate_hz=10.0,
-                delay_before_seconds=0.0,
-            )
-            
-            # Auto-generate essential I/O actions for vacuum operation
-            self._add_default_io_actions(stage)
+        # Create default stage with sensible defaults
+        stage = TestStage(
+            name=f"Stage {len(self.sequence.stages) + 1}",
+            target_vacuum_bar=0.5,
+            max_time_seconds=30.0,
+            min_time_seconds=0.0,
+            pump_mode=PumpMode.MAINTAIN_VACUUM,
+        )
+        
+        # Auto-generate essential I/O actions for vacuum operation
+        self._add_default_io_actions(stage)
         
         self.sequence.add_stage(stage)
         self.refresh_stages_table()
@@ -467,7 +481,8 @@ class SequenceEditorDialog(QDialog):
         # Select new row
         self.stages_table.selectRow(len(self.sequence.stages) - 1)
         
-        # Refresh I/O table to show auto-generated actions
+        # Refresh stage config panel and I/O table
+        self.refresh_stage_config()
         self.refresh_io_table()
         
         logger.info("Added new stage to sequence")
@@ -538,61 +553,136 @@ class SequenceEditorDialog(QDialog):
         self.move_up_btn.setEnabled(has_selection and row > 0)
         self.move_down_btn.setEnabled(has_selection and row < len(self.sequence.stages) - 1)
         
-        # Update I/O actions table for selected stage
+        # Update stage configuration panel and I/O table
+        self.refresh_stage_config()
         self.refresh_io_table()
     
     def on_table_item_changed(self, item: QTableWidgetItem) -> None:
-        """Handle table cell edit."""
-        row = item.row()
-        col = item.column()
-        
+        """Handle table cell edit (table is now read-only, so this shouldn't be called)."""
+        # Table is now read-only, edits happen in the stage config panel
+        pass
+    
+    def on_metadata_changed(self) -> None:
+        """Handle metadata field changes."""
+        self.modified = True
+    
+    def on_stage_config_changed(self) -> None:
+        """Handle changes in the stage configuration panel."""
+        row = self.stages_table.currentRow()
         if row < 0 or row >= len(self.sequence.stages):
             return
         
         stage = self.sequence.stages[row]
         
-        try:
-            # Determine which field was edited
-            if self.current_mode == SequenceMode.SIMPLE:
-                field_map = {1: "name", 2: "target_vacuum_bar", 3: "hold_time_seconds"}
-            else:
-                field_map = {
-                    1: "name", 2: "target_vacuum_bar", 3: "hold_time_seconds",
-                    4: "ramp_rate_bar_per_sec", 5: "sample_rate_hz",
-                    6: "delay_before_seconds", 7: "max_force_kg"
-                }
-            
-            if col not in field_map:
-                return
-            
-            field = field_map[col]
-            value = item.text()
-            
-            # Update stage
-            if field == "name":
-                stage.name = value
-            else:
-                # Convert to float
-                setattr(stage, field, float(value))
-            
-            self.modified = True
-            self.update_status()
-            
-            # Refresh the row to update calculated fields
-            self.stages_table.blockSignals(True)
-            self.populate_stage_row(row, stage)
-            self.stages_table.blockSignals(False)
-            
-        except ValueError as e:
-            logger.warning(f"Invalid value entered in table: {e}")
-            # Reset the item
-            self.stages_table.blockSignals(True)
-            self.populate_stage_row(row, stage)
-            self.stages_table.blockSignals(False)
-    
-    def on_metadata_changed(self) -> None:
-        """Handle metadata field changes."""
+        # Update stage from UI
+        stage.name = self.stage_name_edit.text()
+        
+        # Update setpoint
+        if self.setpoint_enabled.isChecked():
+            stage.target_vacuum_bar = self.setpoint_spinbox.value()
+            self.setpoint_spinbox.setEnabled(True)
+        else:
+            stage.target_vacuum_bar = None
+            self.setpoint_spinbox.setEnabled(False)
+        
+        # Update time limit
+        if self.time_enabled.isChecked():
+            stage.max_time_seconds = self.time_spinbox.value()
+            self.time_spinbox.setEnabled(True)
+        else:
+            stage.max_time_seconds = None
+            self.time_spinbox.setEnabled(False)
+        
+        # Update minimum time
+        if self.min_time_enabled.isChecked():
+            stage.min_time_seconds = self.min_time_spinbox.value()
+        else:
+            stage.min_time_seconds = 0.0
+        
+        # Update pump mode
+        if self.pump_continuous_radio.isChecked():
+            stage.pump_mode = PumpMode.CONTINUOUS
+        elif self.pump_maintain_radio.isChecked():
+            stage.pump_mode = PumpMode.MAINTAIN_VACUUM
+        elif self.pump_off_radio.isChecked():
+            stage.pump_mode = PumpMode.OFF
+        
+        # Refresh table row to show updated values
+        self.stages_table.blockSignals(True)
+        self.populate_stage_row(row, stage)
+        self.stages_table.blockSignals(False)
+        
         self.modified = True
+        self.update_status()
+    
+    def refresh_stage_config(self) -> None:
+        """Refresh the stage configuration panel with selected stage data."""
+        row = self.stages_table.currentRow()
+        
+        if row < 0 or row >= len(self.sequence.stages):
+            self.stage_config_group.setEnabled(False)
+            return
+        
+        self.stage_config_group.setEnabled(True)
+        stage = self.sequence.stages[row]
+        
+        # Block signals during refresh
+        self.stage_name_edit.blockSignals(True)
+        self.setpoint_enabled.blockSignals(True)
+        self.setpoint_spinbox.blockSignals(True)
+        self.time_enabled.blockSignals(True)
+        self.time_spinbox.blockSignals(True)
+        self.min_time_enabled.blockSignals(True)
+        self.min_time_spinbox.blockSignals(True)
+        
+        # Set values
+        self.stage_name_edit.setText(stage.name)
+        
+        # Setpoint
+        if stage.target_vacuum_bar is not None:
+            self.setpoint_enabled.setChecked(True)
+            self.setpoint_spinbox.setValue(stage.target_vacuum_bar)
+            self.setpoint_spinbox.setEnabled(True)
+        else:
+            self.setpoint_enabled.setChecked(False)
+            self.setpoint_spinbox.setEnabled(False)
+        
+        # Time limit
+        if stage.max_time_seconds is not None:
+            self.time_enabled.setChecked(True)
+            self.time_spinbox.setValue(stage.max_time_seconds)
+            self.time_spinbox.setEnabled(True)
+        else:
+            self.time_enabled.setChecked(False)
+            self.time_spinbox.setEnabled(False)
+        
+        # Minimum time
+        if stage.min_time_seconds > 0:
+            self.min_time_enabled.setChecked(True)
+            self.min_time_spinbox.setValue(stage.min_time_seconds)
+            self.min_time_spinbox.setEnabled(True)
+        else:
+            self.min_time_enabled.setChecked(False)
+            self.min_time_spinbox.setEnabled(False)
+        
+        # Pump mode
+        if stage.pump_mode == PumpMode.CONTINUOUS:
+            self.pump_continuous_radio.setChecked(True)
+        elif stage.pump_mode == PumpMode.MAINTAIN_VACUUM:
+            self.pump_maintain_radio.setChecked(True)
+        elif stage.pump_mode == PumpMode.OFF:
+            self.pump_off_radio.setChecked(True)
+        
+        # Re-enable signals
+        self.stage_name_edit.blockSignals(False)
+        self.setpoint_enabled.blockSignals(False)
+        self.setpoint_spinbox.blockSignals(False)
+        self.time_enabled.blockSignals(False)
+        self.time_spinbox.blockSignals(False)
+        self.min_time_enabled.blockSignals(False)
+        self.min_time_spinbox.blockSignals(False)
+        
+        logger.debug(f"Refreshed stage config panel for stage {row + 1}")
     
     def validate_sequence(self) -> bool:
         """
@@ -661,7 +751,6 @@ class SequenceEditorDialog(QDialog):
         """Update sequence object from UI fields."""
         self.sequence.name = self.name_edit.text()
         self.sequence.description = self.description_edit.toPlainText()
-        self.sequence.mode = self.current_mode
     
     def on_save(self) -> None:
         """Handle save button click."""
@@ -749,19 +838,6 @@ class SequenceEditorDialog(QDialog):
         except Exception as e:
             logger.warning(f"Could not load I/O devices from config: {e}")
             return []
-    
-    def update_io_section_visibility(self) -> None:
-        """Update visibility of I/O section based on mode."""
-        # Show I/O section in advanced mode or if any stage has I/O actions
-        show_io = self.current_mode == SequenceMode.ADVANCED
-        if not show_io:
-            # Check if any stage has I/O actions
-            for stage in self.sequence.stages:
-                if stage.io_actions:
-                    show_io = True
-                    break
-        
-        self.io_actions_group.setVisible(show_io)
     
     def refresh_io_table(self) -> None:
         """Refresh I/O states table for currently selected stage."""
@@ -952,7 +1028,7 @@ class SequenceEditorDialog(QDialog):
         # Set default states for common devices
         defaults = {
             "inlet_valve": {"start": False, "end": False},  # CLOSED throughout
-            "vent_valve": {"start": False, "end": True if stage.auto_vent else False},  # CLOSED at start, OPEN at end if auto_vent
+            "vent_valve": {"start": False, "end": True},  # CLOSED at start, OPEN at end
             "safety_valve": {"start": False, "end": False},  # CLOSED throughout
         }
         

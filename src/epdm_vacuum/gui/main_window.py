@@ -350,8 +350,8 @@ class MainWindow(QMainWindow):
         if self.sequence_manager:
             sequence = self.sequence_manager.create_default_sequence()
         else:
-            from ..control.sequence import TestSequence, SequenceMode
-            sequence = TestSequence(name="New Sequence", mode=SequenceMode.SIMPLE)
+            from ..control.sequence import TestSequence
+            sequence = TestSequence(name="New Sequence")
         
         # Open editor dialog
         self.open_sequence_editor(sequence)

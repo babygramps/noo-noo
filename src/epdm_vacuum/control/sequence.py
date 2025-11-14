@@ -16,12 +16,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class SequenceMode(Enum):
-    """Sequence configuration mode."""
-    SIMPLE = "simple"
-    ADVANCED = "advanced"
-
-
 class IOActionTiming(Enum):
     """When an I/O action should occur relative to stage."""
     BEFORE_STAGE = "before_stage"
@@ -36,6 +30,13 @@ class IOActionType(Enum):
     DIGITAL_OUTPUT = "digital_output"  # Set relay/valve on/off
     ANALOG_OUTPUT = "analog_output"    # Set analog output value
     PULSE = "pulse"                     # Pulse output for duration
+
+
+class PumpMode(Enum):
+    """Vacuum pump control mode."""
+    CONTINUOUS = "continuous"         # Pump ON entire stage
+    MAINTAIN_VACUUM = "maintain"     # Cycle pump to maintain vacuum at setpoint
+    OFF = "off"                       # Pump stays OFF (for venting stages, etc.)
 
 
 @dataclass
@@ -128,31 +129,27 @@ class TestStage:
     """
     Represents a single stage in a test sequence.
     
-    A stage defines parameters for one phase of testing, such as
-    ramping to a target vacuum and holding for a specified duration.
+    A stage defines parameters for one phase of testing with flexible
+    completion conditions (time-based, setpoint-based, or both).
     """
     
-    # Core parameters (required for all modes)
-    target_vacuum_bar: float
-    hold_time_seconds: float
+    # Core parameters
+    name: str = "New Stage"
     
-    # Advanced parameters (optional, use defaults if None)
-    name: Optional[str] = None
-    description: Optional[str] = None
-    ramp_rate_bar_per_sec: Optional[float] = None
-    sample_rate_hz: Optional[float] = None
-    delay_before_seconds: Optional[float] = 0.0
+    # Completion conditions (OR logic - first to complete wins)
+    target_vacuum_bar: Optional[float] = None  # None = no vacuum setpoint
+    max_time_seconds: Optional[float] = None   # None = run indefinitely
+    min_time_seconds: float = 0.0              # Minimum hold before checking setpoint
     
-    # Safety limits (per-stage overrides)
-    max_force_kg: Optional[float] = None
-    max_single_cell_kg: Optional[float] = None
-    
-    # Control options
-    collect_data: bool = True
-    auto_vent: bool = True
+    # Pump control
+    pump_mode: PumpMode = PumpMode.CONTINUOUS
+    vacuum_tolerance_bar: float = 0.05  # For MAINTAIN_VACUUM mode
     
     # I/O control actions
     io_actions: List[IOAction] = field(default_factory=list)
+    
+    # Data collection
+    collect_data: bool = True
     
     def add_io_action(self, action: IOAction) -> None:
         """
@@ -203,45 +200,42 @@ class TestStage:
         errors = []
         warnings = []
         
-        # Basic parameter validation
-        if self.target_vacuum_bar < 0 or self.target_vacuum_bar > 1.0:
-            errors.append(f"Target vacuum {self.target_vacuum_bar} bar is out of range [0, 1.0]")
+        # Check that at least one completion condition is set
+        if self.target_vacuum_bar is None and self.max_time_seconds is None:
+            warnings.append("No completion condition set - stage will run indefinitely until manual stop")
         
-        if self.hold_time_seconds < 0:
-            errors.append(f"Hold time {self.hold_time_seconds}s cannot be negative")
-        
-        if self.hold_time_seconds > 3600:
-            errors.append(f"Hold time {self.hold_time_seconds}s exceeds 1 hour (safety limit)")
-        
-        if self.delay_before_seconds and self.delay_before_seconds < 0:
-            errors.append(f"Delay {self.delay_before_seconds}s cannot be negative")
-        
-        # Advanced parameter validation
-        if self.ramp_rate_bar_per_sec is not None:
-            if self.ramp_rate_bar_per_sec <= 0:
-                errors.append(f"Ramp rate {self.ramp_rate_bar_per_sec} must be positive")
-            if self.ramp_rate_bar_per_sec > 0.5:
-                errors.append(f"Ramp rate {self.ramp_rate_bar_per_sec} bar/s exceeds safety limit (0.5)")
-        
-        if self.sample_rate_hz is not None:
-            if self.sample_rate_hz <= 0 or self.sample_rate_hz > 100:
-                errors.append(f"Sample rate {self.sample_rate_hz} Hz is out of range (0, 100]")
-        
-        # Safety limits validation
-        if config_limits:
-            max_vacuum = config_limits.get("max_vacuum_bar", 1.0)
-            if self.target_vacuum_bar > max_vacuum:
-                errors.append(f"Target vacuum {self.target_vacuum_bar} bar exceeds config limit {max_vacuum} bar")
+        # Vacuum setpoint validation
+        if self.target_vacuum_bar is not None:
+            if self.target_vacuum_bar < 0 or self.target_vacuum_bar > 1.0:
+                errors.append(f"Target vacuum {self.target_vacuum_bar} bar is out of range [0, 1.0]")
             
-            if self.max_force_kg:
-                max_force_limit = config_limits.get("max_force_kg", 800.0)
-                if self.max_force_kg > max_force_limit:
-                    errors.append(f"Max force {self.max_force_kg} kg exceeds config limit {max_force_limit} kg")
+            # Check against config limits
+            if config_limits:
+                max_vacuum = config_limits.get("max_vacuum_bar", 1.0)
+                if self.target_vacuum_bar > max_vacuum:
+                    errors.append(f"Target vacuum {self.target_vacuum_bar} bar exceeds config limit {max_vacuum} bar")
+        
+        # Time limit validation
+        if self.max_time_seconds is not None:
+            if self.max_time_seconds <= 0:
+                errors.append(f"Time limit {self.max_time_seconds}s must be positive")
             
-            if self.max_single_cell_kg:
-                max_cell_limit = config_limits.get("max_single_cell_kg", 250.0)
-                if self.max_single_cell_kg > max_cell_limit:
-                    errors.append(f"Max single cell {self.max_single_cell_kg} kg exceeds config limit {max_cell_limit} kg")
+            if self.max_time_seconds > 3600:
+                errors.append(f"Time limit {self.max_time_seconds}s exceeds 1 hour (safety limit)")
+        
+        # Minimum time validation
+        if self.min_time_seconds < 0:
+            errors.append(f"Minimum time {self.min_time_seconds}s cannot be negative")
+        
+        if self.min_time_seconds > 600:
+            warnings.append(f"Minimum time {self.min_time_seconds}s is quite long (>10 minutes)")
+        
+        # Pump mode validation
+        if self.pump_mode == PumpMode.MAINTAIN_VACUUM and self.target_vacuum_bar is None:
+            warnings.append("Pump mode 'Maintain Vacuum' requires a vacuum setpoint to be effective")
+        
+        if self.vacuum_tolerance_bar <= 0:
+            errors.append(f"Vacuum tolerance {self.vacuum_tolerance_bar} bar must be positive")
         
         # Validate I/O actions
         for i, io_action in enumerate(self.io_actions):
@@ -298,33 +292,42 @@ class TestStage:
         """
         duration = 0.0
         
-        # Add delay before stage
-        if self.delay_before_seconds:
-            duration += self.delay_before_seconds
+        # Add minimum time
+        duration += self.min_time_seconds
         
-        # Add ramp time (if ramp rate specified)
-        if self.ramp_rate_bar_per_sec and self.ramp_rate_bar_per_sec > 0:
-            ramp_time = self.target_vacuum_bar / self.ramp_rate_bar_per_sec
+        # If only time limit is set, use that
+        if self.max_time_seconds is not None and self.target_vacuum_bar is None:
+            duration += self.max_time_seconds
+            return duration
+        
+        # If only setpoint is set, estimate ramp time
+        if self.target_vacuum_bar is not None and self.max_time_seconds is None:
+            # Conservative estimate: 10 seconds per 0.1 bar
+            ramp_time = self.target_vacuum_bar * 100
             duration += ramp_time
-        else:
-            # Conservative estimate: assume 10 seconds per 0.1 bar
-            duration += self.target_vacuum_bar * 100
+            return duration
         
-        # Add hold time
-        duration += self.hold_time_seconds
+        # If both are set, use the shorter estimate (since it's OR logic)
+        if self.max_time_seconds is not None and self.target_vacuum_bar is not None:
+            ramp_time = self.target_vacuum_bar * 100
+            duration += min(self.max_time_seconds, ramp_time)
+            return duration
         
-        # Add vent time (if auto-vent enabled)
-        if self.auto_vent:
-            duration += 5.0  # Conservative estimate
-        
+        # If neither is set, return minimum time only
         return duration
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert stage to dictionary for serialization."""
-        data = asdict(self)
-        # Convert I/O actions to dictionaries
-        if self.io_actions:
-            data["io_actions"] = [action.to_dict() for action in self.io_actions]
+        data = {
+            "name": self.name,
+            "target_vacuum_bar": self.target_vacuum_bar,
+            "max_time_seconds": self.max_time_seconds,
+            "min_time_seconds": self.min_time_seconds,
+            "pump_mode": self.pump_mode.value,
+            "vacuum_tolerance_bar": self.vacuum_tolerance_bar,
+            "collect_data": self.collect_data,
+            "io_actions": [action.to_dict() for action in self.io_actions],
+        }
         return data
     
     @classmethod
@@ -334,6 +337,28 @@ class TestStage:
         io_actions_data = data.pop("io_actions", [])
         io_actions = [IOAction.from_dict(action_data) for action_data in io_actions_data]
         
+        # Convert pump_mode if it's a string
+        if "pump_mode" in data and isinstance(data["pump_mode"], str):
+            data["pump_mode"] = PumpMode(data["pump_mode"])
+        
+        # Handle legacy fields (for backward compatibility)
+        legacy_mappings = {
+            "hold_time_seconds": "max_time_seconds",
+            "auto_vent": None,  # Ignore, handled by I/O actions now
+            "ramp_rate_bar_per_sec": None,  # Ignore, simplified
+            "sample_rate_hz": None,  # Ignore, use global
+            "delay_before_seconds": None,  # Ignore, simplified
+            "max_force_kg": None,  # Ignore for now
+            "max_single_cell_kg": None,  # Ignore for now
+        }
+        
+        for old_key, new_key in legacy_mappings.items():
+            if old_key in data:
+                if new_key:
+                    data[new_key] = data.pop(old_key)
+                else:
+                    data.pop(old_key)
+        
         # Create stage with remaining data
         stage = cls(**data)
         stage.io_actions = io_actions
@@ -342,8 +367,14 @@ class TestStage:
     
     def __str__(self) -> str:
         """String representation."""
-        name = self.name or f"Stage @ {self.target_vacuum_bar} bar"
-        return f"{name}: {self.target_vacuum_bar} bar for {self.hold_time_seconds}s"
+        conditions = []
+        if self.target_vacuum_bar is not None:
+            conditions.append(f"{self.target_vacuum_bar} bar")
+        if self.max_time_seconds is not None:
+            conditions.append(f"{self.max_time_seconds}s max")
+        
+        condition_str = " OR ".join(conditions) if conditions else "run until stopped"
+        return f"{self.name}: {condition_str}"
 
 
 @dataclass
@@ -360,23 +391,19 @@ class TestSequence:
     
     # Metadata
     description: str = ""
-    mode: SequenceMode = SequenceMode.SIMPLE
     created_date: Optional[str] = None
     modified_date: Optional[str] = None
     author: Optional[str] = None
-    
-    # Sequence-level settings
-    loop_count: int = 1
-    pause_between_stages: bool = False
     
     def __post_init__(self):
         """Initialize metadata if not provided."""
         if self.created_date is None:
             self.created_date = datetime.now().isoformat()
         
-        # Ensure mode is SequenceMode enum
-        if isinstance(self.mode, str):
-            self.mode = SequenceMode(self.mode)
+        # Ensure pump_mode is PumpMode enum in all stages
+        for stage in self.stages:
+            if isinstance(stage.pump_mode, str):
+                stage.pump_mode = PumpMode(stage.pump_mode)
     
     def add_stage(self, stage: TestStage, index: Optional[int] = None) -> None:
         """
@@ -528,12 +555,9 @@ class TestSequence:
         return {
             "name": self.name,
             "description": self.description,
-            "mode": self.mode.value,
             "created_date": self.created_date,
             "modified_date": self.modified_date,
             "author": self.author,
-            "loop_count": self.loop_count,
-            "pause_between_stages": self.pause_between_stages,
             "stages": [stage.to_dict() for stage in self.stages],
         }
     

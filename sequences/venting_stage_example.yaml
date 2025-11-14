@@ -1,14 +1,14 @@
-name: Quick Test
-description: Single stage quick test for initial seal verification
+name: Venting Stage Example
+description: Demonstrates using pump OFF mode for manual venting stages
 created_date: '2024-11-14T00:00:00'
 modified_date: '2024-11-14T00:00:00'
 author: System
 stages:
-  - name: Quick Seal Check
-    target_vacuum_bar: 0.5
-    max_time_seconds: 30.0
+  - name: Build Vacuum
+    target_vacuum_bar: 0.6
+    max_time_seconds: 60.0
     min_time_seconds: 0.0
-    pump_mode: maintain
+    pump_mode: continuous
     vacuum_tolerance_bar: 0.05
     collect_data: true
     io_actions:
@@ -27,11 +27,28 @@ stages:
         delay_seconds: 0.0
         duration_seconds: null
         description: Set vent_valve to CLOSED at start of stage
-      
+  
+  - name: Controlled Vent
+    target_vacuum_bar: null
+    max_time_seconds: 10.0
+    min_time_seconds: 0.0
+    pump_mode: off
+    vacuum_tolerance_bar: 0.05
+    collect_data: true
+    io_actions:
       - device_name: vent_valve
         action_type: digital_output
         value: true
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Set vent_valve to OPEN at start of stage
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
         timing: end_of_stage
         delay_seconds: 0.0
         duration_seconds: null
-        description: Set vent_valve to OPEN at end of stage
+        description: Set vent_valve to CLOSED at end of stage
+

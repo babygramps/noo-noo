@@ -283,13 +283,14 @@ Edit this file to match your hardware setup.
 
 ### Test Sequencing
 - **Create and edit multi-stage test sequences**
-- **Simple mode:** Quick setup with just vacuum target and hold time
-- **Advanced mode:** Full control over ramp rates, sampling, and safety limits
+- **Flexible completion:** Stages end when setpoint reached OR time limit (whichever comes first)
+- **Intelligent pump control:** Continuous, maintain vacuum (cycling), or OFF modes
 - **Save/load sequences:** Reusable test configurations stored as YAML files
-- **Visual editor:** Table-based interface with drag-and-drop reordering
-- **Real-time validation:** Immediate feedback on parameter validity
+- **Unified editor:** Clean interface showing all parameters at once
+- **I/O control panel:** Visual display of all valve/relay states per stage
+- **Real-time validation:** Immediate feedback with warnings and errors
 - **Stage management:** Add, remove, duplicate, and reorder test stages
-- **Progress tracking:** Live updates showing current stage during execution
+- **Progress tracking:** Live updates showing current stage and completion reason
 
 ### Test Control
 - Automated multi-stage test sequences
@@ -356,11 +357,12 @@ This is a **scaffold implementation** with complete structure but placeholder lo
 
 ### Overview
 
-The test sequencing feature allows you to create, save, load, and execute complex multi-stage test sequences. This is useful for:
-- Testing seals at multiple vacuum levels
-- Endurance testing with extended hold times
-- Ramp rate sensitivity studies
-- Standardized QA testing procedures
+The test sequencing feature allows you to create, save, load, and execute multi-stage test sequences with intelligent completion logic. This is useful for:
+- Testing seals at multiple vacuum levels with setpoint control
+- Endurance testing with time-based or setpoint-based completion
+- Automated sequences that adapt to actual vacuum performance
+- Standardized QA testing procedures with reproducible results
+- Complex valve sequencing and I/O control
 
 ### Creating a Sequence
 
@@ -369,46 +371,52 @@ The test sequencing feature allows you to create, save, load, and execute comple
    - Enter a name for your sequence
    - The sequence editor dialog will open
 
-2. **Sequence Editor Modes:**
+2. **Creating and Configuring Stages:**
    
-   **Simple Mode:**
-   - Quick stage creation with minimal parameters
-   - Specify only vacuum target (bar) and hold time (seconds)
-   - Uses default ramp rates and safety limits from configuration
-   - Perfect for basic multi-level testing
-   - No manual I/O configuration needed
+   The editor shows a unified interface with all controls visible:
    
-   **Advanced Mode:**
-   - Full control over all parameters:
-     - Target vacuum pressure
-     - Hold time
-     - Ramp rate (bar/second)
-     - Data sample rate (Hz)
-     - Delay before stage
-     - Per-stage force limits
-     - Data collection options
-     - **I/O action configuration**
-   - Stage naming and descriptions
-   - Pause between stages option
-   - **Auto-generated I/O actions** for new stages (inlet/vent valves)
-   - Validation warnings if required I/O actions are missing
+   **Stages Table:**
+   - Lists all stages with name, setpoint, time limit, pump mode
+   - Click "Add Stage" to create a new stage
+   - Duplicate, remove, or reorder stages using the buttons
+   - Select a stage to configure it in the panel below
+   
+   **Stage Configuration Panel:**
+   - **Stage Name:** Descriptive name for the stage
+   - **Completion Conditions:** (stage ends when FIRST condition is met)
+     - ☑ Vacuum Setpoint: Target vacuum in bar
+     - ☑ Time Limit: Maximum duration in seconds
+     - ☐ Minimum Time: Optional minimum hold before checking setpoint
+   - **Pump Control Mode:**
+     - Continuous ON: Pump runs entire stage
+     - Maintain Vacuum: Pump cycles to maintain setpoint (recommended)
+     - OFF: Pump stays off (for venting/manual stages)
+   - **I/O Device States:**
+     - All available devices shown with dropdown controls
+     - Set state at start and end of stage (CLOSED/OPEN/Not Set)
+     - Auto-configured defaults for common vacuum test setup
 
-3. **Managing Stages:**
-   - **Add Stage:** Click "Add Stage" to append a new stage
-   - **Duplicate:** Select a stage and click "Duplicate" to create a copy
-   - **Remove:** Select a stage and click "Remove" to delete it
-   - **Reorder:** Use "Move Up" and "Move Down" buttons to change stage order
-   - **Edit:** Double-click cells in the table to edit values directly
+3. **Completion Conditions:**
+   
+   Each stage can end when:
+   - **Setpoint Reached:** Vacuum reaches target (e.g., 0.5 bar)
+   - **Time Limit:** Maximum duration exceeded (e.g., 60 seconds)
+   - **Both:** Whichever happens first (recommended for safety)
+   - **Neither:** Stage runs indefinitely until manual stop
+   
+   Example: "0.5 bar OR 60s max" = Stage ends as soon as vacuum hits 0.5 bar, or after 60 seconds if setpoint not reached
 
 4. **Validation:**
    - The editor validates all parameters in real-time
-   - Invalid values are highlighted with error messages
+   - Errors (red) prevent saving
+   - Warnings (orange) allow saving with confirmation
    - Estimated total test duration is displayed
    - Click "Validate" to see a detailed report
 
 5. **Saving:**
    - Click "Save" to save the sequence as a YAML file in the `sequences/` directory
    - Sequences are automatically validated before saving
+   - Warnings will prompt for confirmation before saving
 
 ### Loading and Running Sequences
 
@@ -430,52 +438,55 @@ The test sequencing feature allows you to create, save, load, and execute comple
    - Current stage progress is shown in the status bar
    - Data is collected for each stage independently
 
+### Pump Control Modes
+
+Each stage can use one of three pump control modes:
+
+**Continuous ON:**
+- Pump runs continuously during the entire stage
+- Use for: Initial vacuum ramp, fast evacuation
+- Simple and predictable behavior
+
+**Maintain Vacuum (Recommended):**
+- Pump cycles ON/OFF to maintain setpoint within tolerance
+- Use for: Holding at specific vacuum levels, leak testing
+- Reduces pump wear and power consumption
+- Only works with a vacuum setpoint configured
+
+**OFF:**
+- Pump stays off during the stage
+- Use for: Venting stages, manual operations, atmospheric tests
+- Often combined with vent valve I/O actions
+
 ### I/O Control and Valve Sequencing
 
-The sequencing system includes powerful I/O control capabilities for managing valves, relays, and other actuators during test execution.
+The sequencing system includes powerful I/O control for managing valves, relays, and other actuators.
 
 #### Configurable I/O Devices
 
 Available I/O devices are defined in `hardware_config.yaml`:
-- **vacuum_pump** - Main vacuum pump relay
+- **vacuum_pump** - Main vacuum pump relay (controlled automatically by pump mode)
 - **vent_valve** - Vent valve for pressure release
 - **inlet_valve** - Inlet valve for chamber access
 - **safety_valve** - Emergency safety relief valve
 - **proportional_valve** - Analog control valve (0-10V)
 
-#### I/O Action Types
-
-- **Digital Output (ON/OFF):** Turn relays/valves on or off
-- **Analog Output (Value):** Set analog control values (e.g., proportional valves)
-- **Pulse (Timed):** Activate output for a specific duration then turn off
-
-#### I/O Action Timing
-
-I/O actions can be triggered at five different points during stage execution:
-- **Before Stage:** Execute before any stage operations begin
-- **Start of Stage:** Execute when stage starts (after delays)
-- **During Stage:** Execute during the hold period
-- **End of Stage:** Execute at the end of the hold period
-- **After Stage:** Execute after all stage operations complete
-
 #### Setting I/O States
 
-In the sequence editor (Advanced Mode):
+In the sequence editor:
 1. Select a stage from the stages table
-2. Scroll to the "I/O Device States for Selected Stage" section
+2. In the Stage Configuration panel, scroll to "I/O Device States"
 3. **All available I/O devices are displayed automatically**
 4. For each device, set the state using dropdown menus:
    - **State at Start**: Device state when the stage begins (Not Set, CLOSED, OPEN)
    - **State at End**: Device state when the stage completes (Not Set, CLOSED, OPEN)
 5. Changes are saved automatically to the stage
 
-The I/O control panel shows all devices at once, making it easy to see and configure the complete I/O state for each stage.
-
 #### Auto-Generated I/O States
 
-When you create a new stage in **Advanced Mode**, the system automatically configures essential I/O states:
+When you create a new stage, the system automatically configures essential I/O states:
 - **inlet_valve** → CLOSED at start and end (seals chamber)
-- **vent_valve** → CLOSED at start (enables vacuum), OPEN at end (if auto_vent is enabled)
+- **vent_valve** → CLOSED at start, OPEN at end (enables vacuum, then releases)
 - **safety_valve** → CLOSED at start and end
 
 **All available I/O devices are shown in the control panel** for each stage. You can see and modify any device state using the dropdown menus:
@@ -485,26 +496,32 @@ When you create a new stage in **Advanced Mode**, the system automatically confi
 
 The I/O control panel makes it easy to see the complete I/O configuration at a glance.
 
-#### Validation Warnings
+#### Validation System
 
-The system validates your sequences and provides warnings if:
-- No I/O action closes the inlet valve (chamber may not seal)
-- No I/O action closes the vent valve (vacuum may leak)
-- No I/O action opens vent valve at end (pressure not released)
+The system validates your sequences and provides:
 
-These are **warnings**, not errors - your sequence will still run, but may not work as expected. Review the warnings and add the necessary I/O actions.
+**Errors (Red - Prevents Saving):**
+- Invalid parameter ranges (vacuum > 1.0 bar, negative times, etc.)
+- Missing sequence name
+- I/O action configuration errors
+
+**Warnings (Orange - Allows Saving with Confirmation):**
+- No completion condition set (stage runs indefinitely)
+- Missing recommended I/O actions (inlet/vent valves)
+- Pump mode mismatch (e.g., "Maintain" without setpoint)
+- Very long durations
+
+Validation runs automatically as you edit, with color-coded feedback in the status bar.
 
 ### Example Sequences
 
 Several example sequences are included in the `sequences/` directory:
 
-- **quick_test.yaml:** Single-stage 10-second test at 0.5 bar
-- **simple_multi_stage.yaml:** Three stages testing at 0.3, 0.5, and 0.7 bar
-- **advanced_detailed_test.yaml:** Comprehensive test with precise ramp rates and sampling control
-- **endurance_test.yaml:** Extended 5-minute hold test for long-term seal evaluation
-- **valve_control_test.yaml:** Demonstrates I/O control with inlet/vent valve sequencing
-- **example_with_auto_io.yaml:** Shows auto-generated I/O states in Advanced mode
-- **example_io_control_panel.yaml:** Demonstrates the I/O control panel interface
+- **quick_test.yaml:** Single-stage test with setpoint and time limit (0.5 bar OR 30s)
+- **simple_multi_stage.yaml:** Three stages testing at different vacuum levels with maintain mode
+- **endurance_test.yaml:** Extended 5-minute time-based test with maintain vacuum mode
+- **setpoint_only_test.yaml:** Demonstrates setpoint-based completion without time limits
+- **venting_stage_example.yaml:** Shows pump OFF mode for controlled venting stages
 
 ### Sequence File Format
 
@@ -513,45 +530,29 @@ Sequences are stored as YAML files. Example structure:
 ```yaml
 name: My Test Sequence
 description: Description of what this test does
-mode: simple  # or 'advanced'
-loop_count: 1
-pause_between_stages: false
 stages:
   - name: Stage 1
-    target_vacuum_bar: 0.5
-    hold_time_seconds: 30.0
+    target_vacuum_bar: 0.5      # Setpoint (null = no setpoint)
+    max_time_seconds: 30.0      # Time limit (null = no limit)
+    min_time_seconds: 0.0       # Minimum hold time
+    pump_mode: maintain         # continuous, maintain, or off
+    vacuum_tolerance_bar: 0.05  # For maintain mode
     collect_data: true
-    auto_vent: true
-  - name: Stage 2
-    target_vacuum_bar: 0.7
-    hold_time_seconds: 45.0
-    collect_data: true
-    auto_vent: true
-```
-
-Advanced mode stages include additional parameters:
-- `ramp_rate_bar_per_sec`: Control how quickly vacuum is applied
-- `sample_rate_hz`: Data collection frequency
-- `delay_before_seconds`: Wait time before starting stage
-- `max_force_kg`: Per-stage force limit
-- `max_single_cell_kg`: Per-cell force limit
-- `io_actions`: List of I/O control actions (see example below)
-
-Example with I/O actions:
-```yaml
-stages:
-  - name: Test with Valve Control
-    target_vacuum_bar: 0.5
-    hold_time_seconds: 30.0
-    collect_data: true
-    auto_vent: false
     io_actions:
+      # I/O actions define valve/relay states
       - device_name: inlet_valve
         action_type: digital_output
-        value: false
-        timing: before_stage
+        value: false              # false = CLOSED, true = OPEN
+        timing: start_of_stage
         delay_seconds: 0.0
         description: Close inlet valve
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        description: Close vent valve
       
       - device_name: vent_valve
         action_type: digital_output
@@ -561,17 +562,27 @@ stages:
         description: Open vent valve
 ```
 
+**Key Parameters:**
+- `target_vacuum_bar`: Vacuum setpoint (null for no setpoint)
+- `max_time_seconds`: Time limit (null for no limit)
+- `min_time_seconds`: Minimum hold before checking setpoint
+- `pump_mode`: `continuous`, `maintain`, or `off`
+- `vacuum_tolerance_bar`: Tolerance for maintain mode (default 0.05)
+- `io_actions`: List of I/O control actions (auto-generated for new stages)
+
 ### Tips
 
-- **Start Simple:** Use simple mode for initial sequence development
-- **Copy and Modify:** Duplicate existing sequences and modify them for new tests
+- **Use Both Conditions:** Set both setpoint AND time limit for safety (stage ends at first condition)
+- **Maintain Mode:** Use "Maintain Vacuum" pump mode for stable, long-duration holds
+- **Minimum Time:** Set minimum time if you need setpoint to stabilize before moving on
+- **Copy and Modify:** Duplicate existing stages to create variations quickly
 - **Name Stages:** Give stages descriptive names for easier tracking during execution
-- **Validate Often:** Use the validation button to catch errors before running
-- **Test Incrementally:** Start with short hold times and increase gradually
-- **Document Sequences:** Use the description field to note the purpose and expected results
-- **I/O Actions:** Add I/O actions in advanced mode to control valves and actuators
-- **Test I/O First:** Verify I/O actions work correctly with short test durations before long tests
-- **Emergency Stop:** All I/O actions respect the emergency stop button
+- **Validate Often:** Use the validation button to catch errors and review warnings
+- **Test Incrementally:** Start with short time limits and increase gradually
+- **I/O Defaults:** New stages come with sensible I/O defaults - modify as needed
+- **Setpoint-Only:** For setpoint-only stages, set time limit to null (uncheck the box)
+- **Time-Only:** For time-only stages, set setpoint to null (uncheck the box)
+- **Emergency Stop:** All operations respect the emergency stop button
 
 ---
 

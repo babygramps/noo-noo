@@ -14,7 +14,7 @@ from typing import List, Optional, Dict, Any
 import logging
 import yaml
 
-from .sequence import TestSequence, TestStage, SequenceMode
+from .sequence import TestSequence, TestStage, PumpMode
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +213,7 @@ class SequenceManager:
     
     def create_default_sequence(self, name: str = "Default Sequence") -> TestSequence:
         """
-        Create a default simple sequence.
+        Create a default sequence with one stage.
         
         Args:
             name: Name for the sequence
@@ -224,102 +224,94 @@ class SequenceManager:
         stage = TestStage(
             name="Default Stage",
             target_vacuum_bar=0.5,
-            hold_time_seconds=30.0,
+            max_time_seconds=30.0,
+            pump_mode=PumpMode.MAINTAIN_VACUUM,
         )
         
         sequence = TestSequence(
             name=name,
             description="Default test sequence",
-            mode=SequenceMode.SIMPLE,
             stages=[stage],
         )
         
         logger.info(f"Created default sequence '{name}'")
         return sequence
     
-    def create_template_simple(self) -> TestSequence:
+    def create_template_multi_level(self) -> TestSequence:
         """
-        Create a template simple sequence with multiple stages.
+        Create a template multi-level sequence.
         
         Returns:
-            TestSequence: Template simple sequence
+            TestSequence: Template multi-level sequence
         """
         stages = [
             TestStage(
                 name="Low Vacuum Test",
                 target_vacuum_bar=0.3,
-                hold_time_seconds=20.0,
+                max_time_seconds=60.0,  # Max 60s or until 0.3 bar reached
+                pump_mode=PumpMode.MAINTAIN_VACUUM,
             ),
             TestStage(
                 name="Medium Vacuum Test",
                 target_vacuum_bar=0.5,
-                hold_time_seconds=30.0,
+                max_time_seconds=60.0,
+                pump_mode=PumpMode.MAINTAIN_VACUUM,
             ),
             TestStage(
                 name="High Vacuum Test",
                 target_vacuum_bar=0.7,
-                hold_time_seconds=40.0,
+                max_time_seconds=90.0,
+                pump_mode=PumpMode.MAINTAIN_VACUUM,
             ),
         ]
         
         sequence = TestSequence(
-            name="Simple Multi-Stage Template",
-            description="Template for testing at multiple vacuum levels",
-            mode=SequenceMode.SIMPLE,
+            name="Multi-Level Test Template",
+            description="Template for testing at multiple vacuum levels with setpoint control",
             stages=stages,
         )
         
-        logger.info("Created simple template sequence")
+        logger.info("Created multi-level template sequence")
         return sequence
     
-    def create_template_advanced(self) -> TestSequence:
+    def create_template_setpoint_based(self) -> TestSequence:
         """
-        Create a template advanced sequence with full parameter control.
+        Create a template setpoint-based sequence.
         
         Returns:
-            TestSequence: Template advanced sequence
+            TestSequence: Template setpoint-based sequence
         """
         stages = [
             TestStage(
-                name="Initial Ramp",
+                name="Ramp to Low Vacuum",
                 target_vacuum_bar=0.3,
-                hold_time_seconds=15.0,
-                ramp_rate_bar_per_sec=0.05,
-                sample_rate_hz=10.0,
-                collect_data=True,
+                max_time_seconds=120.0,  # Max 2 minutes to reach
+                min_time_seconds=0.0,
+                pump_mode=PumpMode.CONTINUOUS,
             ),
             TestStage(
-                name="Stabilization Hold",
+                name="Hold at Medium Vacuum",
                 target_vacuum_bar=0.5,
-                hold_time_seconds=30.0,
-                ramp_rate_bar_per_sec=0.1,
-                sample_rate_hz=10.0,
-                delay_before_seconds=5.0,
-                max_force_kg=600.0,
-                collect_data=True,
+                max_time_seconds=60.0,  # Hold for max 60s at 0.5 bar
+                min_time_seconds=10.0,  # Hold at least 10s before moving on
+                pump_mode=PumpMode.MAINTAIN_VACUUM,
             ),
             TestStage(
-                name="Peak Test",
+                name="Peak Vacuum Test",
                 target_vacuum_bar=0.8,
-                hold_time_seconds=20.0,
-                ramp_rate_bar_per_sec=0.05,
-                sample_rate_hz=20.0,
-                delay_before_seconds=5.0,
-                max_force_kg=800.0,
-                max_single_cell_kg=250.0,
-                collect_data=True,
+                max_time_seconds=45.0,
+                min_time_seconds=5.0,
+                pump_mode=PumpMode.MAINTAIN_VACUUM,
             ),
         ]
         
         sequence = TestSequence(
-            name="Advanced Multi-Stage Template",
-            description="Template with full parameter control for detailed testing",
-            mode=SequenceMode.ADVANCED,
+            name="Setpoint-Based Test Template",
+            description="Template demonstrating setpoint-based stage completion",
             stages=stages,
-            pause_between_stages=True,
         )
         
-        logger.info("Created advanced template sequence")
+        logger.info("Created setpoint-based template sequence")
         return sequence
     
     def _sanitize_filename(self, name: str) -> str:

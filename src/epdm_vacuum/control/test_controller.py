@@ -13,7 +13,7 @@ import logging
 import time
 from enum import Enum
 
-from .sequence import TestSequence, TestStage, IOAction, IOActionTiming, IOActionType
+from .sequence import TestSequence, TestStage, IOAction, IOActionTiming, IOActionType, PumpMode
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +258,12 @@ class TestController:
     
     def _execute_stage(self, stage: TestStage) -> bool:
         """
-        Execute a single test stage.
+        Execute a single test stage with flexible completion conditions.
+        
+        Stage completes when FIRST condition is met:
+        - Vacuum setpoint reached (if configured)
+        - Time limit exceeded (if configured)
+        - Manual stop
         
         Args:
             stage: TestStage to execute
@@ -273,39 +278,34 @@ class TestController:
             # Execute I/O actions: BEFORE_STAGE
             self._execute_io_actions(stage, IOActionTiming.BEFORE_STAGE)
             
-            # Apply delay before stage if specified
-            if stage.delay_before_seconds and stage.delay_before_seconds > 0:
-                self._update_status(f"Waiting {stage.delay_before_seconds:.0f}s before stage...")
-                time.sleep(stage.delay_before_seconds)
-            
             # Execute I/O actions: START_OF_STAGE
             self._execute_io_actions(stage, IOActionTiming.START_OF_STAGE)
             
-            # Start vacuum pump
-            self._update_status("Starting vacuum pump...")
-            self._control_pump(True)
+            # Control pump based on mode
+            if stage.pump_mode == PumpMode.CONTINUOUS:
+                self._update_status("Starting vacuum pump (continuous mode)...")
+                self._control_pump(True)
+            elif stage.pump_mode == PumpMode.MAINTAIN_VACUUM:
+                self._update_status("Starting vacuum pump (maintain mode)...")
+                self._control_pump(True)
+            elif stage.pump_mode == PumpMode.OFF:
+                self._update_status("Pump OFF mode...")
+                self._control_pump(False)
             
-            # Ramp to target vacuum
-            self._update_status(f"Ramping to {stage.target_vacuum_bar:.3f} bar...")
-            self._ramp_to_vacuum_target(stage.target_vacuum_bar, stage.ramp_rate_bar_per_sec)
-            
-            # Execute I/O actions: DURING_STAGE (at start of hold period)
+            # Execute I/O actions: DURING_STAGE
             self._execute_io_actions(stage, IOActionTiming.DURING_STAGE)
             
-            # Hold at vacuum and collect data
-            self._update_status(f"Holding at {stage.target_vacuum_bar:.3f} bar for {stage.hold_time_seconds:.0f}s...")
-            self._hold_and_collect_stage(stage, stage_data)
+            # Run stage with completion monitoring
+            completion_reason = self._run_stage_with_monitoring(stage, stage_data)
+            
+            logger.info(f"Stage completed: {completion_reason}")
+            self._update_status(f"Stage complete: {completion_reason}")
             
             # Execute I/O actions: END_OF_STAGE
             self._execute_io_actions(stage, IOActionTiming.END_OF_STAGE)
             
-            # Vent chamber if configured
-            if stage.auto_vent:
-                self._update_status("Venting chamber...")
-                self._vent_chamber()
-            else:
-                # Just turn off pump but don't vent
-                self._control_pump(False)
+            # Turn off pump
+            self._control_pump(False)
             
             # Execute I/O actions: AFTER_STAGE
             self._execute_io_actions(stage, IOActionTiming.AFTER_STAGE)
@@ -321,6 +321,70 @@ class TestController:
         except Exception as e:
             logger.error(f"Error executing stage: {e}", exc_info=True)
             return False
+    
+    def _run_stage_with_monitoring(self, stage: TestStage, stage_data: List[Dict[str, Any]]) -> str:
+        """
+        Run stage while monitoring for completion conditions.
+        
+        Args:
+            stage: TestStage being executed
+            stage_data: List to append collected data to
+        
+        Returns:
+            str: Reason for completion ("setpoint reached", "time limit", etc.)
+        """
+        stage_start = time.time()
+        sample_interval = 0.1  # Check conditions every 100ms
+        
+        logger.info(f"Monitoring stage completion - Setpoint: {stage.target_vacuum_bar}, Time: {stage.max_time_seconds}")
+        
+        while self.state == TestState.RUNNING:
+            elapsed = time.time() - stage_start
+            
+            # TODO: Read actual vacuum from sensors
+            current_vacuum = 0.0  # Placeholder
+            
+            # Check minimum time first
+            if elapsed < stage.min_time_seconds:
+                time.sleep(sample_interval)
+                continue
+            
+            # Check completion conditions (OR logic - first to complete wins)
+            
+            # Condition 1: Setpoint reached
+            if stage.target_vacuum_bar is not None:
+                # TODO: Replace with actual vacuum reading
+                # For now, estimate that vacuum builds at ~0.1 bar/sec
+                estimated_vacuum = min(elapsed * 0.1, stage.target_vacuum_bar)
+                current_vacuum = estimated_vacuum
+                
+                if current_vacuum >= stage.target_vacuum_bar:
+                    logger.info(f"Setpoint reached: {current_vacuum:.3f} >= {stage.target_vacuum_bar:.3f} bar")
+                    return f"setpoint reached ({current_vacuum:.3f} bar)"
+            
+            # Condition 2: Time limit exceeded
+            if stage.max_time_seconds is not None:
+                if elapsed >= stage.max_time_seconds:
+                    logger.info(f"Time limit reached: {elapsed:.1f}s >= {stage.max_time_seconds:.1f}s")
+                    return f"time limit ({elapsed:.1f}s)"
+            
+            # Pump cycling for MAINTAIN_VACUUM mode
+            if stage.pump_mode == PumpMode.MAINTAIN_VACUUM and stage.target_vacuum_bar is not None:
+                self._maintain_vacuum_cycle(current_vacuum, stage.target_vacuum_bar, stage.vacuum_tolerance_bar)
+            
+            # Collect data if enabled
+            if stage.collect_data and elapsed % 1.0 < sample_interval:  # Collect ~1 sample/sec
+                data_point = {
+                    "timestamp": time.time(),
+                    "vacuum_bar": current_vacuum,
+                    "elapsed": elapsed,
+                }
+                stage_data.append(data_point)
+            
+            time.sleep(sample_interval)
+        
+        # If we exit the loop, test was stopped manually
+        return "manually stopped"
     
     def stop_test(self) -> None:
         """Stop the current test immediately."""
@@ -394,87 +458,31 @@ class TestController:
         
         time.sleep(0.5)
     
-    def _ramp_to_vacuum(self) -> None:
-        """Ramp vacuum pressure to target value (legacy single test)."""
-        target = self.test_config.get("target_vacuum_bar", 0.5)
-        self._ramp_to_vacuum_target(target, None)
-    
-    def _ramp_to_vacuum_target(self, target_bar: float, ramp_rate: Optional[float] = None) -> None:
+    def _maintain_vacuum_cycle(self, current_vacuum: float, target_vacuum: float, tolerance: float) -> None:
         """
-        Ramp vacuum pressure to target value.
+        Cycle pump to maintain vacuum at setpoint.
         
         Args:
-            target_bar: Target vacuum in bar
-            ramp_rate: Optional ramp rate in bar/s
+            current_vacuum: Current vacuum reading in bar
+            target_vacuum: Target vacuum in bar
+            tolerance: Acceptable tolerance in bar
         """
-        logger.info(f"Ramping to target vacuum: {target_bar} bar")
+        # TODO: Implement actual vacuum reading and control
+        # For now, this is a placeholder that would:
+        # - Turn pump OFF if vacuum > (target + tolerance)
+        # - Turn pump ON if vacuum < (target - tolerance)
         
-        # TODO: Implement closed-loop vacuum control
-        # Monitor pressure and adjust pump timing
+        # Example logic (when hardware is connected):
+        # if current_vacuum > target_vacuum + tolerance:
+        #     if self.pump.is_running():
+        #         logger.debug("Pump cycling OFF - vacuum above target")
+        #         self._control_pump(False)
+        # elif current_vacuum < target_vacuum - tolerance:
+        #     if not self.pump.is_running():
+        #         logger.debug("Pump cycling ON - vacuum below target")
+        #         self._control_pump(True)
         
-        # Placeholder: wait for vacuum to build
-        if ramp_rate and ramp_rate > 0:
-            ramp_time = target_bar / ramp_rate
-        else:
-            ramp_time = target_bar * 10  # Conservative estimate
-        
-        time.sleep(min(ramp_time, 30))  # Cap at 30 seconds for safety
-        
-        logger.info("Target vacuum reached")
-    
-    def _hold_and_collect(self) -> None:
-        """Hold at target vacuum and collect data (legacy single test)."""
-        hold_time = self.test_config.get("hold_time_seconds", 30)
-        logger.info(f"Holding for {hold_time} seconds")
-        
-        # TODO: Implement data collection loop
-        # - Monitor vacuum and force
-        # - Check safety limits
-        # - Store data points
-        
-        # Placeholder
-        time.sleep(hold_time)
-        
-        logger.info("Hold period completed")
-    
-    def _hold_and_collect_stage(self, stage: TestStage, stage_data: List[Dict[str, Any]]) -> None:
-        """
-        Hold at target vacuum and collect data for a specific stage.
-        
-        Args:
-            stage: TestStage being executed
-            stage_data: List to append collected data points to
-        """
-        logger.info(f"Holding for {stage.hold_time_seconds} seconds")
-        
-        # TODO: Implement actual data collection loop
-        # - Monitor vacuum and force at sample_rate_hz
-        # - Check safety limits (stage.max_force_kg, etc.)
-        # - Store data points in stage_data
-        
-        # Placeholder: simulate data collection
-        if stage.collect_data:
-            sample_rate = stage.sample_rate_hz or 10.0
-            num_samples = int(stage.hold_time_seconds * sample_rate)
-            
-            for i in range(num_samples):
-                if self.state != TestState.RUNNING:
-                    break
-                
-                # Simulate sample
-                data_point = {
-                    "timestamp": time.time(),
-                    "vacuum_bar": stage.target_vacuum_bar,
-                    "force_kg": 100.0,  # Mock data
-                }
-                stage_data.append(data_point)
-                
-                time.sleep(1.0 / sample_rate)
-        else:
-            # Just wait without collecting data
-            time.sleep(stage.hold_time_seconds)
-        
-        logger.info("Hold period completed")
+        pass  # Placeholder until hardware interface is implemented
     
     def _vent_chamber(self) -> None:
         """Safely vent the test chamber."""
