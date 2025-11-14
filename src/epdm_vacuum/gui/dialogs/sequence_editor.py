@@ -8,7 +8,7 @@ Dialog for creating and editing test sequences:
 - Real-time validation and duration preview
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 
 from PyQt5.QtWidgets import (
