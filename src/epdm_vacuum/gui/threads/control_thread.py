@@ -141,7 +141,7 @@ class ControlThread(QThread):
             logger.info(f"Simulating stage {stage_index + 1}/{total_stages}: {stage_name}")
             
             # Simulate IO actions at start of stage
-            from ..control.sequence import IOActionTiming
+            from ...control.sequence import IOActionTiming
             start_actions = stage.get_io_actions_for_timing(IOActionTiming.START_OF_STAGE)
             for io_action in start_actions:
                 self.io_state_changed.emit(io_action.device_name, bool(io_action.value))
