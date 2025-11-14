@@ -110,11 +110,106 @@ class ControlThread(QThread):
         """
         Placeholder test sequence for development.
         
-        This should be replaced with actual test logic from TestController.
+        Simulates test execution with the loaded sequence, emitting all
+        appropriate signals to update the UI.
         """
         logger.info("Executing placeholder test sequence")
         
-        # Simulate test stages
+        # If we have a sequence, simulate it properly
+        if self.sequence and len(self.sequence.stages) > 0:
+            logger.info(f"Simulating sequence: {self.sequence.name} with {len(self.sequence.stages)} stages")
+            self._simulate_sequence_execution()
+        else:
+            # Fallback to generic placeholder if no sequence
+            logger.warning("No sequence loaded, using generic placeholder")
+            self._simulate_generic_test()
+    
+    def _simulate_sequence_execution(self) -> None:
+        """Simulate execution of the loaded sequence."""
+        total_stages = len(self.sequence.stages)
+        
+        for stage_index, stage in enumerate(self.sequence.stages):
+            if not self.running:
+                logger.info("Test sequence interrupted")
+                break
+            
+            stage_name = stage.name or f"Stage {stage_index + 1}"
+            
+            # Emit stage changed signal
+            self.stage_changed.emit(stage_index, total_stages, stage_name)
+            self.status_update.emit(f"Stage {stage_index + 1}/{total_stages}: {stage_name}")
+            logger.info(f"Simulating stage {stage_index + 1}/{total_stages}: {stage_name}")
+            
+            # Simulate IO actions at start of stage
+            from ..control.sequence import IOActionTiming
+            start_actions = stage.get_io_actions_for_timing(IOActionTiming.START_OF_STAGE)
+            for io_action in start_actions:
+                self.io_state_changed.emit(io_action.device_name, bool(io_action.value))
+                logger.debug(f"  IO: {io_action.device_name} -> {'OPEN' if io_action.value else 'CLOSED'}")
+            
+            # Determine stage duration (use max_time or estimate)
+            if stage.max_time_seconds:
+                duration = min(stage.max_time_seconds, 30.0)  # Cap at 30s for simulation
+            elif stage.target_vacuum_bar:
+                duration = stage.target_vacuum_bar * 10  # Estimate based on vacuum
+            else:
+                duration = 10.0  # Default duration
+            
+            # Simulate stage execution with progress updates
+            start_time = time.time()
+            update_interval = 0.5  # Update every 0.5 seconds
+            
+            while self.running:
+                elapsed = time.time() - start_time
+                
+                if elapsed >= duration:
+                    break
+                
+                # Calculate progress
+                progress = min(1.0, elapsed / duration)
+                
+                # Build status text
+                status_text = f"Elapsed: {elapsed:.1f}s"
+                if stage.target_vacuum_bar:
+                    simulated_vacuum = min(elapsed * 0.1, stage.target_vacuum_bar)
+                    status_text += f" | Vacuum: {simulated_vacuum:.3f} bar"
+                
+                # Emit progress update
+                self.stage_progress_updated.emit(progress, status_text)
+                
+                time.sleep(update_interval)
+            
+            if not self.running:
+                break
+            
+            # Determine completion reason
+            if stage.target_vacuum_bar and stage.max_time_seconds:
+                # Simulate that we usually hit setpoint
+                completion_reason = f"setpoint reached ({stage.target_vacuum_bar:.3f} bar)"
+            elif stage.max_time_seconds:
+                completion_reason = f"time limit ({stage.max_time_seconds:.1f}s)"
+            elif stage.target_vacuum_bar:
+                completion_reason = f"setpoint reached ({stage.target_vacuum_bar:.3f} bar)"
+            else:
+                completion_reason = "completed"
+            
+            # Emit stage completed signal
+            self.stage_completed.emit(stage_index, completion_reason)
+            logger.info(f"  Stage {stage_index} completed: {completion_reason}")
+            
+            # Simulate IO actions at end of stage
+            end_actions = stage.get_io_actions_for_timing(IOActionTiming.END_OF_STAGE)
+            for io_action in end_actions:
+                self.io_state_changed.emit(io_action.device_name, bool(io_action.value))
+                logger.debug(f"  IO: {io_action.device_name} -> {'OPEN' if io_action.value else 'CLOSED'}")
+            
+            # Brief pause between stages
+            if stage_index < total_stages - 1:
+                time.sleep(0.5)
+    
+    def _simulate_generic_test(self) -> None:
+        """Fallback generic test simulation when no sequence is loaded."""
+        # Generic placeholder stages
         stages = [
             ("Pre-test checks...", 2),
             ("Evacuating chamber...", 5),
