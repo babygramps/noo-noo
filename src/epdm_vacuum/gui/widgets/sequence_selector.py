@@ -161,8 +161,7 @@ class SequenceSelectorWidget(QWidget):
                 tooltip = f"{info['name']}\n"
                 tooltip += f"Stages: {info['stage_count']}\n"
                 if info['description']:
-                    tooltip += f"Description: {info['description']}\n"
-                tooltip += f"Mode: {info['mode']}"
+                    tooltip += f"Description: {info['description']}"
                 
                 self.sequence_combo.addItem(name, name)
                 self.sequence_combo.setItemData(
@@ -242,8 +241,8 @@ class SequenceSelectorWidget(QWidget):
             if self.sequence_manager:
                 sequence = self.sequence_manager.create_default_sequence(name)
             else:
-                from ...control.sequence import TestSequence, SequenceMode
-                sequence = TestSequence(name=name, mode=SequenceMode.SIMPLE)
+                from ...control.sequence import TestSequence
+                sequence = TestSequence(name=name)
             
             self.current_sequence = sequence
             
@@ -356,8 +355,7 @@ class SequenceSelectorWidget(QWidget):
         """Update the sequence info display."""
         if self.current_sequence:
             info = f"{self.current_sequence.get_stage_count()} stages, "
-            info += f"~{self.current_sequence.get_estimated_duration():.0f}s total, "
-            info += f"Mode: {self.current_sequence.mode.value}"
+            info += f"~{self.current_sequence.get_estimated_duration():.0f}s total"
             self.info_label.setText(info)
             self.info_label.setStyleSheet("color: black;")
         else:

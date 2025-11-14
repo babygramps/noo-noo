@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
     QMenuBar,
     QAction,
     QMessageBox,
+    QDialog,
 )
 from PyQt5.QtCore import Qt
 

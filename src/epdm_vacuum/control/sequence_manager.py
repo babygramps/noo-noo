@@ -366,7 +366,6 @@ class SequenceManager:
             info = {
                 "name": data.get("name", "Unknown"),
                 "description": data.get("description", ""),
-                "mode": data.get("mode", "simple"),
                 "stage_count": len(data.get("stages", [])),
                 "created_date": data.get("created_date", ""),
                 "modified_date": data.get("modified_date", ""),
