@@ -245,7 +245,7 @@ class TestStage:
                     errors.append(f"I/O Action {i+1}: {error}")
         
         # Check for recommended I/O actions (warnings, not errors)
-        if self.target_vacuum_bar > 0.0:  # Only for vacuum stages
+        if self.target_vacuum_bar is not None and self.target_vacuum_bar > 0.0:  # Only for vacuum stages
             # Check if inlet valve is being closed
             has_inlet_close = any(
                 action.device_name == "inlet_valve" and 
