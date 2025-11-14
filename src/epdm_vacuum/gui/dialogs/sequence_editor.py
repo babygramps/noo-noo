@@ -246,10 +246,30 @@ class SequenceEditorDialog(QDialog):
         group = QGroupBox("I/O Actions for Selected Stage")
         layout = QVBoxLayout()
         
-        # Info label
-        info_label = QLabel("Configure valve and actuator control for the selected stage:")
-        info_label.setStyleSheet("color: gray; font-style: italic;")
-        layout.addWidget(info_label)
+        # Info label with helpful guidance
+        info_frame = QFrame()
+        info_frame.setFrameStyle(QFrame.StyledPanel)
+        info_frame.setStyleSheet("QFrame { background-color: #e8f4f8; border: 1px solid #b8d4e8; border-radius: 4px; padding: 8px; }")
+        info_layout = QVBoxLayout(info_frame)
+        info_layout.setContentsMargins(8, 8, 8, 8)
+        
+        info_title = QLabel("ℹ️ I/O Control Requirements:")
+        info_title.setStyleSheet("font-weight: bold; color: #0066cc;")
+        info_layout.addWidget(info_title)
+        
+        info_text = QLabel(
+            "For vacuum tests to work properly:<br>"
+            "• <b>Inlet valve</b> must be CLOSED (seals chamber)<br>"
+            "• <b>Vent valve</b> must be CLOSED during vacuum<br>"
+            "• <b>Vent valve</b> should OPEN at end to release pressure<br>"
+            "• <b>Vacuum pump</b> is controlled automatically<br><br>"
+            "<i>New stages in Advanced mode include these actions by default.</i>"
+        )
+        info_text.setWordWrap(True)
+        info_text.setStyleSheet("color: #333333;")
+        info_layout.addWidget(info_text)
+        
+        layout.addWidget(info_frame)
         
         # I/O actions table
         self.io_table = QTableWidget()
@@ -469,6 +489,9 @@ class SequenceEditorDialog(QDialog):
                 sample_rate_hz=10.0,
                 delay_before_seconds=0.0,
             )
+            
+            # Auto-generate essential I/O actions for vacuum operation
+            self._add_default_io_actions(stage)
         
         self.sequence.add_stage(stage)
         self.refresh_stages_table()
@@ -477,6 +500,9 @@ class SequenceEditorDialog(QDialog):
         
         # Select new row
         self.stages_table.selectRow(len(self.sequence.stages) - 1)
+        
+        # Refresh I/O table to show auto-generated actions
+        self.refresh_io_table()
         
         logger.info("Added new stage to sequence")
     
@@ -613,17 +639,30 @@ class SequenceEditorDialog(QDialog):
         self.update_sequence_from_ui()
         
         # Validate
-        is_valid, errors = self.sequence.validate(self.config_limits)
+        is_valid, errors, warnings = self.sequence.validate(self.config_limits)
         
         if is_valid:
-            self.validation_label.setText("Validation: OK")
-            self.validation_label.setStyleSheet("color: green; font-weight: bold;")
-            QMessageBox.information(self, "Validation", "Sequence is valid!")
+            if warnings:
+                self.validation_label.setText(f"Validation: OK ({len(warnings)} warnings)")
+                self.validation_label.setStyleSheet("color: orange; font-weight: bold;")
+                
+                # Show warnings to user
+                warning_msg = "Sequence is valid, but has warnings:\n\n" + "\n".join(f"• {warn}" for warn in warnings)
+                warning_msg += "\n\nThese are recommendations, not errors. The sequence will run, but may not work as expected."
+                QMessageBox.warning(self, "Validation Warnings", warning_msg)
+            else:
+                self.validation_label.setText("Validation: OK")
+                self.validation_label.setStyleSheet("color: green; font-weight: bold;")
+                QMessageBox.information(self, "Validation", "Sequence is valid with no warnings!")
         else:
             self.validation_label.setText("Validation: ERRORS")
             self.validation_label.setStyleSheet("color: red; font-weight: bold;")
             
             error_msg = "Validation errors:\n\n" + "\n".join(f"• {err}" for err in errors)
+            
+            if warnings:
+                error_msg += "\n\nWarnings:\n" + "\n".join(f"• {warn}" for warn in warnings)
+            
             QMessageBox.warning(self, "Validation Errors", error_msg)
         
         return is_valid
@@ -637,13 +676,20 @@ class SequenceEditorDialog(QDialog):
         self.duration_label.setText(f"Total Duration: ~{minutes}m {seconds}s ({len(self.sequence.stages)} stages)")
         
         # Quick validation check
-        is_valid, errors = self.sequence.validate(self.config_limits)
+        is_valid, errors, warnings = self.sequence.validate(self.config_limits)
         if is_valid:
-            self.validation_label.setText("Validation: OK")
-            self.validation_label.setStyleSheet("color: green; font-weight: bold;")
+            if warnings:
+                self.validation_label.setText(f"Validation: OK ({len(warnings)} warnings)")
+                self.validation_label.setStyleSheet("color: orange; font-weight: bold;")
+                self.validation_label.setToolTip("\n".join(warnings))
+            else:
+                self.validation_label.setText("Validation: OK")
+                self.validation_label.setStyleSheet("color: green; font-weight: bold;")
+                self.validation_label.setToolTip("")
         else:
             self.validation_label.setText(f"Validation: {len(errors)} errors")
             self.validation_label.setStyleSheet("color: red; font-weight: bold;")
+            self.validation_label.setToolTip("\n".join(errors[:3]))  # Show first 3 errors
     
     def update_sequence_from_ui(self) -> None:
         """Update sequence object from UI fields."""
@@ -657,11 +703,27 @@ class SequenceEditorDialog(QDialog):
         self.update_sequence_from_ui()
         
         # Validate before saving
-        is_valid, errors = self.sequence.validate(self.config_limits)
+        is_valid, errors, warnings = self.sequence.validate(self.config_limits)
         if not is_valid:
             error_msg = "Cannot save invalid sequence:\n\n" + "\n".join(f"• {err}" for err in errors)
             QMessageBox.warning(self, "Validation Errors", error_msg)
             return
+        
+        # Show warnings but allow saving
+        if warnings:
+            warning_msg = "Sequence has warnings:\n\n" + "\n".join(f"• {warn}" for warn in warnings)
+            warning_msg += "\n\nDo you want to save anyway?"
+            
+            reply = QMessageBox.question(
+                self,
+                "Save with Warnings?",
+                warning_msg,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            
+            if reply == QMessageBox.No:
+                return
         
         # Emit signal and accept dialog
         self.sequence_saved.emit(self.sequence)
@@ -855,4 +917,49 @@ class SequenceEditorDialog(QDialog):
         
         self.edit_io_btn.setEnabled(has_selection)
         self.remove_io_btn.setEnabled(has_selection)
+    
+    def _add_default_io_actions(self, stage: TestStage) -> None:
+        """
+        Add default I/O actions required for basic vacuum operation.
+        
+        Args:
+            stage: TestStage to add I/O actions to
+        """
+        from ...control.sequence import IOAction, IOActionType, IOActionTiming
+        
+        # Only add if device exists in configuration
+        if "inlet_valve" in self.available_io_devices:
+            # Close inlet valve before stage to seal chamber
+            stage.add_io_action(IOAction(
+                device_name="inlet_valve",
+                action_type=IOActionType.DIGITAL_OUTPUT,
+                value=False,
+                timing=IOActionTiming.BEFORE_STAGE,
+                delay_seconds=0.0,
+                description="Close inlet valve to seal chamber"
+            ))
+        
+        if "vent_valve" in self.available_io_devices:
+            # Ensure vent valve is closed at start
+            stage.add_io_action(IOAction(
+                device_name="vent_valve",
+                action_type=IOActionType.DIGITAL_OUTPUT,
+                value=False,
+                timing=IOActionTiming.START_OF_STAGE,
+                delay_seconds=0.0,
+                description="Close vent valve for evacuation"
+            ))
+            
+            # Open vent valve at end if auto_vent is enabled
+            if stage.auto_vent:
+                stage.add_io_action(IOAction(
+                    device_name="vent_valve",
+                    action_type=IOActionType.DIGITAL_OUTPUT,
+                    value=True,
+                    timing=IOActionTiming.END_OF_STAGE,
+                    delay_seconds=0.0,
+                    description="Open vent valve to release vacuum"
+                ))
+        
+        logger.info(f"Added {len(stage.io_actions)} default I/O actions to stage")
 

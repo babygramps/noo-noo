@@ -73,11 +73,15 @@ class SequenceManager:
             sequence = TestSequence.from_dict(data)
             
             # Validate the loaded sequence
-            is_valid, errors = sequence.validate(self.config_limits)
+            is_valid, errors, warnings = sequence.validate(self.config_limits)
             if not is_valid:
                 logger.warning(f"Loaded sequence '{sequence.name}' has validation errors:")
                 for error in errors:
                     logger.warning(f"  - {error}")
+            if warnings:
+                logger.info(f"Loaded sequence '{sequence.name}' has validation warnings:")
+                for warning in warnings:
+                    logger.info(f"  - {warning}")
             
             logger.info(f"Loaded sequence '{sequence.name}' from {filepath}")
             return sequence
@@ -98,12 +102,17 @@ class SequenceManager:
             bool: True if saved successfully
         """
         # Validate before saving
-        is_valid, errors = sequence.validate(self.config_limits)
+        is_valid, errors, warnings = sequence.validate(self.config_limits)
         if not is_valid:
             logger.error(f"Cannot save invalid sequence '{sequence.name}':")
             for error in errors:
                 logger.error(f"  - {error}")
             return False
+        
+        if warnings:
+            logger.warning(f"Saving sequence '{sequence.name}' with validation warnings:")
+            for warning in warnings:
+                logger.warning(f"  - {warning}")
         
         # Generate filename
         if filename is None:

@@ -190,7 +190,7 @@ class TestStage:
         """
         return [action for action in self.io_actions if action.timing == timing]
     
-    def validate(self, config_limits: Optional[Dict[str, Any]] = None) -> tuple[bool, List[str]]:
+    def validate(self, config_limits: Optional[Dict[str, Any]] = None) -> tuple[bool, List[str], List[str]]:
         """
         Validate stage parameters against safety limits.
         
@@ -198,9 +198,10 @@ class TestStage:
             config_limits: Dictionary with safety limits from config
         
         Returns:
-            Tuple of (is_valid, list_of_error_messages)
+            Tuple of (is_valid, list_of_error_messages, list_of_warnings)
         """
         errors = []
+        warnings = []
         
         # Basic parameter validation
         if self.target_vacuum_bar < 0 or self.target_vacuum_bar > 1.0:
@@ -249,8 +250,44 @@ class TestStage:
                 for error in action_errors:
                     errors.append(f"I/O Action {i+1}: {error}")
         
+        # Check for recommended I/O actions (warnings, not errors)
+        if self.target_vacuum_bar > 0.0:  # Only for vacuum stages
+            # Check if inlet valve is being closed
+            has_inlet_close = any(
+                action.device_name == "inlet_valve" and 
+                action.value == False and
+                action.timing in (IOActionTiming.BEFORE_STAGE, IOActionTiming.START_OF_STAGE)
+                for action in self.io_actions
+            )
+            
+            if not has_inlet_close:
+                warnings.append("⚠️ No I/O action closes 'inlet_valve' - chamber may not seal properly")
+            
+            # Check if vent valve is being closed during vacuum
+            has_vent_close = any(
+                action.device_name == "vent_valve" and 
+                action.value == False and
+                action.timing in (IOActionTiming.BEFORE_STAGE, IOActionTiming.START_OF_STAGE)
+                for action in self.io_actions
+            )
+            
+            if not has_vent_close:
+                warnings.append("⚠️ No I/O action closes 'vent_valve' - vacuum may not be maintained")
+            
+            # Check if vent valve opens at end (if auto_vent is True)
+            if self.auto_vent:
+                has_vent_open = any(
+                    action.device_name == "vent_valve" and 
+                    action.value == True and
+                    action.timing in (IOActionTiming.END_OF_STAGE, IOActionTiming.AFTER_STAGE)
+                    for action in self.io_actions
+                )
+                
+                if not has_vent_open:
+                    warnings.append("ℹ️ Consider adding I/O action to open 'vent_valve' at end of stage")
+        
         is_valid = len(errors) == 0
-        return is_valid, errors
+        return is_valid, errors, warnings
     
     def get_estimated_duration(self) -> float:
         """
@@ -415,7 +452,7 @@ class TestSequence:
             return True
         return False
     
-    def validate(self, config_limits: Optional[Dict[str, Any]] = None) -> tuple[bool, List[str]]:
+    def validate(self, config_limits: Optional[Dict[str, Any]] = None) -> tuple[bool, List[str], List[str]]:
         """
         Validate entire sequence.
         
@@ -423,14 +460,15 @@ class TestSequence:
             config_limits: Dictionary with safety limits from config
         
         Returns:
-            Tuple of (is_valid, list_of_error_messages)
+            Tuple of (is_valid, list_of_error_messages, list_of_warnings)
         """
         errors = []
+        warnings = []
         
         # Check if sequence has stages
         if not self.stages:
             errors.append("Sequence has no stages")
-            return False, errors
+            return False, errors, []
         
         # Check if name is valid
         if not self.name or not self.name.strip():
@@ -438,10 +476,13 @@ class TestSequence:
         
         # Validate each stage
         for i, stage in enumerate(self.stages):
-            stage_valid, stage_errors = stage.validate(config_limits)
+            stage_valid, stage_errors, stage_warnings = stage.validate(config_limits)
             if not stage_valid:
                 for error in stage_errors:
                     errors.append(f"Stage {i+1}: {error}")
+            # Collect warnings from stages
+            for warning in stage_warnings:
+                warnings.append(f"Stage {i+1}: {warning}")
         
         # Check total duration
         total_duration = self.get_estimated_duration()
@@ -449,7 +490,7 @@ class TestSequence:
             errors.append(f"Total sequence duration {total_duration/60:.1f} minutes exceeds 2 hours")
         
         is_valid = len(errors) == 0
-        return is_valid, errors
+        return is_valid, errors, warnings
     
     def get_estimated_duration(self) -> float:
         """

@@ -376,6 +376,7 @@ The test sequencing feature allows you to create, save, load, and execute comple
    - Specify only vacuum target (bar) and hold time (seconds)
    - Uses default ramp rates and safety limits from configuration
    - Perfect for basic multi-level testing
+   - No manual I/O configuration needed
    
    **Advanced Mode:**
    - Full control over all parameters:
@@ -386,8 +387,11 @@ The test sequencing feature allows you to create, save, load, and execute comple
      - Delay before stage
      - Per-stage force limits
      - Data collection options
+     - **I/O action configuration**
    - Stage naming and descriptions
    - Pause between stages option
+   - **Auto-generated I/O actions** for new stages (inlet/vent valves)
+   - Validation warnings if required I/O actions are missing
 
 3. **Managing Stages:**
    - **Add Stage:** Click "Add Stage" to append a new stage
@@ -471,6 +475,27 @@ In the sequence editor (Advanced Mode):
 
 Multiple I/O actions can be added to each stage, and they will execute in order at their specified timing points.
 
+#### Auto-Generated I/O Actions
+
+When you create a new stage in **Advanced Mode**, the system automatically adds essential I/O actions:
+- **inlet_valve** is set to CLOSE before the stage starts (seals chamber)
+- **vent_valve** is set to CLOSE at the start of the stage (enables vacuum)
+- **vent_valve** is set to OPEN at the end (if auto_vent is enabled)
+
+These defaults ensure your vacuum test will work correctly. You can:
+- Edit these actions if you need different timing or behavior
+- Remove them if you're using different valves
+- Add more actions for additional control
+
+#### Validation Warnings
+
+The system validates your sequences and provides warnings if:
+- No I/O action closes the inlet valve (chamber may not seal)
+- No I/O action closes the vent valve (vacuum may leak)
+- No I/O action opens vent valve at end (pressure not released)
+
+These are **warnings**, not errors - your sequence will still run, but may not work as expected. Review the warnings and add the necessary I/O actions.
+
 ### Example Sequences
 
 Several example sequences are included in the `sequences/` directory:
@@ -480,6 +505,7 @@ Several example sequences are included in the `sequences/` directory:
 - **advanced_detailed_test.yaml:** Comprehensive test with precise ramp rates and sampling control
 - **endurance_test.yaml:** Extended 5-minute hold test for long-term seal evaluation
 - **valve_control_test.yaml:** Demonstrates I/O control with inlet/vent valve sequencing
+- **example_with_auto_io.yaml:** Shows auto-generated I/O actions in Advanced mode
 
 ### Sequence File Format
 
