@@ -268,17 +268,16 @@ class TestStage:
             if not has_vent_close:
                 warnings.append("⚠️ No I/O action closes 'vent_valve' - vacuum may not be maintained")
             
-            # Check if vent valve opens at end (if auto_vent is True)
-            if self.auto_vent:
-                has_vent_open = any(
-                    action.device_name == "vent_valve" and 
-                    action.value == True and
-                    action.timing in (IOActionTiming.END_OF_STAGE, IOActionTiming.AFTER_STAGE)
-                    for action in self.io_actions
-                )
-                
-                if not has_vent_open:
-                    warnings.append("ℹ️ Consider adding I/O action to open 'vent_valve' at end of stage")
+            # Check if vent valve opens at end
+            has_vent_open = any(
+                action.device_name == "vent_valve" and 
+                action.value == True and
+                action.timing in (IOActionTiming.END_OF_STAGE, IOActionTiming.AFTER_STAGE)
+                for action in self.io_actions
+            )
+            
+            if not has_vent_open:
+                warnings.append("ℹ️ Consider adding I/O action to open 'vent_valve' at end of stage")
         
         is_valid = len(errors) == 0
         return is_valid, errors, warnings
