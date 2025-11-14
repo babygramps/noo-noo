@@ -35,8 +35,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor
 
-from ...control.sequence import TestSequence, TestStage, SequenceMode, IOAction
-from .io_action_dialog import IOActionDialog
+from ...control.sequence import TestSequence, TestStage, SequenceMode, IOAction, IOActionType, IOActionTiming
 
 logger = logging.getLogger(__name__)
 
@@ -242,75 +241,42 @@ class SequenceEditorDialog(QDialog):
         return layout
     
     def create_io_actions_section(self) -> QGroupBox:
-        """Create the I/O actions management section."""
-        group = QGroupBox("I/O Actions for Selected Stage")
+        """Create the I/O control panel section."""
+        group = QGroupBox("I/O Device States for Selected Stage")
         layout = QVBoxLayout()
         
         # Info label with helpful guidance
-        info_frame = QFrame()
-        info_frame.setFrameStyle(QFrame.StyledPanel)
-        info_frame.setStyleSheet("QFrame { background-color: #e8f4f8; border: 1px solid #b8d4e8; border-radius: 4px; padding: 8px; }")
-        info_layout = QVBoxLayout(info_frame)
-        info_layout.setContentsMargins(8, 8, 8, 8)
-        
-        info_title = QLabel("ℹ️ I/O Control Requirements:")
-        info_title.setStyleSheet("font-weight: bold; color: #0066cc;")
-        info_layout.addWidget(info_title)
-        
-        info_text = QLabel(
-            "For vacuum tests to work properly:<br>"
-            "• <b>Inlet valve</b> must be CLOSED (seals chamber)<br>"
-            "• <b>Vent valve</b> must be CLOSED during vacuum<br>"
-            "• <b>Vent valve</b> should OPEN at end to release pressure<br>"
-            "• <b>Vacuum pump</b> is controlled automatically<br><br>"
-            "<i>New stages in Advanced mode include these actions by default.</i>"
+        info_label = QLabel(
+            "ℹ️ Set the state of each I/O device during this stage. "
+            "Common setup: inlet_valve CLOSED, vent_valve CLOSED during vacuum, OPEN at end."
         )
-        info_text.setWordWrap(True)
-        info_text.setStyleSheet("color: #333333;")
-        info_layout.addWidget(info_text)
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
+        layout.addWidget(info_label)
         
-        layout.addWidget(info_frame)
-        
-        # I/O actions table
+        # I/O states table - shows ALL available devices
         self.io_table = QTableWidget()
-        self.io_table.setColumnCount(5)
-        self.io_table.setHorizontalHeaderLabels(["Device", "Action", "Value", "Timing", "Delay (s)"])
+        self.io_table.setColumnCount(4)
+        self.io_table.setHorizontalHeaderLabels(["Device", "Type", "State at Start", "State at End"])
         self.io_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.io_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.io_table.setMaximumHeight(150)
+        self.io_table.setMaximumHeight(200)
+        self.io_table.setEditTriggers(QAbstractItemView.NoEditTriggers)  # Use custom widgets
         
         # Set column widths
         header = self.io_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)  # Device
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Action
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Value
-        header.setSectionResizeMode(3, QHeaderView.Stretch)  # Timing
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Delay
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Type
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Start state
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # End state
         
         layout.addWidget(self.io_table)
         
-        # I/O action buttons
-        io_buttons = QHBoxLayout()
-        
-        self.add_io_btn = QPushButton("Add I/O Action")
-        self.add_io_btn.clicked.connect(self.on_add_io_action)
-        io_buttons.addWidget(self.add_io_btn)
-        
-        self.edit_io_btn = QPushButton("Edit")
-        self.edit_io_btn.clicked.connect(self.on_edit_io_action)
-        self.edit_io_btn.setEnabled(False)
-        io_buttons.addWidget(self.edit_io_btn)
-        
-        self.remove_io_btn = QPushButton("Remove")
-        self.remove_io_btn.clicked.connect(self.on_remove_io_action)
-        self.remove_io_btn.setEnabled(False)
-        io_buttons.addWidget(self.remove_io_btn)
-        
-        io_buttons.addStretch()
-        layout.addLayout(io_buttons)
-        
-        # Connect table selection
-        self.io_table.itemSelectionChanged.connect(self.on_io_selection_changed)
+        # Note about vacuum pump
+        pump_note = QLabel("Note: Vacuum pump is controlled automatically - it will turn ON at stage start and OFF at stage end.")
+        pump_note.setWordWrap(True)
+        pump_note.setStyleSheet("color: #0066cc; font-size: 10pt; padding: 5px; background-color: #f0f8ff; border-radius: 3px;")
+        layout.addWidget(pump_note)
         
         group.setLayout(layout)
         return group
@@ -798,125 +764,183 @@ class SequenceEditorDialog(QDialog):
         self.io_actions_group.setVisible(show_io)
     
     def refresh_io_table(self) -> None:
-        """Refresh I/O actions table for currently selected stage."""
+        """Refresh I/O states table for currently selected stage."""
         row = self.stages_table.currentRow()
         
         if row < 0 or row >= len(self.sequence.stages):
             self.io_table.setRowCount(0)
-            self.add_io_btn.setEnabled(False)
             return
         
-        self.add_io_btn.setEnabled(True)
         stage = self.sequence.stages[row]
         
         # Block signals during refresh
         self.io_table.blockSignals(True)
         
-        # Clear and resize table
-        self.io_table.setRowCount(len(stage.io_actions))
+        # Get all available I/O devices from configuration
+        io_devices = self._get_io_device_configs()
         
-        # Populate rows
-        for i, io_action in enumerate(stage.io_actions):
+        # Set table size to show ALL devices
+        self.io_table.setRowCount(len(io_devices))
+        
+        # Populate each row with device info
+        for i, (device_name, device_config) in enumerate(io_devices.items()):
             # Device name
-            self.io_table.setItem(i, 0, QTableWidgetItem(io_action.device_name))
+            name_item = QTableWidgetItem(device_name)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+            self.io_table.setItem(i, 0, name_item)
             
-            # Action type
-            action_type_str = io_action.action_type.value.replace("_", " ").title()
-            self.io_table.setItem(i, 1, QTableWidgetItem(action_type_str))
+            # Device type
+            device_type = device_config.get("type", "Digital")
+            type_item = QTableWidgetItem(device_type)
+            type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
+            self.io_table.setItem(i, 1, type_item)
             
-            # Value
-            if isinstance(io_action.value, bool):
-                value_str = "ON" if io_action.value else "OFF"
+            # Get current states from stage I/O actions
+            start_state = self._get_io_state_from_stage(stage, device_name, IOActionTiming.START_OF_STAGE)
+            end_state = self._get_io_state_from_stage(stage, device_name, IOActionTiming.END_OF_STAGE)
+            
+            # State at Start - combo box or checkbox
+            if device_type == "Digital":
+                start_combo = QComboBox()
+                start_combo.addItems(["Not Set", "CLOSED", "OPEN"])
+                start_combo.setCurrentText(start_state)
+                start_combo.currentTextChanged.connect(
+                    lambda state, dev=device_name, timing=IOActionTiming.START_OF_STAGE: 
+                    self._on_io_state_changed(dev, timing, state)
+                )
+                self.io_table.setCellWidget(i, 2, start_combo)
             else:
-                value_str = str(io_action.value)
-            self.io_table.setItem(i, 2, QTableWidgetItem(value_str))
+                # For analog, would need spinbox - for now just show text
+                start_item = QTableWidgetItem(start_state)
+                self.io_table.setItem(i, 2, start_item)
             
-            # Timing
-            timing_str = io_action.timing.value.replace("_", " ").title()
-            self.io_table.setItem(i, 3, QTableWidgetItem(timing_str))
-            
-            # Delay
-            self.io_table.setItem(i, 4, QTableWidgetItem(f"{io_action.delay_seconds:.1f}"))
+            # State at End - combo box or checkbox
+            if device_type == "Digital":
+                end_combo = QComboBox()
+                end_combo.addItems(["Not Set", "CLOSED", "OPEN"])
+                end_combo.setCurrentText(end_state)
+                end_combo.currentTextChanged.connect(
+                    lambda state, dev=device_name, timing=IOActionTiming.END_OF_STAGE:
+                    self._on_io_state_changed(dev, timing, state)
+                )
+                self.io_table.setCellWidget(i, 3, end_combo)
+            else:
+                # For analog, would need spinbox
+                end_item = QTableWidgetItem(end_state)
+                self.io_table.setItem(i, 3, end_item)
         
         # Re-enable signals
         self.io_table.blockSignals(False)
         
-        logger.debug(f"Refreshed I/O table with {len(stage.io_actions)} actions")
+        logger.debug(f"Refreshed I/O table with {len(io_devices)} devices")
     
-    def on_add_io_action(self) -> None:
-        """Add a new I/O action to the current stage."""
+    def _get_io_device_configs(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get all available I/O device configurations.
+        
+        Returns:
+            Dict mapping device_name to configuration dict with 'type' field
+        """
+        try:
+            from ...config.settings import get_settings
+            from pathlib import Path
+            
+            config_file = Path(__file__).parent.parent.parent / "config" / "hardware_config.yaml"
+            settings = get_settings(str(config_file))
+            
+            devices = {}
+            
+            # Load digital outputs
+            digital_outputs = settings.get("io_devices", "digital_outputs", default=[])
+            if isinstance(digital_outputs, list):
+                for device in digital_outputs:
+                    if isinstance(device, dict) and "name" in device:
+                        devices[device["name"]] = {
+                            "type": "Digital",
+                            "description": device.get("description", ""),
+                            "channel": device.get("channel", 0)
+                        }
+            
+            # Load analog outputs
+            analog_outputs = settings.get("io_devices", "analog_outputs", default=[])
+            if isinstance(analog_outputs, list):
+                for device in analog_outputs:
+                    if isinstance(device, dict) and "name" in device:
+                        devices[device["name"]] = {
+                            "type": "Analog",
+                            "description": device.get("description", ""),
+                            "channel": device.get("channel", 0),
+                            "min_value": device.get("min_value", 0.0),
+                            "max_value": device.get("max_value", 10.0)
+                        }
+            
+            return devices
+            
+        except Exception as e:
+            logger.warning(f"Could not load I/O device configs: {e}")
+            return {}
+    
+    def _get_io_state_from_stage(self, stage: TestStage, device_name: str, timing: IOActionTiming) -> str:
+        """
+        Get the current state of a device at a specific timing from stage's I/O actions.
+        
+        Args:
+            stage: TestStage to check
+            device_name: Name of the I/O device
+            timing: Timing point to check
+        
+        Returns:
+            String representation of the state ("Not Set", "CLOSED", "OPEN", or value)
+        """
+        # Find matching I/O action
+        for action in stage.io_actions:
+            if action.device_name == device_name and action.timing == timing:
+                if isinstance(action.value, bool):
+                    return "OPEN" if action.value else "CLOSED"
+                else:
+                    return str(action.value)
+        
+        return "Not Set"
+    
+    def _on_io_state_changed(self, device_name: str, timing: IOActionTiming, state: str) -> None:
+        """
+        Handle when user changes an I/O device state.
+        
+        Args:
+            device_name: Name of the device
+            timing: Timing point (START_OF_STAGE or END_OF_STAGE)
+            state: New state ("Not Set", "CLOSED", "OPEN")
+        """
         row = self.stages_table.currentRow()
         if row < 0 or row >= len(self.sequence.stages):
             return
         
         stage = self.sequence.stages[row]
         
-        # Open dialog to create new I/O action
-        dialog = IOActionDialog(available_devices=self.available_io_devices, parent=self)
+        # Remove existing action for this device/timing if it exists
+        for i, action in enumerate(stage.io_actions):
+            if action.device_name == device_name and action.timing == timing:
+                stage.remove_io_action(i)
+                break
         
-        if dialog.exec_() == QDialog.Accepted:
-            io_action = dialog.get_io_action()
-            stage.add_io_action(io_action)
-            self.refresh_io_table()
-            self.modified = True
+        # Add new action if state is not "Not Set"
+        if state != "Not Set":
+            value = (state == "OPEN")  # CLOSED = False, OPEN = True
             
-            logger.info(f"Added I/O action to stage {row + 1}: {io_action}")
-    
-    def on_edit_io_action(self) -> None:
-        """Edit the selected I/O action."""
-        stage_row = self.stages_table.currentRow()
-        io_row = self.io_table.currentRow()
-        
-        if stage_row < 0 or io_row < 0:
-            return
-        
-        stage = self.sequence.stages[stage_row]
-        if io_row >= len(stage.io_actions):
-            return
-        
-        io_action = stage.io_actions[io_row]
-        
-        # Open dialog to edit I/O action
-        dialog = IOActionDialog(io_action=io_action, available_devices=self.available_io_devices, parent=self)
-        
-        if dialog.exec_() == QDialog.Accepted:
-            # Action was modified in place
-            self.refresh_io_table()
-            self.modified = True
+            new_action = IOAction(
+                device_name=device_name,
+                action_type=IOActionType.DIGITAL_OUTPUT,
+                value=value,
+                timing=timing,
+                delay_seconds=0.0,
+                description=f"Set {device_name} to {state} at {timing.value.replace('_', ' ')}"
+            )
             
-            logger.info(f"Edited I/O action in stage {stage_row + 1}")
-    
-    def on_remove_io_action(self) -> None:
-        """Remove the selected I/O action."""
-        stage_row = self.stages_table.currentRow()
-        io_row = self.io_table.currentRow()
+            stage.add_io_action(new_action)
+            logger.debug(f"Updated {device_name} at {timing.value} to {state}")
         
-        if stage_row < 0 or io_row < 0:
-            return
-        
-        stage = self.sequence.stages[stage_row]
-        
-        # Confirm deletion
-        reply = QMessageBox.question(
-            self,
-            "Remove I/O Action",
-            f"Remove I/O action {io_row + 1}?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            stage.remove_io_action(io_row)
-            self.refresh_io_table()
-            self.modified = True
-            
-            logger.info(f"Removed I/O action from stage {stage_row + 1}")
-    
-    def on_io_selection_changed(self) -> None:
-        """Handle I/O action selection change."""
-        has_selection = self.io_table.currentRow() >= 0
-        
-        self.edit_io_btn.setEnabled(has_selection)
-        self.remove_io_btn.setEnabled(has_selection)
+        self.modified = True
+        self.update_status()
     
     def _add_default_io_actions(self, stage: TestStage) -> None:
         """
@@ -925,41 +949,35 @@ class SequenceEditorDialog(QDialog):
         Args:
             stage: TestStage to add I/O actions to
         """
-        from ...control.sequence import IOAction, IOActionType, IOActionTiming
+        # Set default states for common devices
+        defaults = {
+            "inlet_valve": {"start": False, "end": False},  # CLOSED throughout
+            "vent_valve": {"start": False, "end": True if stage.auto_vent else False},  # CLOSED at start, OPEN at end if auto_vent
+            "safety_valve": {"start": False, "end": False},  # CLOSED throughout
+        }
         
-        # Only add if device exists in configuration
-        if "inlet_valve" in self.available_io_devices:
-            # Close inlet valve before stage to seal chamber
-            stage.add_io_action(IOAction(
-                device_name="inlet_valve",
-                action_type=IOActionType.DIGITAL_OUTPUT,
-                value=False,
-                timing=IOActionTiming.BEFORE_STAGE,
-                delay_seconds=0.0,
-                description="Close inlet valve to seal chamber"
-            ))
-        
-        if "vent_valve" in self.available_io_devices:
-            # Ensure vent valve is closed at start
-            stage.add_io_action(IOAction(
-                device_name="vent_valve",
-                action_type=IOActionType.DIGITAL_OUTPUT,
-                value=False,
-                timing=IOActionTiming.START_OF_STAGE,
-                delay_seconds=0.0,
-                description="Close vent valve for evacuation"
-            ))
-            
-            # Open vent valve at end if auto_vent is enabled
-            if stage.auto_vent:
+        for device_name, states in defaults.items():
+            if device_name in self.available_io_devices:
+                # Add start state
                 stage.add_io_action(IOAction(
-                    device_name="vent_valve",
+                    device_name=device_name,
                     action_type=IOActionType.DIGITAL_OUTPUT,
-                    value=True,
-                    timing=IOActionTiming.END_OF_STAGE,
+                    value=states["start"],
+                    timing=IOActionTiming.START_OF_STAGE,
                     delay_seconds=0.0,
-                    description="Open vent valve to release vacuum"
+                    description=f"Set {device_name} to {'OPEN' if states['start'] else 'CLOSED'} at stage start"
                 ))
+                
+                # Add end state if different from start
+                if states["end"] != states["start"]:
+                    stage.add_io_action(IOAction(
+                        device_name=device_name,
+                        action_type=IOActionType.DIGITAL_OUTPUT,
+                        value=states["end"],
+                        timing=IOActionTiming.END_OF_STAGE,
+                        delay_seconds=0.0,
+                        description=f"Set {device_name} to {'OPEN' if states['end'] else 'CLOSED'} at stage end"
+                    ))
         
         logger.info(f"Added {len(stage.io_actions)} default I/O actions to stage")
 

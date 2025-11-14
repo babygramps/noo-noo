@@ -458,34 +458,32 @@ I/O actions can be triggered at five different points during stage execution:
 - **End of Stage:** Execute at the end of the hold period
 - **After Stage:** Execute after all stage operations complete
 
-#### Adding I/O Actions
+#### Setting I/O States
 
 In the sequence editor (Advanced Mode):
 1. Select a stage from the stages table
-2. Scroll to the "I/O Actions for Selected Stage" section
-3. Click "Add I/O Action"
-4. Configure:
-   - Device (select from dropdown or enter custom name)
-   - Action Type (Digital/Analog/Pulse)
-   - Value (ON/OFF for digital, numeric for analog)
-   - Timing (when the action occurs)
-   - Delay (wait time before executing action)
-   - Duration (for pulse actions)
-5. Click OK to add the action
+2. Scroll to the "I/O Device States for Selected Stage" section
+3. **All available I/O devices are displayed automatically**
+4. For each device, set the state using dropdown menus:
+   - **State at Start**: Device state when the stage begins (Not Set, CLOSED, OPEN)
+   - **State at End**: Device state when the stage completes (Not Set, CLOSED, OPEN)
+5. Changes are saved automatically to the stage
 
-Multiple I/O actions can be added to each stage, and they will execute in order at their specified timing points.
+The I/O control panel shows all devices at once, making it easy to see and configure the complete I/O state for each stage.
 
-#### Auto-Generated I/O Actions
+#### Auto-Generated I/O States
 
-When you create a new stage in **Advanced Mode**, the system automatically adds essential I/O actions:
-- **inlet_valve** is set to CLOSE before the stage starts (seals chamber)
-- **vent_valve** is set to CLOSE at the start of the stage (enables vacuum)
-- **vent_valve** is set to OPEN at the end (if auto_vent is enabled)
+When you create a new stage in **Advanced Mode**, the system automatically configures essential I/O states:
+- **inlet_valve** → CLOSED at start and end (seals chamber)
+- **vent_valve** → CLOSED at start (enables vacuum), OPEN at end (if auto_vent is enabled)
+- **safety_valve** → CLOSED at start and end
 
-These defaults ensure your vacuum test will work correctly. You can:
-- Edit these actions if you need different timing or behavior
-- Remove them if you're using different valves
-- Add more actions for additional control
+**All available I/O devices are shown in the control panel** for each stage. You can see and modify any device state using the dropdown menus:
+- **Not Set** - Device state not controlled in this stage
+- **CLOSED** - Device is closed/off (valve closed, relay off)
+- **OPEN** - Device is open/on (valve open, relay on)
+
+The I/O control panel makes it easy to see the complete I/O configuration at a glance.
 
 #### Validation Warnings
 
@@ -505,7 +503,8 @@ Several example sequences are included in the `sequences/` directory:
 - **advanced_detailed_test.yaml:** Comprehensive test with precise ramp rates and sampling control
 - **endurance_test.yaml:** Extended 5-minute hold test for long-term seal evaluation
 - **valve_control_test.yaml:** Demonstrates I/O control with inlet/vent valve sequencing
-- **example_with_auto_io.yaml:** Shows auto-generated I/O actions in Advanced mode
+- **example_with_auto_io.yaml:** Shows auto-generated I/O states in Advanced mode
+- **example_io_control_panel.yaml:** Demonstrates the I/O control panel interface
 
 ### Sequence File Format
 
