@@ -527,14 +527,6 @@ class TestSequence:
             float: Estimated duration in seconds
         """
         total = sum(stage.get_estimated_duration() for stage in self.stages)
-        
-        # Add pause time if enabled
-        if self.pause_between_stages and len(self.stages) > 1:
-            total += (len(self.stages) - 1) * 5.0  # 5 seconds per pause
-        
-        # Multiply by loop count
-        total *= self.loop_count
-        
         return total
     
     def get_stage_count(self) -> int:
