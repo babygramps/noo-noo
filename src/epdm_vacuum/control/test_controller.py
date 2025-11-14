@@ -13,7 +13,7 @@ import logging
 import time
 from enum import Enum
 
-from .sequence import TestSequence, TestStage
+from .sequence import TestSequence, TestStage, IOAction, IOActionTiming, IOActionType
 
 logger = logging.getLogger(__name__)
 
@@ -270,10 +270,16 @@ class TestController:
             stage_start_time = time.time()
             stage_data = []
             
+            # Execute I/O actions: BEFORE_STAGE
+            self._execute_io_actions(stage, IOActionTiming.BEFORE_STAGE)
+            
             # Apply delay before stage if specified
             if stage.delay_before_seconds and stage.delay_before_seconds > 0:
                 self._update_status(f"Waiting {stage.delay_before_seconds:.0f}s before stage...")
                 time.sleep(stage.delay_before_seconds)
+            
+            # Execute I/O actions: START_OF_STAGE
+            self._execute_io_actions(stage, IOActionTiming.START_OF_STAGE)
             
             # Start vacuum pump
             self._update_status("Starting vacuum pump...")
@@ -283,9 +289,15 @@ class TestController:
             self._update_status(f"Ramping to {stage.target_vacuum_bar:.3f} bar...")
             self._ramp_to_vacuum_target(stage.target_vacuum_bar, stage.ramp_rate_bar_per_sec)
             
+            # Execute I/O actions: DURING_STAGE (at start of hold period)
+            self._execute_io_actions(stage, IOActionTiming.DURING_STAGE)
+            
             # Hold at vacuum and collect data
             self._update_status(f"Holding at {stage.target_vacuum_bar:.3f} bar for {stage.hold_time_seconds:.0f}s...")
             self._hold_and_collect_stage(stage, stage_data)
+            
+            # Execute I/O actions: END_OF_STAGE
+            self._execute_io_actions(stage, IOActionTiming.END_OF_STAGE)
             
             # Vent chamber if configured
             if stage.auto_vent:
@@ -294,6 +306,9 @@ class TestController:
             else:
                 # Just turn off pump but don't vent
                 self._control_pump(False)
+            
+            # Execute I/O actions: AFTER_STAGE
+            self._execute_io_actions(stage, IOActionTiming.AFTER_STAGE)
             
             # Store stage data
             self.stage_data.append(stage_data)
@@ -481,10 +496,120 @@ class TestController:
         # Turn off pump immediately
         self._control_pump(False)
         
-        # TODO: Open vent valve
-        # TODO: Activate any safety interlocks
+        # Emergency I/O actions
+        self._execute_io_emergency_stop()
         
         self._update_status("EMERGENCY STOP")
+    
+    def _execute_io_actions(self, stage: TestStage, timing: IOActionTiming) -> None:
+        """
+        Execute I/O actions for a specific timing point.
+        
+        Args:
+            stage: TestStage containing I/O actions
+            timing: IOActionTiming to execute
+        """
+        actions = stage.get_io_actions_for_timing(timing)
+        
+        if not actions:
+            return
+        
+        logger.info(f"Executing {len(actions)} I/O actions for timing: {timing.value}")
+        
+        for action in actions:
+            self._execute_single_io_action(action)
+    
+    def _execute_single_io_action(self, action: IOAction) -> None:
+        """
+        Execute a single I/O action.
+        
+        Args:
+            action: IOAction to execute
+        """
+        try:
+            # Apply delay if specified
+            if action.delay_seconds > 0:
+                logger.debug(f"Delaying {action.delay_seconds}s before I/O action")
+                time.sleep(action.delay_seconds)
+            
+            logger.info(f"Executing I/O action: {action}")
+            
+            # Execute based on action type
+            if action.action_type == IOActionType.DIGITAL_OUTPUT:
+                self._set_digital_output(action.device_name, bool(action.value))
+            
+            elif action.action_type == IOActionType.ANALOG_OUTPUT:
+                self._set_analog_output(action.device_name, float(action.value))
+            
+            elif action.action_type == IOActionType.PULSE:
+                # Turn on
+                self._set_digital_output(action.device_name, True)
+                # Wait for duration
+                if action.duration_seconds:
+                    time.sleep(action.duration_seconds)
+                # Turn off
+                self._set_digital_output(action.device_name, False)
+            
+            logger.debug(f"I/O action completed: {action.device_name}")
+            
+        except Exception as e:
+            logger.error(f"Error executing I/O action {action}: {e}", exc_info=True)
+            # Don't fail the stage on I/O errors, just log them
+    
+    def _set_digital_output(self, device_name: str, state: bool) -> None:
+        """
+        Set a digital output (relay/valve) to ON or OFF.
+        
+        Args:
+            device_name: Name of the device
+            state: True for ON, False for OFF
+        """
+        logger.info(f"Setting {device_name} to {'ON' if state else 'OFF'}")
+        
+        # TODO: Implement actual hardware control via WidgetLords interface
+        # This would map device_name to relay channel and set the state
+        # Example:
+        # if self.widgetlords:
+        #     channel = self._get_device_channel(device_name)
+        #     self.widgetlords.set_relay(channel, state)
+        
+        # For now, just log the action
+        logger.debug(f"Digital output {device_name}: {state}")
+    
+    def _set_analog_output(self, device_name: str, value: float) -> None:
+        """
+        Set an analog output to a specific value.
+        
+        Args:
+            device_name: Name of the device
+            value: Analog value to set
+        """
+        logger.info(f"Setting {device_name} to {value}")
+        
+        # TODO: Implement actual hardware control via WidgetLords interface
+        # This would map device_name to analog channel and set the value
+        # Example:
+        # if self.widgetlords:
+        #     channel = self._get_device_channel(device_name)
+        #     self.widgetlords.set_analog_output(channel, value)
+        
+        # For now, just log the action
+        logger.debug(f"Analog output {device_name}: {value}")
+    
+    def _execute_io_emergency_stop(self) -> None:
+        """Execute emergency I/O actions (vent valves, etc.)."""
+        logger.warning("Executing emergency I/O stop procedures")
+        
+        # TODO: Implement emergency I/O actions
+        # - Open vent valve
+        # - Close inlet valve
+        # - Activate safety valve
+        # Example:
+        # self._set_digital_output("vent_valve", True)
+        # self._set_digital_output("inlet_valve", False)
+        # self._set_digital_output("safety_valve", True)
+        
+        logger.debug("Emergency I/O actions completed")
     
     def _update_status(self, message: str) -> None:
         """

@@ -426,6 +426,51 @@ The test sequencing feature allows you to create, save, load, and execute comple
    - Current stage progress is shown in the status bar
    - Data is collected for each stage independently
 
+### I/O Control and Valve Sequencing
+
+The sequencing system includes powerful I/O control capabilities for managing valves, relays, and other actuators during test execution.
+
+#### Configurable I/O Devices
+
+Available I/O devices are defined in `hardware_config.yaml`:
+- **vacuum_pump** - Main vacuum pump relay
+- **vent_valve** - Vent valve for pressure release
+- **inlet_valve** - Inlet valve for chamber access
+- **safety_valve** - Emergency safety relief valve
+- **proportional_valve** - Analog control valve (0-10V)
+
+#### I/O Action Types
+
+- **Digital Output (ON/OFF):** Turn relays/valves on or off
+- **Analog Output (Value):** Set analog control values (e.g., proportional valves)
+- **Pulse (Timed):** Activate output for a specific duration then turn off
+
+#### I/O Action Timing
+
+I/O actions can be triggered at five different points during stage execution:
+- **Before Stage:** Execute before any stage operations begin
+- **Start of Stage:** Execute when stage starts (after delays)
+- **During Stage:** Execute during the hold period
+- **End of Stage:** Execute at the end of the hold period
+- **After Stage:** Execute after all stage operations complete
+
+#### Adding I/O Actions
+
+In the sequence editor (Advanced Mode):
+1. Select a stage from the stages table
+2. Scroll to the "I/O Actions for Selected Stage" section
+3. Click "Add I/O Action"
+4. Configure:
+   - Device (select from dropdown or enter custom name)
+   - Action Type (Digital/Analog/Pulse)
+   - Value (ON/OFF for digital, numeric for analog)
+   - Timing (when the action occurs)
+   - Delay (wait time before executing action)
+   - Duration (for pulse actions)
+5. Click OK to add the action
+
+Multiple I/O actions can be added to each stage, and they will execute in order at their specified timing points.
+
 ### Example Sequences
 
 Several example sequences are included in the `sequences/` directory:
@@ -434,6 +479,7 @@ Several example sequences are included in the `sequences/` directory:
 - **simple_multi_stage.yaml:** Three stages testing at 0.3, 0.5, and 0.7 bar
 - **advanced_detailed_test.yaml:** Comprehensive test with precise ramp rates and sampling control
 - **endurance_test.yaml:** Extended 5-minute hold test for long-term seal evaluation
+- **valve_control_test.yaml:** Demonstrates I/O control with inlet/vent valve sequencing
 
 ### Sequence File Format
 
@@ -464,6 +510,31 @@ Advanced mode stages include additional parameters:
 - `delay_before_seconds`: Wait time before starting stage
 - `max_force_kg`: Per-stage force limit
 - `max_single_cell_kg`: Per-cell force limit
+- `io_actions`: List of I/O control actions (see example below)
+
+Example with I/O actions:
+```yaml
+stages:
+  - name: Test with Valve Control
+    target_vacuum_bar: 0.5
+    hold_time_seconds: 30.0
+    collect_data: true
+    auto_vent: false
+    io_actions:
+      - device_name: inlet_valve
+        action_type: digital_output
+        value: false
+        timing: before_stage
+        delay_seconds: 0.0
+        description: Close inlet valve
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: true
+        timing: end_of_stage
+        delay_seconds: 0.0
+        description: Open vent valve
+```
 
 ### Tips
 
@@ -473,6 +544,9 @@ Advanced mode stages include additional parameters:
 - **Validate Often:** Use the validation button to catch errors before running
 - **Test Incrementally:** Start with short hold times and increase gradually
 - **Document Sequences:** Use the description field to note the purpose and expected results
+- **I/O Actions:** Add I/O actions in advanced mode to control valves and actuators
+- **Test I/O First:** Verify I/O actions work correctly with short test durations before long tests
+- **Emergency Stop:** All I/O actions respect the emergency stop button
 
 ---
 

@@ -35,7 +35,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor
 
-from ...control.sequence import TestSequence, TestStage, SequenceMode
+from ...control.sequence import TestSequence, TestStage, SequenceMode, IOAction
+from .io_action_dialog import IOActionDialog
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,9 @@ class SequenceEditorDialog(QDialog):
         self.current_mode = self.sequence.mode
         self.modified = False
         
+        # Load available I/O devices from config
+        self.available_io_devices = self._load_io_devices()
+        
         self.init_ui()
         self.populate_from_sequence()
         
@@ -106,6 +110,11 @@ class SequenceEditorDialog(QDialog):
         # Stage controls
         controls_layout = self.create_stage_controls()
         layout.addLayout(controls_layout)
+        
+        # I/O Actions section (shown only in advanced mode initially)
+        self.io_actions_group = self.create_io_actions_section()
+        layout.addWidget(self.io_actions_group)
+        self.update_io_section_visibility()
         
         # Status and duration preview
         status_layout = self.create_status_section()
@@ -231,6 +240,60 @@ class SequenceEditorDialog(QDialog):
         self.stages_table.itemSelectionChanged.connect(self.on_selection_changed)
         
         return layout
+    
+    def create_io_actions_section(self) -> QGroupBox:
+        """Create the I/O actions management section."""
+        group = QGroupBox("I/O Actions for Selected Stage")
+        layout = QVBoxLayout()
+        
+        # Info label
+        info_label = QLabel("Configure valve and actuator control for the selected stage:")
+        info_label.setStyleSheet("color: gray; font-style: italic;")
+        layout.addWidget(info_label)
+        
+        # I/O actions table
+        self.io_table = QTableWidget()
+        self.io_table.setColumnCount(5)
+        self.io_table.setHorizontalHeaderLabels(["Device", "Action", "Value", "Timing", "Delay (s)"])
+        self.io_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.io_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.io_table.setMaximumHeight(150)
+        
+        # Set column widths
+        header = self.io_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Device
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Action
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Value
+        header.setSectionResizeMode(3, QHeaderView.Stretch)  # Timing
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Delay
+        
+        layout.addWidget(self.io_table)
+        
+        # I/O action buttons
+        io_buttons = QHBoxLayout()
+        
+        self.add_io_btn = QPushButton("Add I/O Action")
+        self.add_io_btn.clicked.connect(self.on_add_io_action)
+        io_buttons.addWidget(self.add_io_btn)
+        
+        self.edit_io_btn = QPushButton("Edit")
+        self.edit_io_btn.clicked.connect(self.on_edit_io_action)
+        self.edit_io_btn.setEnabled(False)
+        io_buttons.addWidget(self.edit_io_btn)
+        
+        self.remove_io_btn = QPushButton("Remove")
+        self.remove_io_btn.clicked.connect(self.on_remove_io_action)
+        self.remove_io_btn.setEnabled(False)
+        io_buttons.addWidget(self.remove_io_btn)
+        
+        io_buttons.addStretch()
+        layout.addLayout(io_buttons)
+        
+        # Connect table selection
+        self.io_table.itemSelectionChanged.connect(self.on_io_selection_changed)
+        
+        group.setLayout(layout)
+        return group
     
     def create_status_section(self) -> QHBoxLayout:
         """Create status and validation display."""
@@ -385,6 +448,7 @@ class SequenceEditorDialog(QDialog):
             self.sequence.mode = new_mode
             self.update_table_columns()
             self.refresh_stages_table()
+            self.update_io_section_visibility()
             self.modified = True
             
             logger.info(f"Changed sequence mode to {new_mode.value}")
@@ -481,6 +545,9 @@ class SequenceEditorDialog(QDialog):
         self.remove_btn.setEnabled(has_selection)
         self.move_up_btn.setEnabled(has_selection and row > 0)
         self.move_down_btn.setEnabled(has_selection and row < len(self.sequence.stages) - 1)
+        
+        # Update I/O actions table for selected stage
+        self.refresh_io_table()
     
     def on_table_item_changed(self, item: QTableWidgetItem) -> None:
         """Handle table cell edit."""
@@ -617,4 +684,175 @@ class SequenceEditorDialog(QDialog):
                 return
         
         event.accept()
+    
+    def _load_io_devices(self) -> List[str]:
+        """
+        Load available I/O device names from configuration.
+        
+        Returns:
+            List of device names
+        """
+        try:
+            from ...config.settings import get_settings
+            from pathlib import Path
+            
+            config_file = Path(__file__).parent.parent.parent / "config" / "hardware_config.yaml"
+            settings = get_settings(str(config_file))
+            
+            devices = []
+            
+            # Load digital outputs
+            digital_outputs = settings.get("io_devices", "digital_outputs", default=[])
+            if isinstance(digital_outputs, list):
+                for device in digital_outputs:
+                    if isinstance(device, dict) and "name" in device:
+                        devices.append(device["name"])
+            
+            # Load analog outputs
+            analog_outputs = settings.get("io_devices", "analog_outputs", default=[])
+            if isinstance(analog_outputs, list):
+                for device in analog_outputs:
+                    if isinstance(device, dict) and "name" in device:
+                        devices.append(device["name"])
+            
+            logger.debug(f"Loaded {len(devices)} I/O devices from config")
+            return devices
+            
+        except Exception as e:
+            logger.warning(f"Could not load I/O devices from config: {e}")
+            return []
+    
+    def update_io_section_visibility(self) -> None:
+        """Update visibility of I/O section based on mode."""
+        # Show I/O section in advanced mode or if any stage has I/O actions
+        show_io = self.current_mode == SequenceMode.ADVANCED
+        if not show_io:
+            # Check if any stage has I/O actions
+            for stage in self.sequence.stages:
+                if stage.io_actions:
+                    show_io = True
+                    break
+        
+        self.io_actions_group.setVisible(show_io)
+    
+    def refresh_io_table(self) -> None:
+        """Refresh I/O actions table for currently selected stage."""
+        row = self.stages_table.currentRow()
+        
+        if row < 0 or row >= len(self.sequence.stages):
+            self.io_table.setRowCount(0)
+            self.add_io_btn.setEnabled(False)
+            return
+        
+        self.add_io_btn.setEnabled(True)
+        stage = self.sequence.stages[row]
+        
+        # Block signals during refresh
+        self.io_table.blockSignals(True)
+        
+        # Clear and resize table
+        self.io_table.setRowCount(len(stage.io_actions))
+        
+        # Populate rows
+        for i, io_action in enumerate(stage.io_actions):
+            # Device name
+            self.io_table.setItem(i, 0, QTableWidgetItem(io_action.device_name))
+            
+            # Action type
+            action_type_str = io_action.action_type.value.replace("_", " ").title()
+            self.io_table.setItem(i, 1, QTableWidgetItem(action_type_str))
+            
+            # Value
+            if isinstance(io_action.value, bool):
+                value_str = "ON" if io_action.value else "OFF"
+            else:
+                value_str = str(io_action.value)
+            self.io_table.setItem(i, 2, QTableWidgetItem(value_str))
+            
+            # Timing
+            timing_str = io_action.timing.value.replace("_", " ").title()
+            self.io_table.setItem(i, 3, QTableWidgetItem(timing_str))
+            
+            # Delay
+            self.io_table.setItem(i, 4, QTableWidgetItem(f"{io_action.delay_seconds:.1f}"))
+        
+        # Re-enable signals
+        self.io_table.blockSignals(False)
+        
+        logger.debug(f"Refreshed I/O table with {len(stage.io_actions)} actions")
+    
+    def on_add_io_action(self) -> None:
+        """Add a new I/O action to the current stage."""
+        row = self.stages_table.currentRow()
+        if row < 0 or row >= len(self.sequence.stages):
+            return
+        
+        stage = self.sequence.stages[row]
+        
+        # Open dialog to create new I/O action
+        dialog = IOActionDialog(available_devices=self.available_io_devices, parent=self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            io_action = dialog.get_io_action()
+            stage.add_io_action(io_action)
+            self.refresh_io_table()
+            self.modified = True
+            
+            logger.info(f"Added I/O action to stage {row + 1}: {io_action}")
+    
+    def on_edit_io_action(self) -> None:
+        """Edit the selected I/O action."""
+        stage_row = self.stages_table.currentRow()
+        io_row = self.io_table.currentRow()
+        
+        if stage_row < 0 or io_row < 0:
+            return
+        
+        stage = self.sequence.stages[stage_row]
+        if io_row >= len(stage.io_actions):
+            return
+        
+        io_action = stage.io_actions[io_row]
+        
+        # Open dialog to edit I/O action
+        dialog = IOActionDialog(io_action=io_action, available_devices=self.available_io_devices, parent=self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            # Action was modified in place
+            self.refresh_io_table()
+            self.modified = True
+            
+            logger.info(f"Edited I/O action in stage {stage_row + 1}")
+    
+    def on_remove_io_action(self) -> None:
+        """Remove the selected I/O action."""
+        stage_row = self.stages_table.currentRow()
+        io_row = self.io_table.currentRow()
+        
+        if stage_row < 0 or io_row < 0:
+            return
+        
+        stage = self.sequence.stages[stage_row]
+        
+        # Confirm deletion
+        reply = QMessageBox.question(
+            self,
+            "Remove I/O Action",
+            f"Remove I/O action {io_row + 1}?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            stage.remove_io_action(io_row)
+            self.refresh_io_table()
+            self.modified = True
+            
+            logger.info(f"Removed I/O action from stage {stage_row + 1}")
+    
+    def on_io_selection_changed(self) -> None:
+        """Handle I/O action selection change."""
+        has_selection = self.io_table.currentRow() >= 0
+        
+        self.edit_io_btn.setEnabled(has_selection)
+        self.remove_io_btn.setEnabled(has_selection)
 

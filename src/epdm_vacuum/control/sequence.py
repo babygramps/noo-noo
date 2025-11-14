@@ -22,6 +22,107 @@ class SequenceMode(Enum):
     ADVANCED = "advanced"
 
 
+class IOActionTiming(Enum):
+    """When an I/O action should occur relative to stage."""
+    BEFORE_STAGE = "before_stage"
+    START_OF_STAGE = "start_of_stage"
+    DURING_STAGE = "during_stage"
+    END_OF_STAGE = "end_of_stage"
+    AFTER_STAGE = "after_stage"
+
+
+class IOActionType(Enum):
+    """Type of I/O action."""
+    DIGITAL_OUTPUT = "digital_output"  # Set relay/valve on/off
+    ANALOG_OUTPUT = "analog_output"    # Set analog output value
+    PULSE = "pulse"                     # Pulse output for duration
+
+
+@dataclass
+class IOAction:
+    """
+    Represents a single I/O control action.
+    
+    Used to control valves, relays, and other actuators during test execution.
+    """
+    
+    # Device identification
+    device_name: str  # Name of the I/O device (e.g., "vent_valve", "inlet_valve")
+    action_type: IOActionType = IOActionType.DIGITAL_OUTPUT
+    
+    # Action parameters
+    value: Any = False  # For digital: True/False, for analog: float value
+    timing: IOActionTiming = IOActionTiming.START_OF_STAGE
+    delay_seconds: float = 0.0  # Delay after timing point
+    duration_seconds: Optional[float] = None  # For pulse actions or timed operations
+    
+    # Description
+    description: str = ""
+    
+    def validate(self) -> tuple[bool, List[str]]:
+        """
+        Validate I/O action parameters.
+        
+        Returns:
+            Tuple of (is_valid, list_of_error_messages)
+        """
+        errors = []
+        
+        if not self.device_name or not self.device_name.strip():
+            errors.append("Device name cannot be empty")
+        
+        if self.delay_seconds < 0:
+            errors.append(f"Delay {self.delay_seconds}s cannot be negative")
+        
+        if self.duration_seconds is not None and self.duration_seconds <= 0:
+            errors.append(f"Duration {self.duration_seconds}s must be positive")
+        
+        if self.action_type == IOActionType.PULSE and self.duration_seconds is None:
+            errors.append("Pulse action requires duration_seconds")
+        
+        if self.action_type == IOActionType.DIGITAL_OUTPUT:
+            if not isinstance(self.value, bool):
+                errors.append(f"Digital output value must be boolean, got {type(self.value)}")
+        
+        if self.action_type == IOActionType.ANALOG_OUTPUT:
+            try:
+                float(self.value)
+            except (TypeError, ValueError):
+                errors.append(f"Analog output value must be numeric, got {self.value}")
+        
+        is_valid = len(errors) == 0
+        return is_valid, errors
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "device_name": self.device_name,
+            "action_type": self.action_type.value,
+            "value": self.value,
+            "timing": self.timing.value,
+            "delay_seconds": self.delay_seconds,
+            "duration_seconds": self.duration_seconds,
+            "description": self.description,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "IOAction":
+        """Create IOAction from dictionary."""
+        # Convert string enums back to enum types
+        if isinstance(data.get("action_type"), str):
+            data["action_type"] = IOActionType(data["action_type"])
+        if isinstance(data.get("timing"), str):
+            data["timing"] = IOActionTiming(data["timing"])
+        
+        return cls(**data)
+    
+    def __str__(self) -> str:
+        """String representation."""
+        value_str = "ON" if self.value else "OFF" if isinstance(self.value, bool) else str(self.value)
+        timing_str = self.timing.value.replace("_", " ").title()
+        return f"{self.device_name}: {value_str} ({timing_str})"
+
+
 @dataclass
 class TestStage:
     """
@@ -49,6 +150,45 @@ class TestStage:
     # Control options
     collect_data: bool = True
     auto_vent: bool = True
+    
+    # I/O control actions
+    io_actions: List[IOAction] = field(default_factory=list)
+    
+    def add_io_action(self, action: IOAction) -> None:
+        """
+        Add an I/O action to this stage.
+        
+        Args:
+            action: IOAction to add
+        """
+        self.io_actions.append(action)
+        logger.debug(f"Added I/O action to stage: {action}")
+    
+    def remove_io_action(self, index: int) -> Optional[IOAction]:
+        """
+        Remove an I/O action from this stage.
+        
+        Args:
+            index: Index of action to remove
+        
+        Returns:
+            The removed IOAction, or None if index invalid
+        """
+        if 0 <= index < len(self.io_actions):
+            return self.io_actions.pop(index)
+        return None
+    
+    def get_io_actions_for_timing(self, timing: IOActionTiming) -> List[IOAction]:
+        """
+        Get all I/O actions for a specific timing point.
+        
+        Args:
+            timing: IOActionTiming to filter by
+        
+        Returns:
+            List of IOAction objects for that timing
+        """
+        return [action for action in self.io_actions if action.timing == timing]
     
     def validate(self, config_limits: Optional[Dict[str, Any]] = None) -> tuple[bool, List[str]]:
         """
@@ -102,6 +242,13 @@ class TestStage:
                 if self.max_single_cell_kg > max_cell_limit:
                     errors.append(f"Max single cell {self.max_single_cell_kg} kg exceeds config limit {max_cell_limit} kg")
         
+        # Validate I/O actions
+        for i, io_action in enumerate(self.io_actions):
+            action_valid, action_errors = io_action.validate()
+            if not action_valid:
+                for error in action_errors:
+                    errors.append(f"I/O Action {i+1}: {error}")
+        
         is_valid = len(errors) == 0
         return is_valid, errors
     
@@ -137,12 +284,24 @@ class TestStage:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert stage to dictionary for serialization."""
-        return asdict(self)
+        data = asdict(self)
+        # Convert I/O actions to dictionaries
+        if self.io_actions:
+            data["io_actions"] = [action.to_dict() for action in self.io_actions]
+        return data
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TestStage":
         """Create TestStage from dictionary."""
-        return cls(**data)
+        # Extract and convert I/O actions
+        io_actions_data = data.pop("io_actions", [])
+        io_actions = [IOAction.from_dict(action_data) for action_data in io_actions_data]
+        
+        # Create stage with remaining data
+        stage = cls(**data)
+        stage.io_actions = io_actions
+        
+        return stage
     
     def __str__(self) -> str:
         """String representation."""

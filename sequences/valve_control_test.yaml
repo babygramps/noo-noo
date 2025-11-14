@@ -1,0 +1,82 @@
+name: Valve Control Test
+description: Test sequence demonstrating valve and I/O control during test execution
+mode: advanced
+created_date: '2024-11-14T00:00:00'
+modified_date: '2024-11-14T00:00:00'
+author: System
+loop_count: 1
+pause_between_stages: false
+stages:
+  - name: Pre-Evacuation with Inlet Closed
+    target_vacuum_bar: 0.3
+    hold_time_seconds: 10.0
+    ramp_rate_bar_per_sec: 0.1
+    sample_rate_hz: 10.0
+    delay_before_seconds: 0.0
+    max_force_kg: null
+    max_single_cell_kg: null
+    collect_data: true
+    auto_vent: false
+    io_actions:
+      - device_name: inlet_valve
+        action_type: digital_output
+        value: false
+        timing: before_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Close inlet valve before starting
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Ensure vent valve is closed
+  
+  - name: Main Test with Controlled Venting
+    target_vacuum_bar: 0.6
+    hold_time_seconds: 30.0
+    ramp_rate_bar_per_sec: 0.1
+    sample_rate_hz: 10.0
+    delay_before_seconds: 2.0
+    max_force_kg: 700.0
+    max_single_cell_kg: null
+    collect_data: true
+    auto_vent: false
+    io_actions:
+      - device_name: vent_valve
+        action_type: digital_output
+        value: true
+        timing: end_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Open vent valve at end of hold period
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: after_stage
+        delay_seconds: 5.0
+        duration_seconds: null
+        description: Close vent valve after 5 seconds of venting
+  
+  - name: Pulse Test with Safety Valve
+    target_vacuum_bar: 0.8
+    hold_time_seconds: 15.0
+    ramp_rate_bar_per_sec: 0.05
+    sample_rate_hz: 20.0
+    delay_before_seconds: 3.0
+    max_force_kg: 800.0
+    max_single_cell_kg: 250.0
+    collect_data: true
+    auto_vent: true
+    io_actions:
+      - device_name: safety_valve
+        action_type: pulse
+        value: true
+        timing: during_stage
+        delay_seconds: 5.0
+        duration_seconds: 2.0
+        description: Pulse safety valve 2 seconds, 5 seconds into hold period
+

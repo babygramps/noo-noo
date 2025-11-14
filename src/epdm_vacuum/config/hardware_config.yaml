@@ -70,6 +70,38 @@ sequences:
   max_stages_per_sequence: 50  # Maximum number of stages allowed
   validate_on_load: true  # Validate sequences when loading
 
+# I/O Device Configuration
+io_devices:
+  # Define available I/O devices for sequencing
+  digital_outputs:
+    - name: vacuum_pump
+      channel: 0
+      description: Main vacuum pump relay
+      default_state: false
+    
+    - name: vent_valve
+      channel: 1
+      description: Vent valve for pressure release
+      default_state: false
+    
+    - name: inlet_valve
+      channel: 2
+      description: Inlet valve for chamber access
+      default_state: false
+    
+    - name: safety_valve
+      channel: 3
+      description: Emergency safety relief valve
+      default_state: false
+  
+  analog_outputs:
+    - name: proportional_valve
+      channel: 0
+      description: Proportional control valve (0-10V)
+      min_value: 0.0
+      max_value: 10.0
+      default_value: 0.0
+
 # Calibration Files
 calibration:
   pressure_sensor_file: calibration/pressure_sensor.json
