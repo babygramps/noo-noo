@@ -246,16 +246,16 @@ class TestStage:
         
         # Check for recommended I/O actions (warnings, not errors)
         if self.target_vacuum_bar is not None and self.target_vacuum_bar > 0.0:  # Only for vacuum stages
-            # Check if inlet valve is being closed
-            has_inlet_close = any(
-                action.device_name == "inlet_valve" and 
-                action.value == False and
+            # Check if vacuum valve is open (needed to connect pump to chamber)
+            has_vacuum_valve_open = any(
+                action.device_name == "vacuum_valve" and 
+                action.value == True and
                 action.timing in (IOActionTiming.BEFORE_STAGE, IOActionTiming.START_OF_STAGE)
                 for action in self.io_actions
             )
             
-            if not has_inlet_close:
-                warnings.append("⚠️ No I/O action closes 'inlet_valve' - chamber may not seal properly")
+            if not has_vacuum_valve_open:
+                warnings.append("⚠️ No I/O action opens 'vacuum_valve' - pump won't connect to chamber")
             
             # Check if vent valve is being closed during vacuum
             has_vent_close = any(
@@ -266,7 +266,7 @@ class TestStage:
             )
             
             if not has_vent_close:
-                warnings.append("⚠️ No I/O action closes 'vent_valve' - vacuum may not be maintained")
+                warnings.append("⚠️ No I/O action closes 'vent_valve' - vacuum will leak to atmosphere")
             
             # Check if vent valve opens at end
             has_vent_open = any(

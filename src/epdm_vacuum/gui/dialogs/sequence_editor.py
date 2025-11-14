@@ -313,7 +313,7 @@ class SequenceEditorDialog(QDialog):
         
         # Info label with helpful guidance
         info_label = QLabel(
-            "ℹ️ Common setup: inlet_valve CLOSED, vent_valve CLOSED at start then OPEN at end."
+            "ℹ️ Common setup for vacuum: vacuum_valve OPEN, vent_valve CLOSED at start then OPEN at end."
         )
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
@@ -1026,11 +1026,10 @@ class SequenceEditorDialog(QDialog):
         Args:
             stage: TestStage to add I/O actions to
         """
-        # Set default states for common devices
+        # Set default states for common devices based on actual hardware
         defaults = {
-            "inlet_valve": {"start": False, "end": False},  # CLOSED throughout
-            "vent_valve": {"start": False, "end": True},  # CLOSED at start, OPEN at end
-            "safety_valve": {"start": False, "end": False},  # CLOSED throughout
+            "vacuum_valve": {"start": True, "end": True},   # OPEN to connect pump to chamber
+            "vent_valve": {"start": False, "end": True},    # CLOSED during vacuum, OPEN at end to vent
         }
         
         for device_name, states in defaults.items():

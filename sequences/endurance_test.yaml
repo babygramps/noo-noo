@@ -12,13 +12,13 @@ stages:
     vacuum_tolerance_bar: 0.05
     collect_data: true
     io_actions:
-      - device_name: inlet_valve
+      - device_name: vacuum_valve
         action_type: digital_output
-        value: false
+        value: true
         timing: start_of_stage
         delay_seconds: 0.0
         duration_seconds: null
-        description: Set inlet_valve to CLOSED at start of stage
+        description: Open vacuum valve to connect pump to chamber
       
       - device_name: vent_valve
         action_type: digital_output
@@ -26,7 +26,7 @@ stages:
         timing: start_of_stage
         delay_seconds: 0.0
         duration_seconds: null
-        description: Set vent_valve to CLOSED at start of stage
+        description: Close vent valve during evacuation
   
   - name: Long Duration Hold
     target_vacuum_bar: null
@@ -36,10 +36,18 @@ stages:
     vacuum_tolerance_bar: 0.03
     collect_data: true
     io_actions:
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: true
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Keep vacuum valve open for pump cycling
+      
       - device_name: vent_valve
         action_type: digital_output
         value: true
         timing: end_of_stage
         delay_seconds: 0.0
         duration_seconds: null
-        description: Set vent_valve to OPEN at end of stage
+        description: Open vent valve to release vacuum

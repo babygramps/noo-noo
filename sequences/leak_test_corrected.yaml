@@ -1,0 +1,122 @@
+name: Leak Test (Corrected)
+description: Proper sequence for 10-minute leak test - vent, pull vacuum, hold, vent
+created_date: '2024-11-14T00:00:00'
+modified_date: '2024-11-14T00:00:00'
+author: System
+stages:
+  - name: Initial Vent
+    target_vacuum_bar: null
+    max_time_seconds: 5.0
+    min_time_seconds: 0.0
+    pump_mode: 'off'
+    vacuum_tolerance_bar: 0.05
+    collect_data: false
+    io_actions:
+      # Open vent valve for 5 seconds to ensure chamber is at atmospheric pressure
+      - device_name: vent_valve
+        action_type: digital_output
+        value: true
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Open vent valve to atmosphere
+      
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Close vacuum valve (isolate chamber from pump)
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: end_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Close vent valve before pulling vacuum
+  
+  - name: Pull Vacuum to 0.5 bar
+    target_vacuum_bar: 0.5
+    max_time_seconds: 60.0
+    min_time_seconds: 0.0
+    pump_mode: continuous
+    vacuum_tolerance_bar: 0.05
+    collect_data: true
+    io_actions:
+      # Close vent valve and open vacuum valve to pull vacuum
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Keep vent valve closed for evacuation
+      
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: true
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Open vacuum valve to connect pump to chamber
+  
+  - name: Hold Vacuum for 10 Minutes (Leak Test)
+    target_vacuum_bar: null
+    max_time_seconds: 600.0
+    min_time_seconds: 0.0
+    pump_mode: maintain
+    vacuum_tolerance_bar: 0.03
+    collect_data: true
+    io_actions:
+      # Keep vacuum valve open so pump can cycle to maintain vacuum
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: true
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Keep vacuum valve open for pump cycling
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Keep vent valve closed to maintain vacuum
+  
+  - name: Final Vent
+    target_vacuum_bar: null
+    max_time_seconds: 10.0
+    min_time_seconds: 0.0
+    pump_mode: 'off'
+    vacuum_tolerance_bar: 0.05
+    collect_data: false
+    io_actions:
+      # Close vacuum valve and open vent valve to release pressure
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Close vacuum valve to isolate pump
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: true
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Open vent valve to release vacuum
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: end_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Close vent valve after venting complete
+
