@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QSpinBox,
     QCheckBox,
+    QRadioButton,
     QComboBox,
     QGroupBox,
     QMessageBox,
