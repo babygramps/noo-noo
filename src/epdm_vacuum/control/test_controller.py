@@ -71,6 +71,9 @@ class TestController:
         # Callbacks for status updates
         self.status_callback: Optional[Callable[[str], None]] = None
         self.stage_callback: Optional[Callable[[int, int, TestStage], None]] = None
+        self.io_callback: Optional[Callable[[str, bool], None]] = None
+        self.progress_callback: Optional[Callable[[float, str], None]] = None
+        self.completion_callback: Optional[Callable[[int, str], None]] = None
         
         logger.info("TestController initialized")
     
@@ -205,7 +208,15 @@ class TestController:
             self.current_stage_index = stage_index
             stage_name = stage.name or f"Stage {stage_index + 1}"
             
-            logger.info(f"Starting stage {stage_index + 1}/{total_stages}: {stage_name}")
+            # Enhanced logging with formatted output
+            logger.info("=" * 60)
+            logger.info(f"[STAGE {stage_index + 1}/{total_stages}] {stage_name} - STARTED")
+            logger.info(f"  Target Vacuum: {stage.target_vacuum_bar:.3f} bar" if stage.target_vacuum_bar else "  Target Vacuum: None")
+            logger.info(f"  Time Limit: {stage.max_time_seconds:.1f}s" if stage.max_time_seconds else "  Time Limit: None")
+            logger.info(f"  Pump Mode: {stage.pump_mode.value}")
+            logger.info(f"  IO Actions: {len(stage.io_actions)}")
+            logger.info("=" * 60)
+            
             self._update_status(f"Stage {stage_index + 1}/{total_stages}: {stage_name}")
             
             # Notify stage change
@@ -216,10 +227,10 @@ class TestController:
             stage_success = self._execute_stage(stage)
             
             if not stage_success:
-                logger.error(f"Stage {stage_index + 1} failed")
+                logger.error(f"[STAGE {stage_index + 1}/{total_stages}] {stage_name} - FAILED")
                 return False
             
-            logger.info(f"Completed stage {stage_index + 1}/{total_stages}")
+            logger.info(f"[STAGE {stage_index + 1}/{total_stages}] {stage_name} - COMPLETED SUCCESSFULLY")
         
         logger.info(f"Sequence '{self.current_sequence.name}' completed successfully")
         return True
@@ -293,8 +304,12 @@ class TestController:
             # Run stage with completion monitoring
             completion_reason = self._run_stage_with_monitoring(stage, stage_data)
             
-            logger.info(f"Stage completed: {completion_reason}")
+            logger.info(f"  Completion Reason: {completion_reason}")
             self._update_status(f"Stage complete: {completion_reason}")
+            
+            # Notify stage completion
+            if self.completion_callback:
+                self.completion_callback(self.current_stage_index, completion_reason)
             
             # Execute I/O actions: END_OF_STAGE
             self._execute_io_actions(stage, IOActionTiming.END_OF_STAGE)
@@ -309,7 +324,8 @@ class TestController:
             self.stage_data.append(stage_data)
             
             stage_duration = time.time() - stage_start_time
-            logger.info(f"Stage completed in {stage_duration:.1f} seconds")
+            logger.info(f"  Duration: {stage_duration:.1f} seconds")
+            logger.info(f"  Data Points Collected: {len(stage_data)}")
             
             return True
             
@@ -330,8 +346,15 @@ class TestController:
         """
         stage_start = time.time()
         sample_interval = 0.1  # Check conditions every 100ms
+        last_progress_log = 0.0  # Track last progress log time
         
-        logger.info(f"Monitoring stage completion - Setpoint: {stage.target_vacuum_bar}, Time: {stage.max_time_seconds}")
+        logger.info(f"  Monitoring Completion Conditions:")
+        if stage.target_vacuum_bar is not None:
+            logger.info(f"    - Vacuum Setpoint: {stage.target_vacuum_bar:.3f} bar")
+        if stage.max_time_seconds is not None:
+            logger.info(f"    - Time Limit: {stage.max_time_seconds:.1f}s")
+        if stage.min_time_seconds > 0:
+            logger.info(f"    - Minimum Hold: {stage.min_time_seconds:.1f}s")
         
         while self.state == TestState.RUNNING:
             elapsed = time.time() - stage_start
@@ -344,6 +367,32 @@ class TestController:
                 time.sleep(sample_interval)
                 continue
             
+            # Calculate progress percentage
+            progress = 0.0
+            if stage.max_time_seconds is not None and stage.max_time_seconds > 0:
+                progress = min(1.0, elapsed / stage.max_time_seconds)
+            elif stage.target_vacuum_bar is not None and stage.target_vacuum_bar > 0:
+                # For setpoint-based, estimate progress
+                estimated_vacuum = min(elapsed * 0.1, stage.target_vacuum_bar)
+                current_vacuum = estimated_vacuum
+                progress = min(1.0, current_vacuum / stage.target_vacuum_bar)
+            
+            # Emit progress update every second
+            if elapsed - last_progress_log >= 1.0:
+                status_text = f"Elapsed: {elapsed:.1f}s"
+                if stage.target_vacuum_bar is not None:
+                    status_text += f" | Vacuum: {current_vacuum:.3f} bar"
+                
+                # Notify progress callback
+                if self.progress_callback:
+                    self.progress_callback(progress, status_text)
+                
+                # Log progress periodically (every 5 seconds)
+                if int(elapsed) % 5 == 0:
+                    logger.debug(f"  Progress: {progress*100:.1f}% - {status_text}")
+                
+                last_progress_log = elapsed
+            
             # Check completion conditions (OR logic - first to complete wins)
             
             # Condition 1: Setpoint reached
@@ -354,13 +403,13 @@ class TestController:
                 current_vacuum = estimated_vacuum
                 
                 if current_vacuum >= stage.target_vacuum_bar:
-                    logger.info(f"Setpoint reached: {current_vacuum:.3f} >= {stage.target_vacuum_bar:.3f} bar")
+                    logger.info(f"  ✓ Setpoint reached: {current_vacuum:.3f} >= {stage.target_vacuum_bar:.3f} bar")
                     return f"setpoint reached ({current_vacuum:.3f} bar)"
             
             # Condition 2: Time limit exceeded
             if stage.max_time_seconds is not None:
                 if elapsed >= stage.max_time_seconds:
-                    logger.info(f"Time limit reached: {elapsed:.1f}s >= {stage.max_time_seconds:.1f}s")
+                    logger.info(f"  ⏱ Time limit reached: {elapsed:.1f}s >= {stage.max_time_seconds:.1f}s")
                     return f"time limit ({elapsed:.1f}s)"
             
             # Pump cycling for MAINTAIN_VACUUM mode
@@ -517,9 +566,10 @@ class TestController:
         if not actions:
             return
         
-        logger.info(f"Executing {len(actions)} I/O actions for timing: {timing.value}")
+        logger.info(f"  Executing {len(actions)} I/O action(s) at timing: {timing.value}")
         
-        for action in actions:
+        for i, action in enumerate(actions, 1):
+            logger.info(f"    [{i}/{len(actions)}] {action.device_name}: {'OPEN' if action.value else 'CLOSED'}")
             self._execute_single_io_action(action)
     
     def _execute_single_io_action(self, action: IOAction) -> None:
@@ -535,11 +585,13 @@ class TestController:
                 logger.debug(f"Delaying {action.delay_seconds}s before I/O action")
                 time.sleep(action.delay_seconds)
             
-            logger.info(f"Executing I/O action: {action}")
-            
             # Execute based on action type
             if action.action_type == IOActionType.DIGITAL_OUTPUT:
                 self._set_digital_output(action.device_name, bool(action.value))
+                
+                # Notify IO callback
+                if self.io_callback:
+                    self.io_callback(action.device_name, bool(action.value))
             
             elif action.action_type == IOActionType.ANALOG_OUTPUT:
                 self._set_analog_output(action.device_name, float(action.value))
@@ -547,13 +599,17 @@ class TestController:
             elif action.action_type == IOActionType.PULSE:
                 # Turn on
                 self._set_digital_output(action.device_name, True)
+                if self.io_callback:
+                    self.io_callback(action.device_name, True)
+                
                 # Wait for duration
                 if action.duration_seconds:
                     time.sleep(action.duration_seconds)
+                
                 # Turn off
                 self._set_digital_output(action.device_name, False)
-            
-            logger.debug(f"I/O action completed: {action.device_name}")
+                if self.io_callback:
+                    self.io_callback(action.device_name, False)
             
         except Exception as e:
             logger.error(f"Error executing I/O action {action}: {e}", exc_info=True)
@@ -567,7 +623,7 @@ class TestController:
             device_name: Name of the device
             state: True for ON, False for OFF
         """
-        logger.info(f"Setting {device_name} to {'ON' if state else 'OFF'}")
+        logger.debug(f"      → {device_name}: {'OPEN/ON' if state else 'CLOSED/OFF'}")
         
         # TODO: Implement actual hardware control via WidgetLords interface
         # This would map device_name to relay channel and set the state
@@ -642,6 +698,33 @@ class TestController:
             callback: Function to call with (current_stage, total_stages, stage_object)
         """
         self.stage_callback = callback
+    
+    def set_io_callback(self, callback: Callable[[str, bool], None]) -> None:
+        """
+        Set callback for IO device state changes.
+        
+        Args:
+            callback: Function to call with (device_name, state)
+        """
+        self.io_callback = callback
+    
+    def set_progress_callback(self, callback: Callable[[float, str], None]) -> None:
+        """
+        Set callback for stage progress updates.
+        
+        Args:
+            callback: Function to call with (percentage, status_text)
+        """
+        self.progress_callback = callback
+    
+    def set_completion_callback(self, callback: Callable[[int, str], None]) -> None:
+        """
+        Set callback for stage completion.
+        
+        Args:
+            callback: Function to call with (stage_index, completion_reason)
+        """
+        self.completion_callback = callback
     
     def get_test_data(self) -> list:
         """

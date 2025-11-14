@@ -5,7 +5,7 @@ Background thread for executing test sequences and control logic
 without blocking the GUI.
 """
 
-from typing import Optional
+from typing import Optional, Dict
 import logging
 import time
 
@@ -28,6 +28,11 @@ class ControlThread(QThread):
     error_occurred = pyqtSignal(str)  # Emitted when an error occurs
     stage_changed = pyqtSignal(int, int, str)  # Emitted on stage transition (current, total, name)
     
+    # New signals for enhanced UI feedback
+    io_state_changed = pyqtSignal(str, bool)  # (device_name, state) - Emitted when IO device state changes
+    stage_progress_updated = pyqtSignal(float, str)  # (percentage, status_text) - Emitted for progress updates
+    stage_completed = pyqtSignal(int, str)  # (stage_index, completion_reason) - Emitted when stage completes
+    
     def __init__(self, test_controller=None, sequence=None):
         """
         Initialize the control thread.
@@ -42,6 +47,9 @@ class ControlThread(QThread):
         self.sequence = sequence
         self.running = False
         self.current_test = None
+        
+        # Track IO device states
+        self.io_device_states: Dict[str, bool] = {}
         
         logger.info("Control thread initialized")
     
@@ -68,6 +76,9 @@ class ControlThread(QThread):
                 # Set callbacks for progress updates
                 self.test_controller.set_status_callback(self._on_status_update)
                 self.test_controller.set_stage_callback(self._on_stage_change)
+                self.test_controller.set_io_callback(self._on_io_change)
+                self.test_controller.set_progress_callback(self._on_progress_update)
+                self.test_controller.set_completion_callback(self._on_stage_complete)
                 
                 # Run the test
                 logger.info("Starting test execution")
@@ -178,6 +189,40 @@ class ControlThread(QThread):
         stage_name = stage.name or f"Stage {current + 1}"
         self.stage_changed.emit(current, total, stage_name)
         logger.info(f"Stage changed: {current + 1}/{total} - {stage_name}")
+    
+    def _on_io_change(self, device_name: str, state: bool) -> None:
+        """
+        Handle IO device state change from test controller.
+        
+        Args:
+            device_name: Name of the IO device
+            state: True for OPEN/ON, False for CLOSED/OFF
+        """
+        self.io_device_states[device_name] = state
+        self.io_state_changed.emit(device_name, state)
+        logger.debug(f"IO state changed: {device_name} -> {'OPEN' if state else 'CLOSED'}")
+    
+    def _on_progress_update(self, percentage: float, status_text: str) -> None:
+        """
+        Handle stage progress update from test controller.
+        
+        Args:
+            percentage: Progress percentage (0.0 to 1.0)
+            status_text: Status message (e.g., elapsed time, vacuum level)
+        """
+        self.stage_progress_updated.emit(percentage, status_text)
+        logger.debug(f"Stage progress: {percentage*100:.1f}% - {status_text}")
+    
+    def _on_stage_complete(self, stage_index: int, completion_reason: str) -> None:
+        """
+        Handle stage completion from test controller.
+        
+        Args:
+            stage_index: Index of completed stage
+            completion_reason: Reason for completion (e.g., "setpoint reached")
+        """
+        self.stage_completed.emit(stage_index, completion_reason)
+        logger.info(f"Stage {stage_index} completed: {completion_reason}")
     
     def pause_test(self) -> None:
         """

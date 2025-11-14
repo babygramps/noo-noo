@@ -28,6 +28,7 @@ from .widgets.display_widget import DisplayWidget
 from .widgets.plot_widget import PlotWidget
 from .widgets.control_panel import ControlPanel
 from .widgets.sequence_selector import SequenceSelectorWidget
+from .widgets.test_status_panel import TestStatusPanel
 from .threads.daq_thread import DataAcquisitionThread
 from .threads.control_thread import ControlThread
 from .dialogs.sequence_editor import SequenceEditorDialog
@@ -74,6 +75,10 @@ class MainWindow(QMainWindow):
         # Create plot widget for charts
         self.plot_widget = PlotWidget()
         main_layout.addWidget(self.plot_widget, stretch=1)
+        
+        # Create test status panel (stage progress + IO status)
+        self.test_status_panel = TestStatusPanel()
+        main_layout.addWidget(self.test_status_panel)
         
         # Create sequence selector
         self.sequence_selector = SequenceSelectorWidget()
@@ -255,6 +260,10 @@ class MainWindow(QMainWindow):
         logger.info("Test completed")
         self.statusBar().showMessage("Test completed", 5000)
         QMessageBox.information(self, "Test Complete", "The test has completed successfully.")
+        
+        # Reset test status panel after a brief delay (so user can see final state)
+        # This could be optional - comment out if you want to keep the display
+        # QTimer.singleShot(10000, self.test_status_panel.reset)  # Reset after 10 seconds
     
     def on_start_test(self) -> None:
         """Handle start test request."""
@@ -264,10 +273,22 @@ class MainWindow(QMainWindow):
         # Get current sequence
         current_seq = self.sequence_selector.get_current_sequence()
         
+        # Validate sequence is selected
+        if not current_seq:
+            QMessageBox.warning(
+                self,
+                "No Sequence Selected",
+                "Please select a test sequence before starting."
+            )
+            return
+        
         # Create new control thread with sequence
         if self.control_thread and self.control_thread.isRunning():
             logger.warning("Control thread already running")
             return
+        
+        # Initialize test status panel with sequence
+        self.test_status_panel.set_sequence(current_seq)
         
         # TODO: Create test controller with hardware interfaces
         # For now, create control thread without controller (will use placeholder)
@@ -275,6 +296,11 @@ class MainWindow(QMainWindow):
         self.control_thread.status_update.connect(self.on_status_update)
         self.control_thread.test_complete.connect(self.on_test_complete)
         self.control_thread.stage_changed.connect(self.on_stage_changed)
+        
+        # Connect new signals for enhanced UI feedback
+        self.control_thread.io_state_changed.connect(self.on_io_state_changed)
+        self.control_thread.stage_progress_updated.connect(self.on_stage_progress_updated)
+        self.control_thread.stage_completed.connect(self.on_stage_completed)
         
         self.control_thread.start()
         
@@ -285,11 +311,14 @@ class MainWindow(QMainWindow):
         logger.info("Stopping test...")
         self.statusBar().showMessage("Stopping test...")
         
-        # TODO: Implement test stop logic
+        # Stop control thread
         if self.control_thread and self.control_thread.isRunning():
             self.control_thread.stop()
         
-        logger.warning("TODO: Stop test logic not fully implemented")
+        # Reset test status panel
+        self.test_status_panel.reset()
+        
+        logger.info("Test stopped by user")
     
     def on_pump_control(self, state: bool) -> None:
         """
@@ -342,6 +371,41 @@ class MainWindow(QMainWindow):
         status = f"Executing: Stage {current + 1}/{total} - {stage_name}"
         self.statusBar().showMessage(status)
         logger.info(f"Stage changed: {status}")
+        
+        # Update test status panel
+        self.test_status_panel.set_current_stage(current, stage_name)
+    
+    def on_io_state_changed(self, device_name: str, state: bool) -> None:
+        """
+        Handle IO device state change.
+        
+        Args:
+            device_name: Name of the IO device
+            state: True for OPEN/ON, False for CLOSED/OFF
+        """
+        self.test_status_panel.set_io_device_state(device_name, state)
+        logger.debug(f"IO state updated in UI: {device_name} -> {state}")
+    
+    def on_stage_progress_updated(self, percentage: float, status_text: str) -> None:
+        """
+        Handle stage progress update.
+        
+        Args:
+            percentage: Progress percentage (0.0 to 1.0)
+            status_text: Status message
+        """
+        self.test_status_panel.update_stage_progress(percentage, status_text)
+    
+    def on_stage_completed(self, stage_index: int, completion_reason: str) -> None:
+        """
+        Handle stage completion.
+        
+        Args:
+            stage_index: Index of completed stage
+            completion_reason: Reason for completion
+        """
+        self.test_status_panel.mark_stage_complete(stage_index, completion_reason)
+        logger.info(f"Stage {stage_index} completed in UI: {completion_reason}")
     
     def on_new_sequence(self) -> None:
         """Handle new sequence request."""
