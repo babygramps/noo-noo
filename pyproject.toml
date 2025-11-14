@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "epdm-vacuum-fixture"
+version = "1.1.0"
+description = "EPDM Gasket Vacuum Seal Testing System Control Software"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Proprietary"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+keywords = ["vacuum", "testing", "raspberry-pi", "daq", "pyqt5"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Manufacturing",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: POSIX :: Linux",
+]
+
+dependencies = [
+    "PyQt5>=5.15.10",
+    "pyqtgraph>=0.13.3",
+    "widgetlords-pi-spi-din>=1.0.0",
+    "minimalmodbus>=2.1.1",
+    "pyserial>=3.5",
+    "numpy>=1.24.3",
+    "pandas>=2.0.3",
+    "scipy>=1.11.1",
+    "matplotlib>=3.7.2",
+    "h5py>=3.9.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.1",
+    "flask>=2.3.3",
+    "flask-cors>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+
+[project.scripts]
+epdm-vacuum-gui = "epdm_vacuum.app_main:main"
+epdm-vacuum-api = "epdm_vacuum.api_main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+

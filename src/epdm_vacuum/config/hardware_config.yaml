@@ -1,0 +1,70 @@
+# EPDM Vacuum Fixture - Hardware Configuration
+# Version: 1.1.0
+
+# Hardware Interfaces
+hardware:
+  widgetlords:
+    enabled: true
+    pressure_channel: 0  # Analog input channel for pressure sensor
+    pump_relay: 0  # Relay channel for vacuum pump control
+  
+  modbus:
+    enabled: true
+    port: /dev/ttyUSB0  # Serial port for Modbus RTU
+    baudrate: 9600
+    slave_address: 1
+    timeout: 1.0  # seconds
+
+# Pressure Sensor Configuration (SPT25-20-V30D)
+pressure_sensor:
+  voltage_min: 0.0  # Volts
+  voltage_max: 10.0  # Volts
+  pressure_min_psi: 0.0  # PSI at voltage_min
+  pressure_max_psi: 30.0  # PSI at voltage_max
+  calibration_offset: 0.0  # Voltage offset correction
+  calibration_scale: 1.0  # Voltage scale factor
+
+# Safety Limits
+safety:
+  max_vacuum_bar: 1.0  # Maximum vacuum pressure (bar)
+  max_force_kg: 800.0  # Maximum total force (kg)
+  max_single_cell_kg: 250.0  # Maximum single load cell force (kg)
+  emergency_stop_enabled: true
+  alarm_threshold_violations: 3  # Number of violations before alarm
+
+# Test Configuration
+test:
+  default_target_vacuum_bar: 0.5  # Default target vacuum (bar)
+  default_hold_time_seconds: 30  # Default hold time (seconds)
+  default_ramp_rate_bar_per_sec: 0.1  # Default vacuum ramp rate
+  sample_rate_hz: 10.0  # Data acquisition sample rate (Hz)
+  max_test_duration_seconds: 600  # Maximum test duration (10 minutes)
+
+# Data Logging
+logging:
+  output_dir: data  # Directory for output files
+  log_level: INFO  # Logging level (DEBUG, INFO, WARNING, ERROR)
+  buffer_size: 10000  # Maximum data points in memory buffer
+  auto_save_enabled: true  # Automatically save data after test
+  save_format: csv  # Default save format (csv, hdf5, both)
+
+# API Configuration
+api:
+  enabled: false  # Enable Flask API server
+  host: 0.0.0.0  # Listen on all interfaces
+  port: 8000  # API port
+  debug: false  # Flask debug mode
+  cors_enabled: true  # Enable CORS for browser access
+
+# GUI Configuration
+gui:
+  window_width: 1280
+  window_height: 720
+  plot_update_interval_ms: 100  # Plot update interval (milliseconds)
+  display_update_interval_ms: 100  # Display update interval
+
+# Calibration Files
+calibration:
+  pressure_sensor_file: calibration/pressure_sensor.json
+  load_cells_file: calibration/load_cells.json
+
