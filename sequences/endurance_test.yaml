@@ -1,0 +1,30 @@
+name: Endurance Test
+description: Extended duration test to evaluate seal performance over time
+mode: advanced
+created_date: '2024-11-14T00:00:00'
+modified_date: '2024-11-14T00:00:00'
+author: System
+loop_count: 1
+pause_between_stages: false
+stages:
+  - name: Ramp to Test Vacuum
+    target_vacuum_bar: 0.6
+    hold_time_seconds: 5.0
+    ramp_rate_bar_per_sec: 0.1
+    sample_rate_hz: 10.0
+    delay_before_seconds: 0.0
+    max_force_kg: null
+    max_single_cell_kg: null
+    collect_data: true
+    auto_vent: false
+  - name: Long Duration Hold
+    target_vacuum_bar: 0.6
+    hold_time_seconds: 300.0
+    ramp_rate_bar_per_sec: 0.0
+    sample_rate_hz: 5.0
+    delay_before_seconds: 0.0
+    max_force_kg: 700.0
+    max_single_cell_kg: null
+    collect_data: true
+    auto_vent: true
+

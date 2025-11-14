@@ -1,0 +1,40 @@
+name: Simple Multi-Stage Test
+description: Basic multi-stage test at different vacuum levels for quick seal testing
+mode: simple
+created_date: '2024-11-14T00:00:00'
+modified_date: '2024-11-14T00:00:00'
+author: System
+loop_count: 1
+pause_between_stages: false
+stages:
+  - name: Low Vacuum Test
+    target_vacuum_bar: 0.3
+    hold_time_seconds: 20.0
+    ramp_rate_bar_per_sec: null
+    sample_rate_hz: null
+    delay_before_seconds: 0.0
+    max_force_kg: null
+    max_single_cell_kg: null
+    collect_data: true
+    auto_vent: true
+  - name: Medium Vacuum Test
+    target_vacuum_bar: 0.5
+    hold_time_seconds: 30.0
+    ramp_rate_bar_per_sec: null
+    sample_rate_hz: null
+    delay_before_seconds: 0.0
+    max_force_kg: null
+    max_single_cell_kg: null
+    collect_data: true
+    auto_vent: true
+  - name: High Vacuum Test
+    target_vacuum_bar: 0.7
+    hold_time_seconds: 40.0
+    ramp_rate_bar_per_sec: null
+    sample_rate_hz: null
+    delay_before_seconds: 0.0
+    max_force_kg: null
+    max_single_cell_kg: null
+    collect_data: true
+    auto_vent: true
+

@@ -281,20 +281,33 @@ Edit this file to match your hardware setup.
 - Vacuum vs. Time
 - Force vs. Vacuum (optional)
 
+### Test Sequencing
+- **Create and edit multi-stage test sequences**
+- **Simple mode:** Quick setup with just vacuum target and hold time
+- **Advanced mode:** Full control over ramp rates, sampling, and safety limits
+- **Save/load sequences:** Reusable test configurations stored as YAML files
+- **Visual editor:** Table-based interface with drag-and-drop reordering
+- **Real-time validation:** Immediate feedback on parameter validity
+- **Stage management:** Add, remove, duplicate, and reorder test stages
+- **Progress tracking:** Live updates showing current stage during execution
+
 ### Test Control
-- Automated test sequences
+- Automated multi-stage test sequences
 - Manual pump control
 - Load cell tare function
 - Emergency stop
+- Stage-by-stage execution with pause options
 
 ### Data Logging
 - CSV export for analysis
 - HDF5 format for large datasets
 - Timestamped test records
+- Per-stage data collection
 
 ### Safety Features
 - Configurable pressure limits
 - Configurable force limits
+- Per-stage safety overrides
 - Automatic pump shutdown on error
 - Emergency stop button
 
@@ -336,6 +349,130 @@ This is a **scaffold implementation** with complete structure but placeholder lo
    - End-to-end testing with hardware
    - Safety system validation
    - Performance optimization
+
+---
+
+## 🧪 Test Sequencing
+
+### Overview
+
+The test sequencing feature allows you to create, save, load, and execute complex multi-stage test sequences. This is useful for:
+- Testing seals at multiple vacuum levels
+- Endurance testing with extended hold times
+- Ramp rate sensitivity studies
+- Standardized QA testing procedures
+
+### Creating a Sequence
+
+1. **From the GUI:**
+   - Click **Sequence → New Sequence** or use the **New** button in the sequence selector
+   - Enter a name for your sequence
+   - The sequence editor dialog will open
+
+2. **Sequence Editor Modes:**
+   
+   **Simple Mode:**
+   - Quick stage creation with minimal parameters
+   - Specify only vacuum target (bar) and hold time (seconds)
+   - Uses default ramp rates and safety limits from configuration
+   - Perfect for basic multi-level testing
+   
+   **Advanced Mode:**
+   - Full control over all parameters:
+     - Target vacuum pressure
+     - Hold time
+     - Ramp rate (bar/second)
+     - Data sample rate (Hz)
+     - Delay before stage
+     - Per-stage force limits
+     - Data collection options
+   - Stage naming and descriptions
+   - Pause between stages option
+
+3. **Managing Stages:**
+   - **Add Stage:** Click "Add Stage" to append a new stage
+   - **Duplicate:** Select a stage and click "Duplicate" to create a copy
+   - **Remove:** Select a stage and click "Remove" to delete it
+   - **Reorder:** Use "Move Up" and "Move Down" buttons to change stage order
+   - **Edit:** Double-click cells in the table to edit values directly
+
+4. **Validation:**
+   - The editor validates all parameters in real-time
+   - Invalid values are highlighted with error messages
+   - Estimated total test duration is displayed
+   - Click "Validate" to see a detailed report
+
+5. **Saving:**
+   - Click "Save" to save the sequence as a YAML file in the `sequences/` directory
+   - Sequences are automatically validated before saving
+
+### Loading and Running Sequences
+
+1. **Load a Sequence:**
+   - Use the dropdown in the sequence selector to choose from saved sequences
+   - Or click **Sequence → Load Sequence** to browse for a file
+   - Sequence info (stages, duration, mode) is displayed once loaded
+
+2. **Edit an Existing Sequence:**
+   - Select a sequence from the dropdown
+   - Click **Edit** or use **Sequence → Edit Sequence**
+   - Make your changes in the editor
+   - Save to update the file
+
+3. **Run a Test:**
+   - Select your sequence from the dropdown
+   - Click **Start Test** in the control panel or press **F5**
+   - The test will execute each stage in order
+   - Current stage progress is shown in the status bar
+   - Data is collected for each stage independently
+
+### Example Sequences
+
+Several example sequences are included in the `sequences/` directory:
+
+- **quick_test.yaml:** Single-stage 10-second test at 0.5 bar
+- **simple_multi_stage.yaml:** Three stages testing at 0.3, 0.5, and 0.7 bar
+- **advanced_detailed_test.yaml:** Comprehensive test with precise ramp rates and sampling control
+- **endurance_test.yaml:** Extended 5-minute hold test for long-term seal evaluation
+
+### Sequence File Format
+
+Sequences are stored as YAML files. Example structure:
+
+```yaml
+name: My Test Sequence
+description: Description of what this test does
+mode: simple  # or 'advanced'
+loop_count: 1
+pause_between_stages: false
+stages:
+  - name: Stage 1
+    target_vacuum_bar: 0.5
+    hold_time_seconds: 30.0
+    collect_data: true
+    auto_vent: true
+  - name: Stage 2
+    target_vacuum_bar: 0.7
+    hold_time_seconds: 45.0
+    collect_data: true
+    auto_vent: true
+```
+
+Advanced mode stages include additional parameters:
+- `ramp_rate_bar_per_sec`: Control how quickly vacuum is applied
+- `sample_rate_hz`: Data collection frequency
+- `delay_before_seconds`: Wait time before starting stage
+- `max_force_kg`: Per-stage force limit
+- `max_single_cell_kg`: Per-cell force limit
+
+### Tips
+
+- **Start Simple:** Use simple mode for initial sequence development
+- **Copy and Modify:** Duplicate existing sequences and modify them for new tests
+- **Name Stages:** Give stages descriptive names for easier tracking during execution
+- **Validate Often:** Use the validation button to catch errors before running
+- **Test Incrementally:** Start with short hold times and increase gradually
+- **Document Sequences:** Use the description field to note the purpose and expected results
 
 ---
 

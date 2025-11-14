@@ -26,17 +26,20 @@ class ControlThread(QThread):
     status_update = pyqtSignal(str)  # Emitted with status messages
     test_complete = pyqtSignal()  # Emitted when test completes
     error_occurred = pyqtSignal(str)  # Emitted when an error occurs
+    stage_changed = pyqtSignal(int, int, str)  # Emitted on stage transition (current, total, name)
     
-    def __init__(self, test_controller=None):
+    def __init__(self, test_controller=None, sequence=None):
         """
         Initialize the control thread.
         
         Args:
             test_controller: TestController instance for managing tests
+            sequence: Optional TestSequence to execute
         """
         super().__init__()
         
         self.test_controller = test_controller
+        self.sequence = sequence
         self.running = False
         self.current_test = None
         
@@ -46,7 +49,7 @@ class ControlThread(QThread):
         """
         Main thread execution loop.
         
-        Executes the current test sequence.
+        Executes the current test sequence or single test.
         """
         logger.info("Control thread started")
         self.running = True
@@ -54,15 +57,33 @@ class ControlThread(QThread):
         try:
             self.status_update.emit("Initializing test...")
             
-            # TODO: Implement actual test sequence execution
-            # if self.test_controller:
-            #     self.test_controller.run_test()
-            
-            # Placeholder test sequence
-            self.execute_placeholder_test()
-            
-            self.status_update.emit("Test completed successfully")
-            self.test_complete.emit()
+            if self.test_controller:
+                # Load sequence if provided
+                if self.sequence:
+                    logger.info(f"Loading sequence: {self.sequence.name}")
+                    success = self.test_controller.load_sequence(self.sequence)
+                    if not success:
+                        raise RuntimeError(f"Failed to load sequence '{self.sequence.name}'")
+                
+                # Set callbacks for progress updates
+                self.test_controller.set_status_callback(self._on_status_update)
+                self.test_controller.set_stage_callback(self._on_stage_change)
+                
+                # Run the test
+                logger.info("Starting test execution")
+                success = self.test_controller.run_test()
+                
+                if success:
+                    self.status_update.emit("Test completed successfully")
+                    self.test_complete.emit()
+                else:
+                    raise RuntimeError("Test execution failed")
+            else:
+                # Fallback to placeholder if no controller
+                logger.warning("No test controller available, using placeholder")
+                self.execute_placeholder_test()
+                self.status_update.emit("Test completed successfully")
+                self.test_complete.emit()
             
         except Exception as e:
             error_msg = f"Control thread error: {str(e)}"
@@ -125,6 +146,38 @@ class ControlThread(QThread):
         """
         self.test_controller = controller
         logger.info("Test controller set")
+    
+    def set_sequence(self, sequence) -> None:
+        """
+        Set the test sequence to execute.
+        
+        Args:
+            sequence: TestSequence to execute
+        """
+        self.sequence = sequence
+        logger.info(f"Test sequence set: {sequence.name if sequence else 'None'}")
+    
+    def _on_status_update(self, status: str) -> None:
+        """
+        Handle status update from test controller.
+        
+        Args:
+            status: Status message
+        """
+        self.status_update.emit(status)
+    
+    def _on_stage_change(self, current: int, total: int, stage) -> None:
+        """
+        Handle stage change from test controller.
+        
+        Args:
+            current: Current stage index
+            total: Total number of stages
+            stage: TestStage object
+        """
+        stage_name = stage.name or f"Stage {current + 1}"
+        self.stage_changed.emit(current, total, stage_name)
+        logger.info(f"Stage changed: {current + 1}/{total} - {stage_name}")
     
     def pause_test(self) -> None:
         """

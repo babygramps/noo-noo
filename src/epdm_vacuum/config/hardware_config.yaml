@@ -63,6 +63,13 @@ gui:
   plot_update_interval_ms: 100  # Plot update interval (milliseconds)
   display_update_interval_ms: 100  # Display update interval
 
+# Sequence Configuration
+sequences:
+  directory: sequences  # Directory for sequence files
+  auto_load_last: false  # Automatically load the last used sequence on startup
+  max_stages_per_sequence: 50  # Maximum number of stages allowed
+  validate_on_load: true  # Validate sequences when loading
+
 # Calibration Files
 calibration:
   pressure_sensor_file: calibration/pressure_sensor.json

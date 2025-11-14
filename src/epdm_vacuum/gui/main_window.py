@@ -26,8 +26,11 @@ from PyQt5.QtCore import Qt
 from .widgets.display_widget import DisplayWidget
 from .widgets.plot_widget import PlotWidget
 from .widgets.control_panel import ControlPanel
+from .widgets.sequence_selector import SequenceSelectorWidget
 from .threads.daq_thread import DataAcquisitionThread
 from .threads.control_thread import ControlThread
+from .dialogs.sequence_editor import SequenceEditorDialog
+from ..control.sequence_manager import SequenceManager
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +48,10 @@ class MainWindow(QMainWindow):
         
         self.daq_thread: Optional[DataAcquisitionThread] = None
         self.control_thread: Optional[ControlThread] = None
+        self.sequence_manager: Optional[SequenceManager] = None
         
         self.init_ui()
+        self.init_sequence_manager()
         self.init_threads()
         
         logger.info("MainWindow initialized")
@@ -69,6 +74,10 @@ class MainWindow(QMainWindow):
         self.plot_widget = PlotWidget()
         main_layout.addWidget(self.plot_widget, stretch=1)
         
+        # Create sequence selector
+        self.sequence_selector = SequenceSelectorWidget()
+        main_layout.addWidget(self.sequence_selector)
+        
         # Create control panel
         self.control_panel = ControlPanel()
         main_layout.addWidget(self.control_panel)
@@ -85,6 +94,11 @@ class MainWindow(QMainWindow):
         self.control_panel.pump_control_requested.connect(self.on_pump_control)
         self.control_panel.tare_requested.connect(self.on_tare)
         self.control_panel.save_data_requested.connect(self.on_save_data)
+        
+        # Connect sequence selector signals
+        self.sequence_selector.sequence_changed.connect(self.on_sequence_changed)
+        self.sequence_selector.edit_requested.connect(self.on_edit_sequence)
+        self.sequence_selector.new_requested.connect(self.on_new_sequence)
         
         logger.info("UI initialized")
     
@@ -106,6 +120,31 @@ class MainWindow(QMainWindow):
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+        
+        # Sequence menu
+        sequence_menu = menubar.addMenu("&Sequence")
+        
+        new_seq_action = QAction("&New Sequence", self)
+        new_seq_action.setShortcut("Ctrl+N")
+        new_seq_action.triggered.connect(self.on_new_sequence)
+        sequence_menu.addAction(new_seq_action)
+        
+        load_seq_action = QAction("&Load Sequence", self)
+        load_seq_action.setShortcut("Ctrl+O")
+        load_seq_action.triggered.connect(self.on_load_sequence)
+        sequence_menu.addAction(load_seq_action)
+        
+        edit_seq_action = QAction("&Edit Sequence", self)
+        edit_seq_action.setShortcut("Ctrl+E")
+        edit_seq_action.triggered.connect(self.on_edit_current_sequence)
+        sequence_menu.addAction(edit_seq_action)
+        
+        sequence_menu.addSeparator()
+        
+        save_seq_action = QAction("&Save Sequence", self)
+        save_seq_action.setShortcut("Ctrl+Shift+S")
+        save_seq_action.triggered.connect(self.on_save_sequence)
+        sequence_menu.addAction(save_seq_action)
         
         # Test menu
         test_menu = menubar.addMenu("&Test")
@@ -132,6 +171,31 @@ class MainWindow(QMainWindow):
         about_action = QAction("&About", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
+    
+    def init_sequence_manager(self) -> None:
+        """Initialize the sequence manager."""
+        from ..config.settings import get_settings
+        from pathlib import Path
+        
+        # Load settings to get safety limits
+        config_file = Path(__file__).parent.parent / "config" / "hardware_config.yaml"
+        settings = get_settings(str(config_file))
+        
+        # Get safety limits for validation
+        config_limits = {
+            "max_vacuum_bar": settings.get("safety", "max_vacuum_bar", default=1.0),
+            "max_force_kg": settings.get("safety", "max_force_kg", default=800.0),
+            "max_single_cell_kg": settings.get("safety", "max_single_cell_kg", default=250.0),
+        }
+        
+        # Create sequence manager
+        sequences_dir = settings.get("sequences", "directory", default="sequences")
+        self.sequence_manager = SequenceManager(sequences_dir, config_limits)
+        
+        # Set manager in sequence selector
+        self.sequence_selector.set_sequence_manager(self.sequence_manager)
+        
+        logger.info("Sequence manager initialized")
     
     def init_threads(self) -> None:
         """Initialize background threads."""
@@ -196,11 +260,24 @@ class MainWindow(QMainWindow):
         logger.info("Starting test...")
         self.statusBar().showMessage("Starting test...")
         
-        # TODO: Implement test start logic
-        if self.control_thread and not self.control_thread.isRunning():
-            self.control_thread.start()
+        # Get current sequence
+        current_seq = self.sequence_selector.get_current_sequence()
         
-        logger.warning("TODO: Start test logic not fully implemented")
+        # Create new control thread with sequence
+        if self.control_thread and self.control_thread.isRunning():
+            logger.warning("Control thread already running")
+            return
+        
+        # TODO: Create test controller with hardware interfaces
+        # For now, create control thread without controller (will use placeholder)
+        self.control_thread = ControlThread(sequence=current_seq)
+        self.control_thread.status_update.connect(self.on_status_update)
+        self.control_thread.test_complete.connect(self.on_test_complete)
+        self.control_thread.stage_changed.connect(self.on_stage_changed)
+        
+        self.control_thread.start()
+        
+        logger.info(f"Started test with sequence: {current_seq.name if current_seq else 'None'}")
     
     def on_stop_test(self) -> None:
         """Handle stop test request."""
@@ -241,6 +318,139 @@ class MainWindow(QMainWindow):
         
         # TODO: Implement data save logic
         logger.warning("TODO: Save data function not implemented")
+    
+    def on_sequence_changed(self, sequence) -> None:
+        """
+        Handle sequence selection change.
+        
+        Args:
+            sequence: TestSequence that was selected
+        """
+        logger.info(f"Sequence changed to: {sequence.name}")
+        self.statusBar().showMessage(f"Loaded sequence: {sequence.name}")
+    
+    def on_stage_changed(self, current: int, total: int, stage_name: str) -> None:
+        """
+        Handle stage change during test execution.
+        
+        Args:
+            current: Current stage index
+            total: Total number of stages
+            stage_name: Name of the current stage
+        """
+        status = f"Executing: Stage {current + 1}/{total} - {stage_name}"
+        self.statusBar().showMessage(status)
+        logger.info(f"Stage changed: {status}")
+    
+    def on_new_sequence(self) -> None:
+        """Handle new sequence request."""
+        logger.info("Creating new sequence...")
+        
+        # Create default sequence
+        if self.sequence_manager:
+            sequence = self.sequence_manager.create_default_sequence()
+        else:
+            from ..control.sequence import TestSequence, SequenceMode
+            sequence = TestSequence(name="New Sequence", mode=SequenceMode.SIMPLE)
+        
+        # Open editor dialog
+        self.open_sequence_editor(sequence)
+    
+    def on_load_sequence(self) -> None:
+        """Handle load sequence request from menu."""
+        # Delegate to sequence selector widget
+        self.sequence_selector.on_load_sequence()
+    
+    def on_edit_sequence(self, sequence) -> None:
+        """
+        Handle edit sequence request.
+        
+        Args:
+            sequence: TestSequence to edit
+        """
+        self.open_sequence_editor(sequence)
+    
+    def on_edit_current_sequence(self) -> None:
+        """Handle edit current sequence from menu."""
+        current_seq = self.sequence_selector.get_current_sequence()
+        if current_seq:
+            self.open_sequence_editor(current_seq)
+        else:
+            QMessageBox.information(
+                self,
+                "No Sequence",
+                "Please select a sequence first."
+            )
+    
+    def on_save_sequence(self) -> None:
+        """Handle save current sequence."""
+        current_seq = self.sequence_selector.get_current_sequence()
+        if current_seq and self.sequence_manager:
+            success = self.sequence_manager.save_sequence(current_seq)
+            if success:
+                self.statusBar().showMessage(f"Saved sequence: {current_seq.name}", 3000)
+                QMessageBox.information(
+                    self,
+                    "Saved",
+                    f"Sequence '{current_seq.name}' saved successfully."
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Save Error",
+                    f"Failed to save sequence '{current_seq.name}'"
+                )
+        else:
+            QMessageBox.information(
+                self,
+                "No Sequence",
+                "Please select a sequence first."
+            )
+    
+    def open_sequence_editor(self, sequence) -> None:
+        """
+        Open the sequence editor dialog.
+        
+        Args:
+            sequence: TestSequence to edit
+        """
+        # Get config limits
+        config_limits = None
+        if self.sequence_manager:
+            config_limits = self.sequence_manager.config_limits
+        
+        # Create and show editor dialog
+        editor = SequenceEditorDialog(sequence, config_limits, self)
+        editor.sequence_saved.connect(self.on_sequence_saved)
+        
+        result = editor.exec_()
+        
+        if result == QDialog.Accepted:
+            logger.info(f"Sequence editor completed for: {sequence.name}")
+    
+    def on_sequence_saved(self, sequence) -> None:
+        """
+        Handle sequence saved from editor.
+        
+        Args:
+            sequence: TestSequence that was saved
+        """
+        if self.sequence_manager:
+            success = self.sequence_manager.save_sequence(sequence)
+            if success:
+                self.statusBar().showMessage(f"Saved sequence: {sequence.name}", 3000)
+                
+                # Refresh sequence list and select the saved sequence
+                self.sequence_selector.refresh_sequence_list()
+                self.sequence_selector.set_current_sequence(sequence)
+                
+                logger.info(f"Sequence saved: {sequence.name}")
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Save Error",
+                    f"Failed to save sequence '{sequence.name}'"
+                )
     
     def show_about(self) -> None:
         """Show about dialog."""
