@@ -219,11 +219,6 @@ class TestController:
                 logger.error(f"Stage {stage_index + 1} failed")
                 return False
             
-            # Pause between stages if configured
-            if self.current_sequence.pause_between_stages and stage_index < total_stages - 1:
-                self._update_status("Pausing between stages...")
-                time.sleep(5.0)
-            
             logger.info(f"Completed stage {stage_index + 1}/{total_stages}")
         
         logger.info(f"Sequence '{self.current_sequence.name}' completed successfully")
