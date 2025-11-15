@@ -126,9 +126,14 @@ class DataAcquisitionThread(QThread):
                 "load_cell_4_kg": 25.0,
             }
         
+        # Create human-readable datetime
+        from datetime import datetime
+        datetime_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        
         # Combine all data
         combined_data = {
             "timestamp": timestamp,
+            "datetime": datetime_str,
             **wl_data,
             **modbus_data,
         }

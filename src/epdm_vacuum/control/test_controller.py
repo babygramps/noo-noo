@@ -447,8 +447,11 @@ class TestController:
             
             # Collect data if enabled
             if stage.collect_data and elapsed % 1.0 < sample_interval:  # Collect ~1 sample/sec
+                current_time = time.time()
+                from datetime import datetime
                 data_point = {
-                    "timestamp": time.time(),
+                    "timestamp": current_time,
+                    "datetime": datetime.fromtimestamp(current_time).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],  # Include milliseconds
                     "elapsed_time": elapsed,
                     "stage_index": self.current_stage_index,
                     "stage_name": stage.name or f"Stage {self.current_stage_index + 1}",
