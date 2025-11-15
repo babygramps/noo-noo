@@ -254,7 +254,7 @@ class MainWindow(QMainWindow):
         modbus_iface = None
         
         # Initialize WidgetLords interface if enabled
-        widgetlords_config = settings.get_dict("hardware.widgetlords", default={})
+        widgetlords_config = settings.get("hardware", "widgetlords", default={})
         if widgetlords_config.get("enabled", False):
             try:
                 widgetlords_iface = WidgetLordsInterface()
@@ -264,7 +264,7 @@ class MainWindow(QMainWindow):
                 logger.error(f"Failed to initialize WidgetLords interface: {e}")
         
         # Initialize Modbus interface if enabled
-        modbus_config = settings.get_dict("hardware.modbus", default={})
+        modbus_config = settings.get("hardware", "modbus", default={})
         if modbus_config.get("enabled", False):
             try:
                 # Extract all modbus configuration parameters
