@@ -135,12 +135,18 @@ class TestController:
         """
         try:
             # Validate sequence
-            is_valid, errors = sequence.validate()
+            is_valid, errors, warnings = sequence.validate()
             if not is_valid:
                 logger.error("Cannot load invalid sequence:")
                 for error in errors:
                     logger.error(f"  - {error}")
                 return False
+            
+            # Log warnings if any
+            if warnings:
+                logger.warning("Sequence validation warnings:")
+                for warning in warnings:
+                    logger.warning(f"  - {warning}")
             
             self.current_sequence = sequence
             self.current_stage_index = 0
