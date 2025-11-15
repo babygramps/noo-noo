@@ -214,10 +214,14 @@ class MainWindow(QMainWindow):
     
     def init_threads(self) -> None:
         """Initialize background threads."""
-        # TODO: Initialize hardware interfaces and pass to threads
+        # Initialize hardware interfaces from configuration
+        widgetlords_iface, modbus_iface = self.init_hardware_interfaces()
         
-        # Create data acquisition thread
-        self.daq_thread = DataAcquisitionThread()
+        # Create data acquisition thread with hardware interfaces
+        self.daq_thread = DataAcquisitionThread(
+            widgetlords_interface=widgetlords_iface,
+            modbus_interface=modbus_iface
+        )
         self.daq_thread.new_data.connect(self.on_new_data)
         self.daq_thread.error_occurred.connect(self.on_daq_error)
         
@@ -230,6 +234,62 @@ class MainWindow(QMainWindow):
         self.daq_thread.start()
         
         logger.info("Background threads initialized")
+    
+    def init_hardware_interfaces(self):
+        """
+        Initialize hardware interfaces from configuration.
+        
+        Returns:
+            tuple: (widgetlords_interface, modbus_interface)
+        """
+        from ..config.settings import get_settings
+        from ..daq import WidgetLordsInterface, ModbusInterface
+        from pathlib import Path
+        
+        # Load hardware configuration
+        config_file = Path(__file__).parent.parent / "config" / "hardware_config.yaml"
+        settings = get_settings(str(config_file))
+        
+        widgetlords_iface = None
+        modbus_iface = None
+        
+        # Initialize WidgetLords interface if enabled
+        widgetlords_config = settings.get_dict("hardware.widgetlords", default={})
+        if widgetlords_config.get("enabled", False):
+            try:
+                widgetlords_iface = WidgetLordsInterface()
+                widgetlords_iface.connect()
+                logger.info("WidgetLords interface initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize WidgetLords interface: {e}")
+        
+        # Initialize Modbus interface if enabled
+        modbus_config = settings.get_dict("hardware.modbus", default={})
+        if modbus_config.get("enabled", False):
+            try:
+                # Extract all modbus configuration parameters
+                modbus_iface = ModbusInterface(
+                    port=modbus_config.get("port", "/dev/ttyUSB0"),
+                    slave_address=modbus_config.get("slave_address", 1),
+                    baudrate=modbus_config.get("baudrate", 9600),
+                    timeout=modbus_config.get("timeout", 1.0),
+                    parity=modbus_config.get("parity", "None"),
+                    databits=modbus_config.get("databits", 8),
+                    stopbits=modbus_config.get("stopbits", 1.0),
+                    byteorder=modbus_config.get("byteorder", "big"),
+                    wordorder=modbus_config.get("wordorder", "big"),
+                    close_port_after_each_call=modbus_config.get("close_port_after_each_call", False),
+                    debug=modbus_config.get("debug", False),
+                )
+                modbus_iface.connect()
+                logger.info(f"Modbus interface initialized on {modbus_config.get('port')}")
+            except Exception as e:
+                logger.error(f"Failed to initialize Modbus interface: {e}")
+                logger.error(f"  Port: {modbus_config.get('port')}")
+                logger.error(f"  Baudrate: {modbus_config.get('baudrate')}")
+                logger.error(f"  Slave Address: {modbus_config.get('slave_address')}")
+        
+        return widgetlords_iface, modbus_iface
     
     def on_new_data(self, data: dict) -> None:
         """

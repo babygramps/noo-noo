@@ -10,10 +10,17 @@ hardware:
   
   modbus:
     enabled: true
-    port: /dev/ttyUSB0  # Serial port for Modbus RTU
-    baudrate: 9600
-    slave_address: 1
-    timeout: 1.0  # seconds
+    port: /dev/ttyUSB0  # Serial port for Modbus RTU (Windows: COM3, COM4, etc.)
+    baudrate: 9600  # Communication speed (TLB4 supports up to 115200)
+    slave_address: 1  # Modbus device address (check TLB4 configuration)
+    timeout: 1.0  # Communication timeout in seconds
+    parity: None  # Parity: None, Even, Odd, Mark, Space
+    databits: 8  # Data bits per byte (7 or 8)
+    stopbits: 1  # Stop bits (1, 1.5, or 2)
+    byteorder: big  # Byte order: big or little (endianness)
+    wordorder: big  # Word order for 32-bit values: big or little
+    close_port_after_each_call: false  # Close port after each read
+    debug: false  # Enable debug logging for troubleshooting
 
 # Pressure Sensor Configuration (SPT25-20-V30D)
 pressure_sensor:

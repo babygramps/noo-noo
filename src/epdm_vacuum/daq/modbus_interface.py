@@ -39,26 +39,58 @@ class ModbusInterface(HardwareInterface):
         slave_address: int = 1,
         baudrate: int = 9600,
         timeout: float = 1.0,
+        parity: str = "None",
+        databits: int = 8,
+        stopbits: float = 1.0,
+        byteorder: str = "big",
+        wordorder: str = "big",
+        close_port_after_each_call: bool = False,
+        debug: bool = False,
     ):
         """
-        Initialize the Modbus interface.
+        Initialize the Modbus interface for TLB4 Load Cell Transmitter.
         
         Args:
-            port: Serial port path
-            slave_address: Modbus slave address
-            baudrate: Serial baud rate
+            port: Serial port path (e.g., COM3 on Windows, /dev/ttyUSB0 on Linux)
+            slave_address: Modbus slave address (1-247, typically 1)
+            baudrate: Serial baud rate (TLB4 supports up to 115200)
             timeout: Communication timeout in seconds
+            parity: Parity setting (None, Even, Odd, Mark, Space)
+            databits: Data bits per byte (7 or 8)
+            stopbits: Stop bits (1, 1.5, or 2)
+            byteorder: Byte order for multi-byte values ('big' or 'little')
+            wordorder: Word order for 32-bit values ('big' or 'little')
+            close_port_after_each_call: Close port after each communication
+            debug: Enable debug logging for troubleshooting
         """
         super().__init__()
         self.port = port
         self.slave_address = slave_address
         self.baudrate = baudrate
         self.timeout = timeout
+        self.parity = parity
+        self.databits = databits
+        self.stopbits = stopbits
+        self.byteorder = byteorder
+        self.wordorder = wordorder
+        self.close_port_after_each_call = close_port_after_each_call
+        self.debug = debug
         self.instrument = None
+        
+        # Log configuration for troubleshooting
+        if self.debug:
+            logger.info(f"ModbusInterface initialized with:")
+            logger.info(f"  Port: {self.port}")
+            logger.info(f"  Baudrate: {self.baudrate}")
+            logger.info(f"  Slave Address: {self.slave_address}")
+            logger.info(f"  Parity: {self.parity}")
+            logger.info(f"  Data Bits: {self.databits}")
+            logger.info(f"  Stop Bits: {self.stopbits}")
+            logger.info(f"  Timeout: {self.timeout}s")
         
     def connect(self) -> bool:
         """
-        Establish Modbus RTU connection.
+        Establish Modbus RTU connection to TLB4.
         
         Returns:
             bool: True if connection successful
@@ -67,21 +99,56 @@ class ModbusInterface(HardwareInterface):
             logger.info(f"Connecting to TLB4 on {self.port} at {self.baudrate} baud...")
             
             # TODO: Implement actual Modbus initialization
+            # Uncomment and install minimalmodbus: pip install minimalmodbus
+            #
             # import minimalmodbus
             # import serial
             #
+            # # Map parity string to serial constant
+            # parity_map = {
+            #     'None': serial.PARITY_NONE,
+            #     'Even': serial.PARITY_EVEN,
+            #     'Odd': serial.PARITY_ODD,
+            #     'Mark': serial.PARITY_MARK,
+            #     'Space': serial.PARITY_SPACE,
+            # }
+            # parity_setting = parity_map.get(self.parity, serial.PARITY_NONE)
+            #
+            # # Map stopbits to serial constant
+            # stopbits_map = {
+            #     1: serial.STOPBITS_ONE,
+            #     1.5: serial.STOPBITS_ONE_POINT_FIVE,
+            #     2: serial.STOPBITS_TWO,
+            # }
+            # stopbits_setting = stopbits_map.get(self.stopbits, serial.STOPBITS_ONE)
+            #
+            # # Create Modbus instrument
             # self.instrument = minimalmodbus.Instrument(
             #     port=self.port,
-            #     slaveaddress=self.slave_address
+            #     slaveaddress=self.slave_address,
+            #     mode=minimalmodbus.MODE_RTU,
+            #     close_port_after_each_call=self.close_port_after_each_call,
+            #     debug=self.debug
             # )
+            #
+            # # Configure serial port
             # self.instrument.serial.baudrate = self.baudrate
-            # self.instrument.serial.bytesize = 8
-            # self.instrument.serial.parity = serial.PARITY_NONE
-            # self.instrument.serial.stopbits = 1
+            # self.instrument.serial.bytesize = self.databits
+            # self.instrument.serial.parity = parity_setting
+            # self.instrument.serial.stopbits = stopbits_setting
             # self.instrument.serial.timeout = self.timeout
-            # self.instrument.mode = minimalmodbus.MODE_RTU
+            #
+            # # Test connection by reading status register
+            # try:
+            #     _ = self.instrument.read_register(self.REG_STATUS, functioncode=3)
+            #     logger.info(f"Successfully connected to TLB4 at address {self.slave_address}")
+            # except Exception as test_error:
+            #     logger.error(f"TLB4 not responding at address {self.slave_address}: {test_error}")
+            #     raise
             
             logger.warning("TODO: Modbus hardware initialization not implemented - using mock mode")
+            logger.info(f"Mock mode: Would connect to {self.port} at {self.baudrate} baud, "
+                       f"slave address {self.slave_address}, parity {self.parity}")
             self.initialized = True
             return True
             

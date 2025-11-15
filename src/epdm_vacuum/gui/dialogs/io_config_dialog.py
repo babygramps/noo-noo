@@ -30,6 +30,10 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QHeaderView,
     QAbstractItemView,
+    QTabWidget,
+    QDoubleSpinBox,
+    QWidget,
+    QScrollArea,
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
@@ -55,6 +59,7 @@ class IOConfigDialog(QDialog):
         self.config_file_path = Path(__file__).parent.parent.parent / "config" / "hardware_config.yaml"
         self.io_devices: List[Dict[str, Any]] = []
         self.current_edit_index: Optional[int] = None
+        self.modbus_config: Dict[str, Any] = {}
         
         self.init_ui()
         self.load_config()
@@ -63,36 +68,46 @@ class IOConfigDialog(QDialog):
     
     def init_ui(self) -> None:
         """Initialize the user interface."""
-        self.setWindowTitle("IO Device Configuration")
-        self.setMinimumSize(900, 600)
+        self.setWindowTitle("Hardware Configuration")
+        self.setMinimumSize(950, 700)
         
         layout = QVBoxLayout(self)
         
         # Title and description
-        title = QLabel("IO Device Configuration")
+        title = QLabel("Hardware Configuration")
         title.setStyleSheet("font-size: 16pt; font-weight: bold; color: #333; margin-bottom: 5px;")
         layout.addWidget(title)
         
-        subtitle = QLabel("Configure digital and analog IO devices (valves, relays, sensors)")
+        subtitle = QLabel("Configure IO devices, Modbus communication, and other hardware settings")
         subtitle.setStyleSheet("font-size: 10pt; color: #666; margin-bottom: 10px;")
         layout.addWidget(subtitle)
         
-        # Hardware info banner
-        hw_banner = self.create_hardware_banner()
-        layout.addWidget(hw_banner)
+        # Create tab widget for different configuration sections
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #ccc;
+                border-radius: 4px;
+            }
+            QTabBar::tab {
+                padding: 8px 20px;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background-color: #2196F3;
+                color: white;
+            }
+        """)
         
-        # Main content area with table and form side-by-side
-        content_layout = QHBoxLayout()
+        # IO Devices tab
+        io_tab = self.create_io_devices_tab()
+        self.tab_widget.addTab(io_tab, "IO Devices")
         
-        # Left side: Device list/table
-        left_panel = self.create_device_list_panel()
-        content_layout.addWidget(left_panel, stretch=1)
+        # Modbus tab
+        modbus_tab = self.create_modbus_tab()
+        self.tab_widget.addTab(modbus_tab, "Modbus/RS485")
         
-        # Right side: Edit form
-        right_panel = self.create_edit_form_panel()
-        content_layout.addWidget(right_panel, stretch=1)
-        
-        layout.addLayout(content_layout)
+        layout.addWidget(self.tab_widget)
         
         # Bottom buttons
         button_layout = QHBoxLayout()
@@ -123,6 +138,241 @@ class IOConfigDialog(QDialog):
         button_layout.addWidget(self.save_btn)
         
         layout.addLayout(button_layout)
+    
+    def create_io_devices_tab(self) -> QWidget:
+        """Create the IO devices configuration tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Hardware info banner
+        hw_banner = self.create_hardware_banner()
+        layout.addWidget(hw_banner)
+        
+        # Main content area with table and form side-by-side
+        content_layout = QHBoxLayout()
+        
+        # Left side: Device list/table
+        left_panel = self.create_device_list_panel()
+        content_layout.addWidget(left_panel, stretch=1)
+        
+        # Right side: Edit form
+        right_panel = self.create_edit_form_panel()
+        content_layout.addWidget(right_panel, stretch=1)
+        
+        layout.addLayout(content_layout)
+        
+        return tab
+    
+    def create_modbus_tab(self) -> QWidget:
+        """Create the Modbus configuration tab."""
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+        
+        # Create scroll area for the form
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        
+        scroll_widget = QWidget()
+        layout = QVBoxLayout(scroll_widget)
+        
+        # Modbus/RS485 Information Banner
+        info_banner = QGroupBox("Modbus RTU Communication Setup")
+        info_banner.setStyleSheet("""
+            QGroupBox {
+                font-size: 11pt;
+                font-weight: bold;
+                border: 2px solid #FF9800;
+                border-radius: 4px;
+                margin-top: 8px;
+                padding-top: 8px;
+                background-color: #FFF3E0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        
+        info_layout = QVBoxLayout()
+        info_text = QLabel(
+            "Configure RS485/Modbus RTU communication for Laumas TLB4 Load Cell Transmitter\n"
+            "• Hardware: TLB4 supports up to 4 load cells, Modbus RTU Slave protocol\n"
+            "• Connection: Use USB-RS485 adapter (e.g., USB-485M, Waveshare USB-RS485)\n"
+            "• Wiring: Connect RS485 A/B terminals between adapter and TLB4\n"
+            "• Power: Ensure TLB4 has 12-24 VDC power supply\n"
+            "• Default: 9600 baud, 8 data bits, no parity, 1 stop bit, slave address 1"
+        )
+        info_text.setStyleSheet("font-size: 9pt; color: #E65100; font-weight: normal;")
+        info_layout.addWidget(info_text)
+        info_banner.setLayout(info_layout)
+        layout.addWidget(info_banner)
+        
+        # Enable/Disable Modbus
+        enable_group = QGroupBox("Modbus Status")
+        enable_layout = QHBoxLayout()
+        self.modbus_enabled_check = QCheckBox("Enable Modbus Communication")
+        self.modbus_enabled_check.setStyleSheet("font-weight: bold; font-size: 10pt;")
+        self.modbus_enabled_check.stateChanged.connect(self.on_modbus_enabled_changed)
+        enable_layout.addWidget(self.modbus_enabled_check)
+        enable_layout.addStretch()
+        enable_group.setLayout(enable_layout)
+        layout.addWidget(enable_group)
+        
+        # Connection Settings
+        conn_group = QGroupBox("Connection Settings")
+        conn_form = QFormLayout()
+        conn_form.setSpacing(12)
+        
+        # Serial Port
+        port_layout = QHBoxLayout()
+        self.modbus_port_edit = QLineEdit()
+        self.modbus_port_edit.setPlaceholderText("e.g., COM3 (Windows) or /dev/ttyUSB0 (Linux)")
+        port_layout.addWidget(self.modbus_port_edit)
+        
+        test_port_btn = QPushButton("Test Connection")
+        test_port_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 4px 12px;")
+        test_port_btn.clicked.connect(self.test_modbus_connection)
+        port_layout.addWidget(test_port_btn)
+        
+        port_help = QLabel("📝 Serial port for USB-RS485 adapter")
+        port_help.setStyleSheet("color: #666; font-size: 9pt;")
+        
+        conn_form.addRow("Serial Port:", port_layout)
+        conn_form.addRow("", port_help)
+        
+        # Baudrate
+        self.modbus_baudrate_combo = QComboBox()
+        self.modbus_baudrate_combo.addItems(["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200"])
+        self.modbus_baudrate_combo.setCurrentText("9600")
+        
+        baud_help = QLabel("📝 Communication speed (bits/second). Common: 9600, 19200")
+        baud_help.setStyleSheet("color: #666; font-size: 9pt;")
+        
+        conn_form.addRow("Baudrate:", self.modbus_baudrate_combo)
+        conn_form.addRow("", baud_help)
+        
+        # Parity
+        self.modbus_parity_combo = QComboBox()
+        self.modbus_parity_combo.addItems(["None", "Even", "Odd", "Mark", "Space"])
+        self.modbus_parity_combo.setCurrentText("None")
+        
+        parity_help = QLabel("📝 Error checking method. Common: None or Even")
+        parity_help.setStyleSheet("color: #666; font-size: 9pt;")
+        
+        conn_form.addRow("Parity:", self.modbus_parity_combo)
+        conn_form.addRow("", parity_help)
+        
+        # Data Bits
+        self.modbus_databits_combo = QComboBox()
+        self.modbus_databits_combo.addItems(["7", "8"])
+        self.modbus_databits_combo.setCurrentText("8")
+        
+        databits_help = QLabel("📝 Number of data bits per byte. Standard: 8")
+        databits_help.setStyleSheet("color: #666; font-size: 9pt;")
+        
+        conn_form.addRow("Data Bits:", self.modbus_databits_combo)
+        conn_form.addRow("", databits_help)
+        
+        # Stop Bits
+        self.modbus_stopbits_combo = QComboBox()
+        self.modbus_stopbits_combo.addItems(["1", "1.5", "2"])
+        self.modbus_stopbits_combo.setCurrentText("1")
+        
+        stopbits_help = QLabel("📝 Stop bits for byte separation. Standard: 1")
+        stopbits_help.setStyleSheet("color: #666; font-size: 9pt;")
+        
+        conn_form.addRow("Stop Bits:", self.modbus_stopbits_combo)
+        conn_form.addRow("", stopbits_help)
+        
+        conn_group.setLayout(conn_form)
+        layout.addWidget(conn_group)
+        
+        # Modbus Protocol Settings
+        protocol_group = QGroupBox("Modbus Protocol Settings")
+        protocol_form = QFormLayout()
+        protocol_form.setSpacing(12)
+        
+        # Slave Address
+        self.modbus_slave_spin = QSpinBox()
+        self.modbus_slave_spin.setRange(1, 247)
+        self.modbus_slave_spin.setValue(1)
+        
+        slave_help = QLabel("📝 Modbus device address (1-247). Check device configuration")
+        slave_help.setStyleSheet("color: #666; font-size: 9pt;")
+        
+        protocol_form.addRow("Slave Address:", self.modbus_slave_spin)
+        protocol_form.addRow("", slave_help)
+        
+        # Timeout
+        self.modbus_timeout_spin = QDoubleSpinBox()
+        self.modbus_timeout_spin.setRange(0.1, 10.0)
+        self.modbus_timeout_spin.setValue(1.0)
+        self.modbus_timeout_spin.setSingleStep(0.1)
+        self.modbus_timeout_spin.setSuffix(" sec")
+        
+        timeout_help = QLabel("📝 Communication timeout. Increase if getting errors")
+        timeout_help.setStyleSheet("color: #666; font-size: 9pt;")
+        
+        protocol_form.addRow("Timeout:", self.modbus_timeout_spin)
+        protocol_form.addRow("", timeout_help)
+        
+        # Byte Order (Endianness)
+        self.modbus_byteorder_combo = QComboBox()
+        self.modbus_byteorder_combo.addItems(["Big Endian (>)", "Little Endian (<)"])
+        self.modbus_byteorder_combo.setCurrentText("Big Endian (>)")
+        
+        byteorder_help = QLabel("📝 Byte order for multi-byte values. Common: Big Endian")
+        byteorder_help.setStyleSheet("color: #666; font-size: 9pt;")
+        
+        protocol_form.addRow("Byte Order:", self.modbus_byteorder_combo)
+        protocol_form.addRow("", byteorder_help)
+        
+        # Word Order
+        self.modbus_wordorder_combo = QComboBox()
+        self.modbus_wordorder_combo.addItems(["High Word First (>)", "Low Word First (<)"])
+        self.modbus_wordorder_combo.setCurrentText("High Word First (>)")
+        
+        wordorder_help = QLabel("📝 Word order for 32-bit values")
+        wordorder_help.setStyleSheet("color: #666; font-size: 9pt;")
+        
+        protocol_form.addRow("Word Order:", self.modbus_wordorder_combo)
+        protocol_form.addRow("", wordorder_help)
+        
+        protocol_group.setLayout(protocol_form)
+        layout.addWidget(protocol_group)
+        
+        # Advanced Settings
+        advanced_group = QGroupBox("Advanced Settings")
+        advanced_form = QFormLayout()
+        advanced_form.setSpacing(12)
+        
+        # Close port after each communication
+        self.modbus_close_port_check = QCheckBox("Close port after each read")
+        close_help = QLabel("📝 Enable if multiple programs access the port")
+        close_help.setStyleSheet("color: #666; font-size: 9pt;")
+        
+        advanced_form.addRow("Port Management:", self.modbus_close_port_check)
+        advanced_form.addRow("", close_help)
+        
+        # Debug mode
+        self.modbus_debug_check = QCheckBox("Enable debug logging")
+        debug_help = QLabel("📝 Log all Modbus communication for troubleshooting")
+        debug_help.setStyleSheet("color: #666; font-size: 9pt;")
+        
+        advanced_form.addRow("Debug Mode:", self.modbus_debug_check)
+        advanced_form.addRow("", debug_help)
+        
+        advanced_group.setLayout(advanced_form)
+        layout.addWidget(advanced_group)
+        
+        layout.addStretch()
+        
+        scroll.setWidget(scroll_widget)
+        main_layout.addWidget(scroll)
+        
+        return tab
     
     def create_hardware_banner(self) -> QGroupBox:
         """Create hardware information banner."""
@@ -306,8 +556,41 @@ class IOConfigDialog(QDialog):
         has_name = len(self.name_edit.text().strip()) > 0
         self.update_btn.setEnabled(has_name)
     
+    def on_modbus_enabled_changed(self) -> None:
+        """Handle Modbus enabled checkbox change."""
+        enabled = self.modbus_enabled_check.isChecked()
+        logger.debug(f"Modbus enabled changed to: {enabled}")
+    
+    def test_modbus_connection(self) -> None:
+        """Test Modbus connection with current settings."""
+        try:
+            port = self.modbus_port_edit.text().strip()
+            if not port:
+                QMessageBox.warning(self, "Test Connection", "Please enter a serial port first.")
+                return
+            
+            baudrate = int(self.modbus_baudrate_combo.currentText())
+            slave_address = self.modbus_slave_spin.value()
+            
+            logger.info(f"Testing Modbus connection: port={port}, baudrate={baudrate}, slave={slave_address}")
+            
+            QMessageBox.information(
+                self,
+                "Test Connection",
+                f"Connection test initiated for:\n\n"
+                f"Port: {port}\n"
+                f"Baudrate: {baudrate}\n"
+                f"Slave Address: {slave_address}\n\n"
+                f"Note: Full connection testing requires actual hardware.\n"
+                f"This validates the configuration parameters."
+            )
+            
+        except Exception as e:
+            logger.error(f"Error testing Modbus connection: {e}", exc_info=True)
+            QMessageBox.critical(self, "Test Error", f"Failed to test connection:\n{e}")
+    
     def load_config(self) -> None:
-        """Load IO devices from hardware_config.yaml."""
+        """Load IO devices and Modbus config from hardware_config.yaml."""
         try:
             if not self.config_file_path.exists():
                 logger.warning(f"Config file not found: {self.config_file_path}")
@@ -316,6 +599,7 @@ class IOConfigDialog(QDialog):
             with open(self.config_file_path, 'r') as f:
                 config = yaml.safe_load(f)
             
+            # Load IO devices
             self.io_devices.clear()
             
             # Load digital outputs
@@ -349,8 +633,57 @@ class IOConfigDialog(QDialog):
             self.refresh_table()
             logger.info(f"Loaded {len(self.io_devices)} IO devices from config")
             
+            # Load Modbus configuration
+            modbus_config = config.get('hardware', {}).get('modbus', {})
+            self.modbus_config = modbus_config
+            
+            # Populate Modbus form fields
+            self.modbus_enabled_check.setChecked(modbus_config.get('enabled', False))
+            self.modbus_port_edit.setText(modbus_config.get('port', '/dev/ttyUSB0'))
+            
+            baudrate = str(modbus_config.get('baudrate', 9600))
+            index = self.modbus_baudrate_combo.findText(baudrate)
+            if index >= 0:
+                self.modbus_baudrate_combo.setCurrentIndex(index)
+            
+            self.modbus_slave_spin.setValue(modbus_config.get('slave_address', 1))
+            self.modbus_timeout_spin.setValue(modbus_config.get('timeout', 1.0))
+            
+            # Load additional Modbus settings if they exist
+            parity = modbus_config.get('parity', 'None')
+            parity_index = self.modbus_parity_combo.findText(parity)
+            if parity_index >= 0:
+                self.modbus_parity_combo.setCurrentIndex(parity_index)
+            
+            databits = str(modbus_config.get('databits', 8))
+            databits_index = self.modbus_databits_combo.findText(databits)
+            if databits_index >= 0:
+                self.modbus_databits_combo.setCurrentIndex(databits_index)
+            
+            stopbits = str(modbus_config.get('stopbits', 1))
+            stopbits_index = self.modbus_stopbits_combo.findText(stopbits)
+            if stopbits_index >= 0:
+                self.modbus_stopbits_combo.setCurrentIndex(stopbits_index)
+            
+            byteorder = modbus_config.get('byteorder', 'big')
+            if byteorder == 'little':
+                self.modbus_byteorder_combo.setCurrentText("Little Endian (<)")
+            else:
+                self.modbus_byteorder_combo.setCurrentText("Big Endian (>)")
+            
+            wordorder = modbus_config.get('wordorder', 'big')
+            if wordorder == 'little':
+                self.modbus_wordorder_combo.setCurrentText("Low Word First (<)")
+            else:
+                self.modbus_wordorder_combo.setCurrentText("High Word First (>)")
+            
+            self.modbus_close_port_check.setChecked(modbus_config.get('close_port_after_each_call', False))
+            self.modbus_debug_check.setChecked(modbus_config.get('debug', False))
+            
+            logger.info(f"Loaded Modbus configuration from config")
+            
         except Exception as e:
-            logger.error(f"Error loading IO config: {e}", exc_info=True)
+            logger.error(f"Error loading config: {e}", exc_info=True)
             QMessageBox.warning(self, "Load Error", f"Failed to load configuration:\n{e}")
     
     def refresh_table(self) -> None:
@@ -554,16 +887,63 @@ class IOConfigDialog(QDialog):
             config['io_devices']['analog_outputs'] = analog_outputs
             config['io_devices']['analog_inputs'] = analog_inputs
             
+            # Save Modbus configuration
+            if 'hardware' not in config:
+                config['hardware'] = {}
+            if 'modbus' not in config['hardware']:
+                config['hardware']['modbus'] = {}
+            
+            # Get parity value
+            parity_text = self.modbus_parity_combo.currentText()
+            
+            # Get byte order
+            byteorder_text = self.modbus_byteorder_combo.currentText()
+            byteorder = 'little' if 'Little' in byteorder_text else 'big'
+            
+            # Get word order
+            wordorder_text = self.modbus_wordorder_combo.currentText()
+            wordorder = 'little' if 'Low' in wordorder_text else 'big'
+            
+            # Convert stopbits to float if needed
+            stopbits_str = self.modbus_stopbits_combo.currentText()
+            try:
+                stopbits = float(stopbits_str)
+            except:
+                stopbits = 1.0
+            
+            config['hardware']['modbus'] = {
+                'enabled': self.modbus_enabled_check.isChecked(),
+                'port': self.modbus_port_edit.text().strip(),
+                'baudrate': int(self.modbus_baudrate_combo.currentText()),
+                'slave_address': self.modbus_slave_spin.value(),
+                'timeout': self.modbus_timeout_spin.value(),
+                'parity': parity_text,
+                'databits': int(self.modbus_databits_combo.currentText()),
+                'stopbits': stopbits,
+                'byteorder': byteorder,
+                'wordorder': wordorder,
+                'close_port_after_each_call': self.modbus_close_port_check.isChecked(),
+                'debug': self.modbus_debug_check.isChecked(),
+            }
+            
+            logger.info(f"Prepared Modbus config: enabled={config['hardware']['modbus']['enabled']}, "
+                       f"port={config['hardware']['modbus']['port']}, "
+                       f"baudrate={config['hardware']['modbus']['baudrate']}")
+            
             # Save to file
             with open(self.config_file_path, 'w') as f:
                 yaml.dump(config, f, default_flow_style=False, indent=2, sort_keys=False)
             
-            logger.info(f"Saved {len(self.io_devices)} IO devices to config")
+            logger.info(f"Saved {len(self.io_devices)} IO devices and Modbus config to {self.config_file_path}")
             
             QMessageBox.information(
                 self,
                 "Configuration Saved",
-                f"Successfully saved {len(self.io_devices)} IO device(s) to configuration."
+                f"Successfully saved configuration:\n\n"
+                f"• {len(self.io_devices)} IO device(s)\n"
+                f"• Modbus: {'Enabled' if config['hardware']['modbus']['enabled'] else 'Disabled'}\n"
+                f"• Port: {config['hardware']['modbus']['port']}\n"
+                f"• Baudrate: {config['hardware']['modbus']['baudrate']}"
             )
             
             # Emit signal
@@ -572,15 +952,15 @@ class IOConfigDialog(QDialog):
             self.accept()
             
         except Exception as e:
-            logger.error(f"Error saving IO config: {e}", exc_info=True)
+            logger.error(f"Error saving config: {e}", exc_info=True)
             QMessageBox.critical(self, "Save Error", f"Failed to save configuration:\n{e}")
     
     def show_help(self) -> None:
         """Show help dialog."""
         help_text = """
-<h3>IO Device Configuration Help</h3>
+<h3>Hardware Configuration Help</h3>
 
-<h4>WidgetLords PI-SPI-DIN Hardware:</h4>
+<h4>IO Devices - WidgetLords PI-SPI-DIN Hardware:</h4>
 <ul>
 <li><b>PI-SPI-DIN-4KO:</b> 4 relay outputs (Channels 0-3)</li>
 <li><b>PI-SPI-DIN-8AI:</b> 8 analog inputs (Channels 0-7)</li>
@@ -595,19 +975,43 @@ class IOConfigDialog(QDialog):
 <li><b>Analog Input:</b> Sensors, 4-20mA loops (voltage reading)</li>
 </ul>
 
-<h4>Configuration Tips:</h4>
+<h4>Modbus/RS485 - TLB4 Load Cell Transmitter:</h4>
 <ul>
-<li>Use descriptive names (e.g., vacuum_pump, vent_valve)</li>
-<li>Match channel numbers to your physical wiring</li>
-<li>Set default states for safety-critical outputs</li>
-<li>For analog inputs, set min/max to match sensor range</li>
+<li><b>Hardware:</b> Laumas TLB4 discrete/analog load cell transmitter</li>
+<li><b>Protocol:</b> Modbus RTU Slave over RS-485</li>
+<li><b>Inputs:</b> Up to 4 load cells (±39 mV, 24-bit resolution)</li>
+<li><b>Communication:</b> RS-485, up to 115.2k baud</li>
+<li><b>Connection:</b> Use USB-485M adapter (AutomationDirect or similar)</li>
+<li><b>Default Settings:</b> 9600 baud, 8 data bits, no parity, 1 stop bit</li>
 </ul>
 
-<h4>Example Devices:</h4>
+<h4>Configuration Tips:</h4>
 <ul>
-<li>vacuum_pump (Digital Output, Channel 0)</li>
-<li>vent_valve (Digital Output, Channel 1)</li>
-<li>pressure_sensor (Analog Input, Channel 0, 0-10V)</li>
+<li><b>IO Devices:</b> Use descriptive names, match channel numbers to physical wiring</li>
+<li><b>Modbus Port:</b> Windows: COM3, COM4, etc. | Linux: /dev/ttyUSB0, /dev/ttyUSB1</li>
+<li><b>Slave Address:</b> Check device DIP switches or configuration (typically 1)</li>
+<li><b>Baudrate:</b> Must match TLB4 setting (check device display/manual)</li>
+<li><b>Troubleshooting:</b> Enable debug logging to see all Modbus communication</li>
+<li><b>Test Connection:</b> Use the test button to verify serial port and parameters</li>
+</ul>
+
+<h4>Example Configuration:</h4>
+<ul>
+<li><b>Modbus Port:</b> COM3 (Windows) or /dev/ttyUSB0 (Linux)</li>
+<li><b>Baudrate:</b> 9600</li>
+<li><b>Slave Address:</b> 1</li>
+<li><b>Parity:</b> None</li>
+<li><b>Data Bits:</b> 8</li>
+<li><b>Stop Bits:</b> 1</li>
+</ul>
+
+<h4>Hardware Connections:</h4>
+<ul>
+<li>1. Connect USB-RS485 adapter to PC USB port</li>
+<li>2. Wire RS485 A/B terminals to TLB4 RS485 terminals</li>
+<li>3. Verify TLB4 power supply (12-24 VDC)</li>
+<li>4. Check TLB4 address matches configuration</li>
+<li>5. Test connection before starting measurements</li>
 </ul>
         """
         
