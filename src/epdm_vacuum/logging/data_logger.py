@@ -78,6 +78,7 @@ class DataLogger:
         self,
         data: List[Dict[str, Any]],
         filename: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Path:
         """
         Export data to CSV file.
@@ -85,6 +86,7 @@ class DataLogger:
         Args:
             data: List of data dictionaries
             filename: Custom filename (optional)
+            metadata: Optional metadata to save in separate JSON file
         
         Returns:
             Path: Path to created CSV file
@@ -101,13 +103,24 @@ class DataLogger:
         filepath = self.output_dir / filename
         
         try:
+            # Save metadata to separate JSON file if provided
+            if metadata or self.session_metadata:
+                metadata_to_save = metadata or self.session_metadata
+                metadata_path = Path(filepath).with_suffix('.json')
+                try:
+                    with open(metadata_path, 'w') as meta_file:
+                        json.dump(metadata_to_save, meta_file, indent=2)
+                    logger.info(f"Saved metadata to: {metadata_path}")
+                except Exception as e:
+                    logger.error(f"Failed to save metadata: {e}", exc_info=True)
+            
             # Get all unique keys from data
             fieldnames = set()
             for row in data:
                 fieldnames.update(row.keys())
             fieldnames = sorted(fieldnames)
             
-            # Write CSV
+            # Write CSV (clean, no comments)
             with open(filepath, "w", newline="") as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()

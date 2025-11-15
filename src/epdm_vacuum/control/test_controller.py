@@ -842,21 +842,26 @@ class TestController:
         
         try:
             import csv
+            import json
             
             # Ensure directory exists
             csv_file_path = Path(self.csv_path)
             csv_file_path.parent.mkdir(parents=True, exist_ok=True)
             
-            # Open CSV file for writing
+            # Save metadata to separate JSON file
+            if self.test_metadata:
+                metadata_path = csv_file_path.with_suffix('.json')
+                try:
+                    with open(metadata_path, 'w') as meta_file:
+                        json.dump(self.test_metadata, meta_file, indent=2)
+                    logger.info(f"Saved test metadata to: {metadata_path}")
+                except Exception as e:
+                    logger.error(f"Failed to save metadata file: {e}", exc_info=True)
+                    # Continue anyway - metadata save failure shouldn't stop the test
+            
+            # Open CSV file for writing (clean, no comments)
             self.csv_file = open(self.csv_path, 'w', newline='')
             self.csv_writer = csv.writer(self.csv_file)
-            
-            # Write metadata as comments
-            if self.test_metadata:
-                self.csv_file.write("# Test Metadata\n")
-                for key, value in self.test_metadata.items():
-                    self.csv_file.write(f"# {key}: {value}\n")
-                self.csv_file.write("#\n")
             
             # CSV header will be written when first data point arrives
             self.csv_header_written = False

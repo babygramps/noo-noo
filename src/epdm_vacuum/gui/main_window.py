@@ -519,8 +519,21 @@ class MainWindow(QMainWindow):
                 )
                 return
             
-            # Save to CSV using data logger
-            filepath = self.data_logger.log_to_csv(buffer_data, filename=filename)
+            # Create basic metadata for manual save
+            from datetime import datetime
+            manual_save_metadata = {
+                "save_type": "manual_save",
+                "save_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "data_points": len(buffer_data),
+                "note": "Data manually saved from buffer"
+            }
+            
+            # Save to CSV using data logger (with metadata in separate JSON)
+            filepath = self.data_logger.log_to_csv(
+                buffer_data, 
+                filename=filename,
+                metadata=manual_save_metadata
+            )
             
             if filepath:
                 QMessageBox.information(
