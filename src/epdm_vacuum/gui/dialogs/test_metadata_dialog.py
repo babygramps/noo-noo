@@ -351,4 +351,54 @@ class TestMetadataDialog(QDialog):
             str: Path to save data file
         """
         return self.save_path
+    
+    def populate_from_metadata(self, metadata: Dict[str, Any]) -> None:
+        """
+        Populate dialog fields from existing metadata.
+        
+        Args:
+            metadata: Dictionary containing metadata to populate
+        """
+        # Basic info
+        if "test_name" in metadata:
+            self.test_name_edit.setText(metadata["test_name"])
+        
+        if "operator" in metadata:
+            self.operator_edit.setText(metadata["operator"])
+        
+        if "date" in metadata:
+            # Parse date/time string
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(metadata["date"], "%Y-%m-%d %H:%M:%S")
+                self.date_edit.setDate(QDate(dt.year, dt.month, dt.day))
+                self.time_edit.setTime(QTime(dt.hour, dt.minute, dt.second))
+            except Exception as e:
+                logger.warning(f"Failed to parse date '{metadata['date']}': {e}")
+        
+        # Material info
+        if "material" in metadata:
+            self.material_edit.setText(metadata["material"])
+        
+        if "sample_id" in metadata:
+            self.sample_id_edit.setText(metadata["sample_id"])
+        
+        if "batch_lot" in metadata:
+            self.batch_edit.setText(metadata["batch_lot"])
+        
+        # Test targets
+        if "target_vacuum_bar" in metadata:
+            self.target_vacuum_spin.setValue(float(metadata["target_vacuum_bar"]))
+        
+        if "target_force_kg" in metadata:
+            self.target_force_spin.setValue(float(metadata["target_force_kg"]))
+        
+        if "target_time_seconds" in metadata:
+            self.target_time_spin.setValue(int(metadata["target_time_seconds"]))
+        
+        # Notes
+        if "notes" in metadata:
+            self.notes_edit.setPlainText(metadata["notes"])
+        
+        logger.info("Populated metadata dialog from existing metadata")
 

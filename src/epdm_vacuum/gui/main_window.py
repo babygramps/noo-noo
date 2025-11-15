@@ -60,6 +60,10 @@ class MainWindow(QMainWindow):
         self.data_buffer = DataBuffer(max_size=10000)
         self.data_logger = DataLogger(output_dir="data")
         
+        # Track current test metadata and CSV path
+        self.current_test_metadata: Optional[dict] = None
+        self.current_csv_path: Optional[str] = None
+        
         self.init_ui()
         self.init_sequence_manager()
         self.init_threads()
@@ -127,6 +131,11 @@ class MainWindow(QMainWindow):
         save_action.setShortcut("Ctrl+S")
         save_action.triggered.connect(self.on_save_data)
         file_menu.addAction(save_action)
+        
+        edit_metadata_action = QAction("Edit &Metadata", self)
+        edit_metadata_action.setShortcut("Ctrl+M")
+        edit_metadata_action.triggered.connect(self.on_edit_metadata)
+        file_menu.addAction(edit_metadata_action)
         
         file_menu.addSeparator()
         
@@ -382,6 +391,10 @@ class MainWindow(QMainWindow):
         logger.info(f"Test metadata collected: {test_metadata}")
         logger.info(f"Data will be saved to: {csv_path}")
         
+        # Store current test info for later editing
+        self.current_test_metadata = test_metadata
+        self.current_csv_path = csv_path
+        
         # Clear data buffer for new test
         self.data_buffer.clear()
         
@@ -469,6 +482,108 @@ class MainWindow(QMainWindow):
         
         # TODO: Implement tare via hardware interface
         logger.warning("TODO: Tare function not implemented")
+    
+    def on_edit_metadata(self) -> None:
+        """Handle edit metadata request."""
+        logger.info("Opening metadata editor...")
+        
+        # Check if we have a current test or ask user to browse for a metadata file
+        if not self.current_test_metadata and not self.current_csv_path:
+            # No current test - ask if they want to browse for an existing file or create new
+            reply = QMessageBox.question(
+                self,
+                "Edit Metadata",
+                "No current test metadata found.\n\n"
+                "Would you like to browse for an existing metadata file to edit?\n\n"
+                "Click 'Yes' to browse, 'No' to create new metadata.",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+            )
+            
+            if reply == QMessageBox.Cancel:
+                return
+            elif reply == QMessageBox.Yes:
+                # Browse for existing metadata file
+                from PyQt5.QtWidgets import QFileDialog
+                json_file, _ = QFileDialog.getOpenFileName(
+                    self,
+                    "Select Metadata File",
+                    "data/",
+                    "JSON Files (*.json);;All Files (*.*)"
+                )
+                
+                if not json_file:
+                    return
+                
+                # Load existing metadata
+                import json
+                try:
+                    with open(json_file, 'r') as f:
+                        self.current_test_metadata = json.load(f)
+                    # Derive CSV path from JSON path
+                    from pathlib import Path
+                    self.current_csv_path = str(Path(json_file).with_suffix('.csv'))
+                    logger.info(f"Loaded metadata from: {json_file}")
+                except Exception as e:
+                    QMessageBox.critical(
+                        self,
+                        "Load Error",
+                        f"Failed to load metadata file:\n{e}"
+                    )
+                    return
+            else:
+                # Create new metadata
+                self.current_test_metadata = {}
+                self.current_csv_path = None
+        
+        # Create metadata dialog
+        metadata_dialog = TestMetadataDialog(self)
+        
+        # Pre-populate with existing metadata if available
+        if self.current_test_metadata:
+            metadata_dialog.populate_from_metadata(self.current_test_metadata)
+        
+        # Set the save path if we have one
+        if self.current_csv_path:
+            metadata_dialog.save_path = self.current_csv_path
+            metadata_dialog.file_path_label.setText(self.current_csv_path)
+        
+        # Show dialog
+        result = metadata_dialog.exec_()
+        
+        if result == QDialog.Accepted:
+            # Get updated metadata
+            updated_metadata = metadata_dialog.get_metadata()
+            updated_csv_path = metadata_dialog.get_save_path()
+            
+            # Update stored values
+            self.current_test_metadata = updated_metadata
+            self.current_csv_path = updated_csv_path
+            
+            # Save metadata to JSON file
+            from pathlib import Path
+            import json
+            
+            metadata_path = Path(updated_csv_path).with_suffix('.json')
+            try:
+                with open(metadata_path, 'w') as f:
+                    json.dump(updated_metadata, f, indent=2)
+                
+                QMessageBox.information(
+                    self,
+                    "Metadata Saved",
+                    f"Metadata successfully saved to:\n{metadata_path}"
+                )
+                self.statusBar().showMessage(f"Metadata saved to {metadata_path}", 5000)
+                logger.info(f"Metadata updated and saved to: {metadata_path}")
+                
+            except Exception as e:
+                error_msg = f"Failed to save metadata: {e}"
+                logger.error(error_msg, exc_info=True)
+                QMessageBox.critical(
+                    self,
+                    "Save Error",
+                    error_msg
+                )
     
     def on_save_data(self) -> None:
         """Handle save data request - save current buffer to CSV."""
