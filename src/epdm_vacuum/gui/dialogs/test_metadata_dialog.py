@@ -27,8 +27,10 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QLabel,
     QMessageBox,
+    QDateEdit,
+    QTimeEdit,
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QDate, QTime
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +90,18 @@ class TestMetadataDialog(QDialog):
         self.operator_edit.setPlaceholderText("e.g., John Smith")
         form.addRow("Operator*:", self.operator_edit)
         
-        # Date (auto-filled, read-only)
-        self.date_edit = QLineEdit()
-        self.date_edit.setReadOnly(True)
-        form.addRow("Date:", self.date_edit)
+        # Date picker
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.date_edit.setDate(QDate.currentDate())
+        form.addRow("Date*:", self.date_edit)
+        
+        # Time picker
+        self.time_edit = QTimeEdit()
+        self.time_edit.setDisplayFormat("HH:mm:ss")
+        self.time_edit.setTime(QTime.currentTime())
+        form.addRow("Time*:", self.time_edit)
         
         # Test ID (auto-generated)
         self.test_id_edit = QLineEdit()
@@ -214,9 +224,8 @@ class TestMetadataDialog(QDialog):
     
     def set_default_values(self) -> None:
         """Set default values for fields."""
-        # Set current date/time
+        # Date and time are already set to current in create_basic_info_section
         now = datetime.now()
-        self.date_edit.setText(now.strftime("%Y-%m-%d %H:%M:%S"))
         
         # Generate test ID from timestamp
         test_id = now.strftime("TEST_%Y%m%d_%H%M%S")
@@ -293,11 +302,16 @@ class TestMetadataDialog(QDialog):
         Returns:
             Dict containing all metadata
         """
+        # Combine date and time
+        date_str = self.date_edit.date().toString("yyyy-MM-dd")
+        time_str = self.time_edit.time().toString("HH:mm:ss")
+        datetime_str = f"{date_str} {time_str}"
+        
         metadata = {
             # Basic info
             "test_name": self.test_name_edit.text().strip(),
             "operator": self.operator_edit.text().strip(),
-            "date": self.date_edit.text(),
+            "date": datetime_str,
             "test_id": self.test_id_edit.text(),
             
             # Material info
