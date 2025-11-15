@@ -84,6 +84,9 @@ class TestController:
         self.csv_writer = None
         self.csv_header_written = False
         
+        # Track IO device states for logging
+        self.io_device_states: Dict[str, bool] = {}
+        
         # Callbacks for status updates
         self.status_callback: Optional[Callable[[str], None]] = None
         self.stage_callback: Optional[Callable[[int, int, TestStage], None]] = None
@@ -459,6 +462,12 @@ class TestController:
                     "test_state": self.state.value,
                 }
                 
+                # Add IO device states (valve positions, etc.)
+                for device_name, state in self.io_device_states.items():
+                    # Create column name like "valve_vent_valve" or "io_pump_relay"
+                    column_name = f"io_{device_name}"
+                    data_point[column_name] = "OPEN" if state else "CLOSED"
+                
                 # Add hardware readings if available
                 try:
                     if self.widgetlords:
@@ -639,11 +648,15 @@ class TestController:
             
             # Execute based on action type
             if action.action_type == IOActionType.DIGITAL_OUTPUT:
-                self._set_digital_output(action.device_name, bool(action.value))
+                state = bool(action.value)
+                self._set_digital_output(action.device_name, state)
+                
+                # Track IO state
+                self.io_device_states[action.device_name] = state
                 
                 # Notify IO callback
                 if self.io_callback:
-                    self.io_callback(action.device_name, bool(action.value))
+                    self.io_callback(action.device_name, state)
             
             elif action.action_type == IOActionType.ANALOG_OUTPUT:
                 self._set_analog_output(action.device_name, float(action.value))
@@ -651,6 +664,7 @@ class TestController:
             elif action.action_type == IOActionType.PULSE:
                 # Turn on
                 self._set_digital_output(action.device_name, True)
+                self.io_device_states[action.device_name] = True
                 if self.io_callback:
                     self.io_callback(action.device_name, True)
                 
@@ -660,6 +674,7 @@ class TestController:
                 
                 # Turn off
                 self._set_digital_output(action.device_name, False)
+                self.io_device_states[action.device_name] = False
                 if self.io_callback:
                     self.io_callback(action.device_name, False)
             

@@ -134,6 +134,8 @@ class DataAcquisitionThread(QThread):
         combined_data = {
             "timestamp": timestamp,
             "datetime": datetime_str,
+            "stage_name": "N/A",  # Stage info not available in DAQ thread (only during test execution)
+            "test_state": "monitoring",  # DAQ is continuous monitoring
             **wl_data,
             **modbus_data,
         }
