@@ -83,6 +83,7 @@ class TestMetadataDialog(QDialog):
         # Test name
         self.test_name_edit = QLineEdit()
         self.test_name_edit.setPlaceholderText("e.g., EPDM_Seal_Test_001")
+        self.test_name_edit.textChanged.connect(self.update_test_id)
         form.addRow("Test Name*:", self.test_name_edit)
         
         # Operator name
@@ -95,17 +96,20 @@ class TestMetadataDialog(QDialog):
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setDisplayFormat("yyyy-MM-dd")
         self.date_edit.setDate(QDate.currentDate())
+        self.date_edit.dateChanged.connect(self.update_test_id)
         form.addRow("Date*:", self.date_edit)
         
         # Time picker
         self.time_edit = QTimeEdit()
         self.time_edit.setDisplayFormat("HH:mm:ss")
         self.time_edit.setTime(QTime.currentTime())
+        self.time_edit.timeChanged.connect(self.update_test_id)
         form.addRow("Time*:", self.time_edit)
         
-        # Test ID (auto-generated)
+        # Test ID (auto-generated from test name + date + time)
         self.test_id_edit = QLineEdit()
         self.test_id_edit.setReadOnly(True)
+        self.test_id_edit.setStyleSheet("background-color: #f0f0f0;")
         form.addRow("Test ID:", self.test_id_edit)
         
         group.setLayout(form)
@@ -225,19 +229,48 @@ class TestMetadataDialog(QDialog):
     def set_default_values(self) -> None:
         """Set default values for fields."""
         # Date and time are already set to current in create_basic_info_section
-        now = datetime.now()
+        # Test ID will be generated when test name is entered
         
-        # Generate test ID from timestamp
-        test_id = now.strftime("TEST_%Y%m%d_%H%M%S")
+        # Set default save location (will be updated when test ID changes)
+        from pathlib import Path
+        default_dir = Path.cwd() / "data"
+        default_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate initial test ID
+        self.update_test_id()
+    
+    def update_test_id(self) -> None:
+        """Update test ID based on test name, date, and time."""
+        # Get test name (sanitized for filename use)
+        test_name = self.test_name_edit.text().strip()
+        if not test_name:
+            test_name = "UNNAMED_TEST"
+        
+        # Sanitize test name for use in filename
+        # Replace spaces and special characters with underscores
+        import re
+        test_name_clean = re.sub(r'[^\w\-]', '_', test_name)
+        
+        # Get date and time
+        date_str = self.date_edit.date().toString("yyyyMMdd")
+        time_str = self.time_edit.time().toString("HHmmss")
+        
+        # Create test ID: TestName_YYYYMMDD_HHMMSS
+        test_id = f"{test_name_clean}_{date_str}_{time_str}"
+        
+        # Update test ID field
         self.test_id_edit.setText(test_id)
         
-        # Set default save location
+        # Update default save location if not manually set
         from pathlib import Path
         default_dir = Path.cwd() / "data"
         default_dir.mkdir(parents=True, exist_ok=True)
         default_file = default_dir / f"{test_id}.csv"
-        self.save_path = str(default_file)
-        self.file_path_label.setText(str(default_file))
+        
+        # Only update save path if it hasn't been manually browsed
+        if not self.save_path or self.save_path.startswith(str(default_dir)):
+            self.save_path = str(default_file)
+            self.file_path_label.setText(str(default_file))
     
     def browse_save_location(self) -> None:
         """Open file dialog to select save location."""
@@ -399,6 +432,9 @@ class TestMetadataDialog(QDialog):
         # Notes
         if "notes" in metadata:
             self.notes_edit.setPlainText(metadata["notes"])
+        
+        # Update test ID based on populated values
+        self.update_test_id()
         
         logger.info("Populated metadata dialog from existing metadata")
 
