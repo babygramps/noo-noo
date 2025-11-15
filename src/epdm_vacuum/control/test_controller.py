@@ -12,8 +12,10 @@ from typing import Optional, Dict, Any, Callable, List
 import logging
 import time
 from enum import Enum
+from pathlib import Path
 
 from .sequence import TestSequence, TestStage, IOAction, IOActionTiming, IOActionType, PumpMode
+from ..logging.data_logger import DataLogger
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,9 @@ class TestController:
         modbus_interface=None,
         safety_monitor=None,
         pump_controller=None,
+        data_logger: Optional[DataLogger] = None,
+        csv_path: Optional[str] = None,
+        test_metadata: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize the test controller.
@@ -52,6 +57,9 @@ class TestController:
             modbus_interface: Modbus hardware interface
             safety_monitor: Safety monitoring system
             pump_controller: Vacuum pump controller
+            data_logger: DataLogger instance for saving data
+            csv_path: Path to CSV file for real-time data logging
+            test_metadata: Metadata about the test (name, operator, etc.)
         """
         self.widgetlords = widgetlords_interface
         self.modbus = modbus_interface
@@ -67,6 +75,17 @@ class TestController:
         self.current_sequence: Optional[TestSequence] = None
         self.current_stage_index: int = 0
         self.stage_data: List[List[Dict[str, Any]]] = []  # Data for each stage
+        
+        # Data logging
+        self.data_logger = data_logger
+        self.csv_path = csv_path
+        self.test_metadata = test_metadata or {}
+        self.csv_file = None
+        self.csv_writer = None
+        self.csv_header_written = False
+        
+        # Track IO device states for logging
+        self.io_device_states: Dict[str, bool] = {}
         
         # Callbacks for status updates
         self.status_callback: Optional[Callable[[str], None]] = None
@@ -119,12 +138,18 @@ class TestController:
         """
         try:
             # Validate sequence
-            is_valid, errors = sequence.validate()
+            is_valid, errors, warnings = sequence.validate()
             if not is_valid:
                 logger.error("Cannot load invalid sequence:")
                 for error in errors:
                     logger.error(f"  - {error}")
                 return False
+            
+            # Log warnings if any
+            if warnings:
+                logger.warning("Sequence validation warnings:")
+                for warning in warnings:
+                    logger.warning(f"  - {warning}")
             
             self.current_sequence = sequence
             self.current_stage_index = 0
@@ -152,6 +177,10 @@ class TestController:
             self.state = TestState.INITIALIZING
             self.test_start_time = time.time()
             self.test_data = []
+            
+            # Open CSV file for real-time logging
+            if not self._open_csv_file():
+                raise RuntimeError("Failed to open CSV file for logging")
             
             # Pre-test checks
             self._update_status("Performing pre-test checks...")
@@ -185,6 +214,9 @@ class TestController:
             self.state = TestState.FAILED
             self._emergency_stop()
             return False
+        finally:
+            # Always close CSV file
+            self._close_csv_file()
     
     def _run_sequence(self) -> bool:
         """
@@ -418,12 +450,41 @@ class TestController:
             
             # Collect data if enabled
             if stage.collect_data and elapsed % 1.0 < sample_interval:  # Collect ~1 sample/sec
+                current_time = time.time()
+                from datetime import datetime
                 data_point = {
-                    "timestamp": time.time(),
+                    "timestamp": current_time,
+                    "datetime": datetime.fromtimestamp(current_time).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],  # Include milliseconds
+                    "elapsed_time": elapsed,
+                    "stage_index": self.current_stage_index,
+                    "stage_name": stage.name or f"Stage {self.current_stage_index + 1}",
                     "vacuum_bar": current_vacuum,
-                    "elapsed": elapsed,
+                    "test_state": self.state.value,
                 }
+                
+                # Add IO device states (valve positions, etc.)
+                for device_name, state in self.io_device_states.items():
+                    # Create column name like "valve_vent_valve" or "io_pump_relay"
+                    column_name = f"io_{device_name}"
+                    data_point[column_name] = "OPEN" if state else "CLOSED"
+                
+                # Add hardware readings if available
+                try:
+                    if self.widgetlords:
+                        wl_data = self.widgetlords.read()
+                        data_point.update(wl_data)
+                    
+                    if self.modbus:
+                        modbus_data = self.modbus.read()
+                        data_point.update(modbus_data)
+                except Exception as e:
+                    logger.warning(f"Error reading sensors for data logging: {e}")
+                
+                # Store in memory
                 stage_data.append(data_point)
+                
+                # Write to CSV in real-time
+                self._write_csv_data(data_point)
             
             time.sleep(sample_interval)
         
@@ -587,11 +648,15 @@ class TestController:
             
             # Execute based on action type
             if action.action_type == IOActionType.DIGITAL_OUTPUT:
-                self._set_digital_output(action.device_name, bool(action.value))
+                state = bool(action.value)
+                self._set_digital_output(action.device_name, state)
+                
+                # Track IO state
+                self.io_device_states[action.device_name] = state
                 
                 # Notify IO callback
                 if self.io_callback:
-                    self.io_callback(action.device_name, bool(action.value))
+                    self.io_callback(action.device_name, state)
             
             elif action.action_type == IOActionType.ANALOG_OUTPUT:
                 self._set_analog_output(action.device_name, float(action.value))
@@ -599,6 +664,7 @@ class TestController:
             elif action.action_type == IOActionType.PULSE:
                 # Turn on
                 self._set_digital_output(action.device_name, True)
+                self.io_device_states[action.device_name] = True
                 if self.io_callback:
                     self.io_callback(action.device_name, True)
                 
@@ -608,6 +674,7 @@ class TestController:
                 
                 # Turn off
                 self._set_digital_output(action.device_name, False)
+                self.io_device_states[action.device_name] = False
                 if self.io_callback:
                     self.io_callback(action.device_name, False)
             
@@ -761,4 +828,88 @@ class TestController:
             TestState: Current state
         """
         return self.state
+    
+    def _open_csv_file(self) -> bool:
+        """
+        Open CSV file for real-time data logging.
+        
+        Returns:
+            bool: True if file opened successfully
+        """
+        if not self.csv_path:
+            logger.warning("No CSV path specified, data will not be saved")
+            return True  # Not an error, just skip logging
+        
+        try:
+            import csv
+            import json
+            
+            # Ensure directory exists
+            csv_file_path = Path(self.csv_path)
+            csv_file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Save metadata to separate JSON file
+            if self.test_metadata:
+                metadata_path = csv_file_path.with_suffix('.json')
+                try:
+                    with open(metadata_path, 'w') as meta_file:
+                        json.dump(self.test_metadata, meta_file, indent=2)
+                    logger.info(f"Saved test metadata to: {metadata_path}")
+                except Exception as e:
+                    logger.error(f"Failed to save metadata file: {e}", exc_info=True)
+                    # Continue anyway - metadata save failure shouldn't stop the test
+            
+            # Open CSV file for writing (clean, no comments)
+            self.csv_file = open(self.csv_path, 'w', newline='')
+            self.csv_writer = csv.writer(self.csv_file)
+            
+            # CSV header will be written when first data point arrives
+            self.csv_header_written = False
+            
+            logger.info(f"Opened CSV file for logging: {self.csv_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to open CSV file: {e}", exc_info=True)
+            return False
+    
+    def _write_csv_data(self, data: Dict[str, Any]) -> None:
+        """
+        Write a data point to the CSV file in real-time.
+        
+        Args:
+            data: Dictionary containing data to write
+        """
+        if not self.csv_file or not self.csv_writer:
+            return
+        
+        try:
+            # Write header if not yet written
+            if not self.csv_header_written:
+                headers = sorted(data.keys())
+                self.csv_writer.writerow(headers)
+                self.csv_header_written = True
+                self._stored_headers = headers
+            
+            # Write data row (in same order as headers)
+            row = [data.get(key, '') for key in self._stored_headers]
+            self.csv_writer.writerow(row)
+            
+            # Flush to ensure data is written immediately
+            self.csv_file.flush()
+            
+        except Exception as e:
+            logger.error(f"Error writing to CSV: {e}", exc_info=True)
+    
+    def _close_csv_file(self) -> None:
+        """Close the CSV file."""
+        if self.csv_file:
+            try:
+                self.csv_file.close()
+                logger.info(f"Closed CSV file: {self.csv_path}")
+            except Exception as e:
+                logger.error(f"Error closing CSV file: {e}", exc_info=True)
+            finally:
+                self.csv_file = None
+                self.csv_writer = None
 

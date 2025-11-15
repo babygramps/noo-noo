@@ -33,7 +33,10 @@ from .threads.daq_thread import DataAcquisitionThread
 from .threads.control_thread import ControlThread
 from .dialogs.sequence_editor import SequenceEditorDialog
 from .dialogs.io_config_dialog import IOConfigDialog
+from .dialogs.test_metadata_dialog import TestMetadataDialog
 from ..control.sequence_manager import SequenceManager
+from ..logging.data_logger import DataLogger
+from ..logging.buffer import DataBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,14 @@ class MainWindow(QMainWindow):
         self.daq_thread: Optional[DataAcquisitionThread] = None
         self.control_thread: Optional[ControlThread] = None
         self.sequence_manager: Optional[SequenceManager] = None
+        
+        # Data logging components
+        self.data_buffer = DataBuffer(max_size=10000)
+        self.data_logger = DataLogger(output_dir="data")
+        
+        # Track current test metadata and CSV path
+        self.current_test_metadata: Optional[dict] = None
+        self.current_csv_path: Optional[str] = None
         
         self.init_ui()
         self.init_sequence_manager()
@@ -120,6 +131,11 @@ class MainWindow(QMainWindow):
         save_action.setShortcut("Ctrl+S")
         save_action.triggered.connect(self.on_save_data)
         file_menu.addAction(save_action)
+        
+        edit_metadata_action = QAction("Edit &Metadata", self)
+        edit_metadata_action.setShortcut("Ctrl+M")
+        edit_metadata_action.triggered.connect(self.on_edit_metadata)
+        file_menu.addAction(edit_metadata_action)
         
         file_menu.addSeparator()
         
@@ -298,6 +314,9 @@ class MainWindow(QMainWindow):
         Args:
             data: Dictionary containing sensor readings
         """
+        # Store data in buffer
+        self.data_buffer.append(data)
+        
         # Update display widget
         self.display_widget.update_values(data)
         
@@ -356,12 +375,65 @@ class MainWindow(QMainWindow):
             logger.warning("Control thread already running")
             return
         
+        # Show metadata dialog to get test information and save location
+        metadata_dialog = TestMetadataDialog(self)
+        result = metadata_dialog.exec_()
+        
+        if result != QDialog.Accepted:
+            logger.info("Test start cancelled by user")
+            self.statusBar().showMessage("Test cancelled")
+            return
+        
+        # Get metadata and save path
+        test_metadata = metadata_dialog.get_metadata()
+        csv_path = metadata_dialog.get_save_path()
+        
+        logger.info(f"Test metadata collected: {test_metadata}")
+        logger.info(f"Data will be saved to: {csv_path}")
+        
+        # Store current test info for later editing
+        self.current_test_metadata = test_metadata
+        self.current_csv_path = csv_path
+        
+        # Clear data buffer for new test
+        self.data_buffer.clear()
+        
         # Initialize test status panel with sequence
         self.test_status_panel.set_sequence(current_seq)
         
-        # TODO: Create test controller with hardware interfaces
-        # For now, create control thread without controller (will use placeholder)
-        self.control_thread = ControlThread(sequence=current_seq)
+        # Initialize hardware interfaces (if available)
+        try:
+            widgetlords_iface, modbus_iface = self.init_hardware_interfaces()
+        except Exception as e:
+            logger.warning(f"Failed to initialize hardware interfaces: {e}")
+            logger.warning("Proceeding with mock data")
+            widgetlords_iface = None
+            modbus_iface = None
+        
+        # Create test controller with data logging
+        from ..control.test_controller import TestController
+        test_controller = TestController(
+            widgetlords_interface=widgetlords_iface,
+            modbus_interface=modbus_iface,
+            data_logger=self.data_logger,
+            csv_path=csv_path,
+            test_metadata=test_metadata,
+        )
+        
+        # Load sequence into controller
+        if not test_controller.load_sequence(current_seq):
+            QMessageBox.critical(
+                self,
+                "Error",
+                "Failed to load test sequence into controller."
+            )
+            return
+        
+        # Create control thread with controller
+        self.control_thread = ControlThread(
+            test_controller=test_controller,
+            sequence=current_seq
+        )
         self.control_thread.status_update.connect(self.on_status_update)
         self.control_thread.test_complete.connect(self.on_test_complete)
         self.control_thread.stage_changed.connect(self.on_stage_changed)
@@ -373,6 +445,7 @@ class MainWindow(QMainWindow):
         
         self.control_thread.start()
         
+        self.statusBar().showMessage(f"Test started: {test_metadata.get('test_name', 'Unnamed Test')}")
         logger.info(f"Started test with sequence: {current_seq.name if current_seq else 'None'}")
     
     def on_stop_test(self) -> None:
@@ -410,13 +483,196 @@ class MainWindow(QMainWindow):
         # TODO: Implement tare via hardware interface
         logger.warning("TODO: Tare function not implemented")
     
+    def on_edit_metadata(self) -> None:
+        """Handle edit metadata request."""
+        logger.info("Opening metadata editor...")
+        
+        # Check if we have a current test or ask user to browse for a metadata file
+        if not self.current_test_metadata and not self.current_csv_path:
+            # No current test - ask if they want to browse for an existing file or create new
+            reply = QMessageBox.question(
+                self,
+                "Edit Metadata",
+                "No current test metadata found.\n\n"
+                "Would you like to browse for an existing metadata file to edit?\n\n"
+                "Click 'Yes' to browse, 'No' to create new metadata.",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+            )
+            
+            if reply == QMessageBox.Cancel:
+                return
+            elif reply == QMessageBox.Yes:
+                # Browse for existing metadata file
+                from PyQt5.QtWidgets import QFileDialog
+                json_file, _ = QFileDialog.getOpenFileName(
+                    self,
+                    "Select Metadata File",
+                    "data/",
+                    "JSON Files (*.json);;All Files (*.*)"
+                )
+                
+                if not json_file:
+                    return
+                
+                # Load existing metadata
+                import json
+                try:
+                    with open(json_file, 'r') as f:
+                        self.current_test_metadata = json.load(f)
+                    # Derive CSV path from JSON path
+                    from pathlib import Path
+                    self.current_csv_path = str(Path(json_file).with_suffix('.csv'))
+                    logger.info(f"Loaded metadata from: {json_file}")
+                except Exception as e:
+                    QMessageBox.critical(
+                        self,
+                        "Load Error",
+                        f"Failed to load metadata file:\n{e}"
+                    )
+                    return
+            else:
+                # Create new metadata
+                self.current_test_metadata = {}
+                self.current_csv_path = None
+        
+        # Create metadata dialog
+        metadata_dialog = TestMetadataDialog(self)
+        
+        # Pre-populate with existing metadata if available
+        if self.current_test_metadata:
+            metadata_dialog.populate_from_metadata(self.current_test_metadata)
+        
+        # Set the save path if we have one
+        if self.current_csv_path:
+            metadata_dialog.save_path = self.current_csv_path
+            metadata_dialog.file_path_label.setText(self.current_csv_path)
+        
+        # Show dialog
+        result = metadata_dialog.exec_()
+        
+        if result == QDialog.Accepted:
+            # Get updated metadata
+            updated_metadata = metadata_dialog.get_metadata()
+            updated_csv_path = metadata_dialog.get_save_path()
+            
+            # Update stored values
+            self.current_test_metadata = updated_metadata
+            self.current_csv_path = updated_csv_path
+            
+            # Save metadata to JSON file
+            from pathlib import Path
+            import json
+            
+            metadata_path = Path(updated_csv_path).with_suffix('.json')
+            try:
+                with open(metadata_path, 'w') as f:
+                    json.dump(updated_metadata, f, indent=2)
+                
+                QMessageBox.information(
+                    self,
+                    "Metadata Saved",
+                    f"Metadata successfully saved to:\n{metadata_path}"
+                )
+                self.statusBar().showMessage(f"Metadata saved to {metadata_path}", 5000)
+                logger.info(f"Metadata updated and saved to: {metadata_path}")
+                
+            except Exception as e:
+                error_msg = f"Failed to save metadata: {e}"
+                logger.error(error_msg, exc_info=True)
+                QMessageBox.critical(
+                    self,
+                    "Save Error",
+                    error_msg
+                )
+    
     def on_save_data(self) -> None:
-        """Handle save data request."""
+        """Handle save data request - save current buffer to CSV."""
         logger.info("Saving data...")
         self.statusBar().showMessage("Saving data...")
         
-        # TODO: Implement data save logic
-        logger.warning("TODO: Save data function not implemented")
+        # Check if there's data to save
+        if self.data_buffer.size() == 0:
+            QMessageBox.information(
+                self,
+                "No Data",
+                "There is no data to save. Start data acquisition first."
+            )
+            return
+        
+        # Ask user for save location
+        from PyQt5.QtWidgets import QFileDialog
+        from datetime import datetime
+        
+        # Generate default filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"manual_save_{timestamp}.csv"
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Data",
+            f"data/{default_filename}",
+            "CSV Files (*.csv);;All Files (*.*)"
+        )
+        
+        if not filename:
+            logger.info("Save cancelled by user")
+            return
+        
+        # Ensure .csv extension
+        if not filename.lower().endswith('.csv'):
+            filename += '.csv'
+        
+        try:
+            # Get all data from buffer
+            buffer_data = self.data_buffer.get_all()
+            
+            if not buffer_data:
+                QMessageBox.warning(
+                    self,
+                    "No Data",
+                    "Buffer is empty, nothing to save."
+                )
+                return
+            
+            # Create basic metadata for manual save
+            from datetime import datetime
+            manual_save_metadata = {
+                "save_type": "manual_save",
+                "save_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "data_points": len(buffer_data),
+                "note": "Data manually saved from buffer"
+            }
+            
+            # Save to CSV using data logger (with metadata in separate JSON)
+            filepath = self.data_logger.log_to_csv(
+                buffer_data, 
+                filename=filename,
+                metadata=manual_save_metadata
+            )
+            
+            if filepath:
+                QMessageBox.information(
+                    self,
+                    "Data Saved",
+                    f"Successfully saved {len(buffer_data)} data points to:\n{filepath}"
+                )
+                self.statusBar().showMessage(f"Data saved to {filepath}", 5000)
+                logger.info(f"Saved {len(buffer_data)} data points to {filepath}")
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Save Error",
+                    "Failed to save data. Check logs for details."
+                )
+        
+        except Exception as e:
+            error_msg = f"Error saving data: {e}"
+            logger.error(error_msg, exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Save Error",
+                error_msg
+            )
     
     def on_sequence_changed(self, sequence) -> None:
         """
