@@ -10,17 +10,68 @@ hardware:
   
   modbus:
     enabled: true
-    port: /dev/ttyUSB0  # Serial port for Modbus RTU (Windows: COM3, COM4, etc.)
-    baudrate: 9600  # Communication speed (TLB4 supports up to 115200)
-    slave_address: 1  # Modbus device address (check TLB4 configuration)
+    port: COM4  # Serial port for Modbus RTU (Windows: COM4)
+    baudrate: 9600  # Communication speed (TLB4 configured for 9600)
+    slave_address: 1  # Modbus device address (TLB4 Addr setting)
     timeout: 1.0  # Communication timeout in seconds
-    parity: None  # Parity: None, Even, Odd, Mark, Space
+    parity: None  # Parity: None, Even, Odd, Mark, Space (TLB4: nOnE)
     databits: 8  # Data bits per byte (7 or 8)
-    stopbits: 1  # Stop bits (1, 1.5, or 2)
-    byteorder: big  # Byte order: big or little (endianness)
+    stopbits: 1  # Stop bits (1, 1.5, or 2) (TLB4: StOP: 1)
+    byteorder: big  # Byte order: big or little (TLB4 uses Big-Endian)
     wordorder: big  # Word order for 32-bit values: big or little
     close_port_after_each_call: false  # Close port after each read
     debug: false  # Enable debug logging for troubleshooting
+    
+    # TLB4 4-Channel Load Cell Transmitter Configuration
+    # Discovered via register scanner on COM4
+    tlb4:
+      # Register addresses (0-based Modbus addresses)
+      # Discovered values from scan:
+      #   R0=11100, R1=620, R2=24, R3=1275, R8=241, R15=10000
+      registers:
+        gross_weight: 0      # Total gross weight (16-bit) - value 11100 = 111.00 kg
+        net_weight: 2        # Net weight (16-bit)
+        tare_weight: 3       # Tare weight (16-bit) - value 1275 = 12.75 kg?
+        status: 6            # Status register (16-bit)
+        channel_1: 8         # Channel 1 - CONFIRMED ACTIVE (value 241 = 2.41 kg)
+        channel_2: 9         # Channel 2 (not connected)
+        channel_3: 10        # Channel 3 (not connected)
+        channel_4: 11        # Channel 4 (not connected)
+      
+      # Data format for weight values
+      # Using int16 since values fit in single registers
+      data_format: int16     # int16, int32, uint32, or float32
+      decimal_places: 2      # Decimal places in raw values (e.g., 241 = 2.41 kg)
+      
+      # Channel scaling configuration
+      # TLB4 transmits values as scaled integers with 2 decimal places
+      # Formula: kg = raw_value / 100 (using full_scale=100, capacity=1.0)
+      channel_scaling:
+        # Default: raw/100 = kg (same as 2 decimal places)
+        full_scale_divisions: 100.0   # Divisor for decimal scaling
+        load_cell_capacity_kg: 1.0    # 1:1 ratio after division
+        
+        # Per-channel configuration
+        channel_1:
+          enabled: true               # CONNECTED
+          full_scale_divisions: 100.0
+          capacity_kg: 1.0
+          zero_offset: 0.0
+        channel_2:
+          enabled: false              # Not connected
+          full_scale_divisions: 100.0
+          capacity_kg: 1.0
+          zero_offset: 0.0
+        channel_3:
+          enabled: false              # Not connected
+          full_scale_divisions: 100.0
+          capacity_kg: 1.0
+          zero_offset: 0.0
+        channel_4:
+          enabled: false              # Not connected
+          full_scale_divisions: 100.0
+          capacity_kg: 1.0
+          zero_offset: 0.0
 
 # Pressure Sensor Configuration (SPT25-20-V30D)
 pressure_sensor:

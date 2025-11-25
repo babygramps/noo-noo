@@ -160,8 +160,21 @@ class DisplayWidget(QWidget):
             vacuum_psi = 14.7 - data["pressure_psi"]
             self.vacuum_psi_lcd.display(f"{vacuum_psi:.2f}")
         
-        # Update total force
-        if "gross_weight_kg" in data:
+        # Update total force - sum of individual load cells (already software-tared)
+        # This is more reliable than the TLB4's internal gross/net registers
+        total_force = 0.0
+        has_load_cells = False
+        for i in range(4):
+            key = f"load_cell_{i+1}_kg"
+            if key in data:
+                total_force += data[key]
+                has_load_cells = True
+        
+        if has_load_cells:
+            self.force_lcd.display(f"{total_force:.2f}")
+        elif "net_weight_kg" in data:
+            self.force_lcd.display(f"{data['net_weight_kg']:.2f}")
+        elif "gross_weight_kg" in data:
             self.force_lcd.display(f"{data['gross_weight_kg']:.2f}")
         elif "total_force_kg" in data:
             self.force_lcd.display(f"{data['total_force_kg']:.2f}")

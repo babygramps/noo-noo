@@ -283,20 +283,9 @@ class MainWindow(QMainWindow):
         modbus_config = settings.get("hardware", "modbus", default={})
         if modbus_config.get("enabled", False):
             try:
-                # Extract all modbus configuration parameters
-                modbus_iface = ModbusInterface(
-                    port=modbus_config.get("port", "/dev/ttyUSB0"),
-                    slave_address=modbus_config.get("slave_address", 1),
-                    baudrate=modbus_config.get("baudrate", 9600),
-                    timeout=modbus_config.get("timeout", 1.0),
-                    parity=modbus_config.get("parity", "None"),
-                    databits=modbus_config.get("databits", 8),
-                    stopbits=modbus_config.get("stopbits", 1.0),
-                    byteorder=modbus_config.get("byteorder", "big"),
-                    wordorder=modbus_config.get("wordorder", "big"),
-                    close_port_after_each_call=modbus_config.get("close_port_after_each_call", False),
-                    debug=modbus_config.get("debug", False),
-                )
+                # Use helper function to create interface with TLB4 config
+                from ..config.settings import create_modbus_interface_from_settings
+                modbus_iface = create_modbus_interface_from_settings(settings)
                 modbus_iface.connect()
                 logger.info(f"Modbus interface initialized on {modbus_config.get('port')}")
             except Exception as e:
@@ -480,8 +469,22 @@ class MainWindow(QMainWindow):
         logger.info("Taring load cells...")
         self.statusBar().showMessage("Taring load cells...")
         
-        # TODO: Implement tare via hardware interface
-        logger.warning("TODO: Tare function not implemented")
+        # Tare via Modbus interface
+        if self.daq_thread and self.daq_thread.modbus:
+            try:
+                success = self.daq_thread.modbus.tare_load_cells()
+                if success:
+                    self.statusBar().showMessage("Tare complete", 3000)
+                    logger.info("Tare operation completed successfully")
+                else:
+                    self.statusBar().showMessage("Tare failed - check device", 5000)
+                    logger.warning("Tare operation failed")
+            except Exception as e:
+                self.statusBar().showMessage(f"Tare error: {e}", 5000)
+                logger.error(f"Tare error: {e}")
+        else:
+            self.statusBar().showMessage("No Modbus interface available", 3000)
+            logger.warning("Cannot tare - Modbus interface not available")
     
     def on_edit_metadata(self) -> None:
         """Handle edit metadata request."""

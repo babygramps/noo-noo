@@ -7,13 +7,16 @@ Loads and manages configuration from:
 - Default values
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TYPE_CHECKING
 import logging
 from pathlib import Path
 import os
 
 import yaml
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from epdm_vacuum.daq.modbus_interface import TLB4Config, TLB4ChannelConfig, ModbusInterface
 
 logger = logging.getLogger(__name__)
 
@@ -291,4 +294,125 @@ def get_settings(config_file: Optional[str] = None) -> Settings:
     if _settings is None:
         _settings = Settings(config_file)
     return _settings
+
+
+def create_tlb4_config_from_settings(settings: Optional[Settings] = None) -> "TLB4Config":
+    """
+    Create TLB4Config from application settings.
+    
+    This loads the TLB4 configuration from hardware_config.yaml and
+    creates a properly configured TLB4Config object for the ModbusInterface.
+    
+    Args:
+        settings: Settings instance (uses global if None)
+        
+    Returns:
+        TLB4Config: Configuration for TLB4 ModbusInterface
+    """
+    from epdm_vacuum.daq.modbus_interface import TLB4Config, TLB4ChannelConfig, DataFormat
+    
+    if settings is None:
+        settings = get_settings()
+    
+    # Get TLB4-specific configuration
+    tlb4_settings = settings.get("hardware", "modbus", "tlb4", default={})
+    
+    # Parse register addresses
+    registers = tlb4_settings.get("registers", {})
+    
+    # Parse data format
+    data_format_str = tlb4_settings.get("data_format", "int16").lower()
+    data_format_map = {
+        "int16": DataFormat.INT16,
+        "uint16": DataFormat.UINT16,
+        "int32": DataFormat.INT32,
+        "uint32": DataFormat.UINT32,
+        "float32": DataFormat.FLOAT32,
+    }
+    data_format = data_format_map.get(data_format_str, DataFormat.INT16)
+    
+    # Parse channel scaling
+    channel_scaling = tlb4_settings.get("channel_scaling", {})
+    default_fs = channel_scaling.get("full_scale_divisions", 10000.0)
+    default_cap = channel_scaling.get("load_cell_capacity_kg", 250.0)
+    
+    # Create channel configurations
+    channels = []
+    for i in range(1, 5):
+        ch_key = f"channel_{i}"
+        ch_settings = channel_scaling.get(ch_key, {})
+        
+        channels.append(TLB4ChannelConfig(
+            register_address=registers.get(ch_key, 8 + (i - 1) * 2),
+            full_scale_divisions=ch_settings.get("full_scale_divisions", default_fs),
+            load_cell_capacity_kg=ch_settings.get("capacity_kg", default_cap),
+            data_format=data_format,
+            zero_offset=ch_settings.get("zero_offset", 0.0),
+            enabled=ch_settings.get("enabled", True),
+        ))
+    
+    # Create TLB4Config
+    config = TLB4Config(
+        reg_gross_weight=registers.get("gross_weight", 0),
+        reg_net_weight=registers.get("net_weight", 2),
+        reg_tare_weight=registers.get("tare_weight", 4),
+        reg_status=registers.get("status", 6),
+        reg_channel_1=registers.get("channel_1", 8),
+        reg_channel_2=registers.get("channel_2", 10),
+        reg_channel_3=registers.get("channel_3", 12),
+        reg_channel_4=registers.get("channel_4", 14),
+        channels=channels,
+        gross_weight_format=data_format,
+        decimal_places=tlb4_settings.get("decimal_places", 2),
+        use_decimal_scaling=True,
+    )
+    
+    logger.info("TLB4 configuration loaded from settings")
+    return config
+
+
+def create_modbus_interface_from_settings(
+    settings: Optional[Settings] = None
+) -> "ModbusInterface":
+    """
+    Create a fully configured ModbusInterface from application settings.
+    
+    This is the recommended way to instantiate the ModbusInterface
+    for production use.
+    
+    Args:
+        settings: Settings instance (uses global if None)
+        
+    Returns:
+        ModbusInterface: Configured interface ready for connect()
+    """
+    from epdm_vacuum.daq.modbus_interface import ModbusInterface
+    
+    if settings is None:
+        settings = get_settings()
+    
+    # Get Modbus settings
+    modbus_cfg = settings.get("hardware", "modbus", default={})
+    
+    # Create TLB4 config
+    tlb4_config = create_tlb4_config_from_settings(settings)
+    
+    # Create interface
+    interface = ModbusInterface(
+        port=modbus_cfg.get("port", "/dev/ttyUSB0"),
+        slave_address=modbus_cfg.get("slave_address", 1),
+        baudrate=modbus_cfg.get("baudrate", 9600),
+        timeout=modbus_cfg.get("timeout", 1.0),
+        parity=modbus_cfg.get("parity", "None"),
+        databits=modbus_cfg.get("databits", 8),
+        stopbits=modbus_cfg.get("stopbits", 1),
+        byteorder=modbus_cfg.get("byteorder", "big"),
+        wordorder=modbus_cfg.get("wordorder", "big"),
+        close_port_after_each_call=modbus_cfg.get("close_port_after_each_call", False),
+        debug=modbus_cfg.get("debug", False),
+        tlb4_config=tlb4_config,
+    )
+    
+    logger.info(f"ModbusInterface created for port {modbus_cfg.get('port')}")
+    return interface
 
