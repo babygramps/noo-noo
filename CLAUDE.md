@@ -132,3 +132,4 @@ self.instrument.write_registers(register_address, [value])  # Correct
 - Python 3.11+ (tested with 3.14)
 - VS Code with Remote-SSH for Pi development
 
+

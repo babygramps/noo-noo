@@ -1,0 +1,162 @@
+# EPDM Vacuum Fixture - Raspberry Pi Hardware Configuration
+# Version: 1.1.0
+#
+# This configuration is for deployment on Raspberry Pi 5 with actual hardware:
+# - TLB4 Load Cell Transmitter via USB-RS485 adapter (/dev/ttyUSB0)
+# - WidgetLords SPI modules for analog I/O
+#
+# Copy this to hardware_config.yaml or set environment variable:
+#   EPDM_CONFIG=/path/to/hardware_config_pi.yaml
+
+# Hardware Interfaces
+hardware:
+  widgetlords:
+    enabled: true
+    pressure_channel: 0  # Analog input channel for pressure sensor
+    pump_relay: 0  # Relay channel for vacuum pump control
+  
+  modbus:
+    enabled: true
+    port: /dev/ttyUSB0  # Serial port for Modbus RTU (Raspberry Pi USB-RS485)
+    baudrate: 9600  # Communication speed (TLB4 configured for 9600)
+    slave_address: 1  # Modbus device address (TLB4 Addr setting)
+    timeout: 1.0  # Communication timeout in seconds
+    parity: None  # Parity: None, Even, Odd, Mark, Space (TLB4: nOnE)
+    databits: 8  # Data bits per byte (7 or 8)
+    stopbits: 1  # Stop bits (1, 1.5, or 2) (TLB4: StOP: 1)
+    byteorder: big  # Byte order: big or little (TLB4 uses Big-Endian)
+    wordorder: big  # Word order for 32-bit values: big or little
+    close_port_after_each_call: false  # Close port after each read
+    debug: false  # Enable debug logging for troubleshooting
+    
+    # TLB4 4-Channel Load Cell Transmitter Configuration
+    # Discovered via register scanner
+    tlb4:
+      # Register addresses (0-based Modbus addresses)
+      # Discovered values from scan:
+      #   R0=11100, R1=620, R2=24, R3=1275, R8=241, R15=10000
+      registers:
+        gross_weight: 0      # Total gross weight (16-bit) - value 11100 = 111.00 kg
+        net_weight: 2        # Net weight (16-bit)
+        tare_weight: 3       # Tare weight (16-bit) - value 1275 = 12.75 kg?
+        status: 6            # Status register (16-bit)
+        channel_1: 8         # Channel 1 - CONFIRMED ACTIVE (value 241 = 2.41 kg)
+        channel_2: 9         # Channel 2 (not connected)
+        channel_3: 10        # Channel 3 (not connected)
+        channel_4: 11        # Channel 4 (not connected)
+      
+      # Data format for weight values
+      # Using int16 since values fit in single registers
+      data_format: int16     # int16, int32, uint32, or float32
+      decimal_places: 2      # Decimal places in raw values (e.g., 241 = 2.41 kg)
+      
+      # Channel scaling configuration
+      # TLB4 transmits values as scaled integers with 2 decimal places
+      # Formula: kg = raw_value / 100 (using full_scale=100, capacity=1.0)
+      channel_scaling:
+        # Default: raw/100 = kg (same as 2 decimal places)
+        full_scale_divisions: 100.0   # Divisor for decimal scaling
+        load_cell_capacity_kg: 1.0    # 1:1 ratio after division
+        
+        # Per-channel configuration
+        channel_1:
+          enabled: true               # CONNECTED
+          full_scale_divisions: 100.0
+          capacity_kg: 1.0
+          zero_offset: 0.0
+        channel_2:
+          enabled: false              # Not connected
+          full_scale_divisions: 100.0
+          capacity_kg: 1.0
+          zero_offset: 0.0
+        channel_3:
+          enabled: false              # Not connected
+          full_scale_divisions: 100.0
+          capacity_kg: 1.0
+          zero_offset: 0.0
+        channel_4:
+          enabled: false              # Not connected
+          full_scale_divisions: 100.0
+          capacity_kg: 1.0
+          zero_offset: 0.0
+
+# Pressure Sensor Configuration (SPT25-20-V30D)
+pressure_sensor:
+  voltage_min: 0.0  # Volts
+  voltage_max: 10.0  # Volts
+  pressure_min_psi: 0.0  # PSI at voltage_min
+  pressure_max_psi: 30.0  # PSI at voltage_max
+  calibration_offset: 0.0  # Voltage offset correction
+  calibration_scale: 1.0  # Voltage scale factor
+
+# Safety Limits
+safety:
+  max_vacuum_bar: 1.0  # Maximum vacuum pressure (bar)
+  max_force_kg: 800.0  # Maximum total force (kg)
+  max_single_cell_kg: 250.0  # Maximum single load cell force (kg)
+  emergency_stop_enabled: true
+  alarm_threshold_violations: 3  # Number of violations before alarm
+
+# Test Configuration
+test:
+  default_target_vacuum_bar: 0.5  # Default target vacuum (bar)
+  default_hold_time_seconds: 30  # Default hold time (seconds)
+  default_ramp_rate_bar_per_sec: 0.1  # Default vacuum ramp rate
+  sample_rate_hz: 10.0  # Data acquisition sample rate (Hz)
+  max_test_duration_seconds: 600  # Maximum test duration (10 minutes)
+
+# Data Logging
+logging:
+  output_dir: data  # Directory for output files
+  log_level: INFO  # Logging level (DEBUG, INFO, WARNING, ERROR)
+  buffer_size: 10000  # Maximum data points in memory buffer
+  auto_save_enabled: true  # Automatically save data after test
+  save_format: csv  # Default save format (csv, hdf5, both)
+
+# API Configuration
+api:
+  enabled: false  # Enable Flask API server
+  host: 0.0.0.0  # Listen on all interfaces
+  port: 8000  # API port
+  debug: false  # Flask debug mode
+  cors_enabled: true  # Enable CORS for browser access
+
+# GUI Configuration
+gui:
+  window_width: 1280
+  window_height: 720
+  plot_update_interval_ms: 100  # Plot update interval (milliseconds)
+  display_update_interval_ms: 100  # Display update interval
+
+# Sequence Configuration
+sequences:
+  directory: sequences  # Directory for sequence files
+  auto_load_last: false  # Automatically load the last used sequence on startup
+  max_stages_per_sequence: 50  # Maximum number of stages allowed
+  validate_on_load: true  # Validate sequences when loading
+
+# I/O Device Configuration
+io_devices:
+  # Define available I/O devices for sequencing
+  # Based on actual hardware: vent valve, vacuum valve, vacuum pump relay
+  digital_outputs:
+    - name: vacuum_pump
+      channel: 0
+      description: Main vacuum pump relay (controlled automatically by pump mode)
+      default_state: false
+    
+    - name: vent_valve
+      channel: 1
+      description: Vent valve - releases chamber to atmosphere
+      default_state: false
+    
+    - name: vacuum_valve
+      channel: 2
+      description: Vacuum valve - between pump and chamber
+      default_state: false
+
+# Calibration Files
+calibration:
+  pressure_sensor_file: calibration/pressure_sensor.json
+  load_cells_file: calibration/load_cells.json
+
