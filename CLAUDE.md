@@ -34,11 +34,24 @@ src/epdm_vacuum/
 │   ├── modbus_interface.py      # TLB4 Modbus RTU driver (IMPORTANT)
 │   └── widgetlords_interface.py # SPI analog I/O
 ├── gui/
-│   ├── main_window.py       # Main Qt window, hardware init
-│   ├── widgets/             # Display, plots, controls
-│   └── threads/             # DAQ and control background threads
+│   ├── main_window.py       # Main Qt window with dockable panels
+│   ├── widgets/
+│   │   ├── display_widget.py      # Large LCD sensor displays
+│   │   ├── plot_widget.py         # Real-time pyqtgraph plots
+│   │   ├── control_panel.py       # Test/pump control buttons
+│   │   ├── sequence_selector.py   # Test sequence dropdown
+│   │   ├── test_status_panel.py   # Stage progress + IO status
+│   │   ├── stage_progress_widget.py
+│   │   └── io_status_widget.py
+│   ├── threads/             # DAQ and control background threads
+│   └── dialogs/             # Sequence editor, IO config, metadata
 ├── control/                 # Test sequencing, safety, pump control
+│   ├── sequence.py          # TestSequence, TestStage dataclasses
+│   ├── sequence_manager.py  # Load/save/validate sequences
+│   └── test_controller.py   # Test execution engine
 └── logging/                 # CSV/HDF5 data logging
+    ├── data_logger.py
+    └── buffer.py
 ```
 
 ## Key Files
@@ -46,8 +59,54 @@ src/epdm_vacuum/
 - `modbus_interface.py` - TLB4 load cell driver with software tare, thread-safe reads
 - `hardware_config.yaml` - Register addresses, port settings, scaling factors
 - `settings.py` - `create_modbus_interface_from_settings()` factory function
-- `main_window.py` - Hardware initialization in `init_hardware_interfaces()`
-- `display_widget.py` - Real-time weight/vacuum display updates
+- `main_window.py` - Dockable panel system, hardware init, layout persistence
+- `display_widget.py` - Large LCD displays with color-coded load cells
+
+## GUI Architecture
+
+### Dockable Panel System
+The main window uses `QDockWidget` for flexible layout:
+- **Central Widget**: PlotWidget (gets maximum real estate)
+- **Dockable Panels**: DisplayWidget, TestStatusPanel, SequenceSelectorWidget, ControlPanel
+
+Panels can be dragged, floated, tabified, or closed. Layout is saved/restored via `QSettings`.
+
+### Keyboard Shortcuts
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+1` | Toggle Sensor Display |
+| `Ctrl+2` | Toggle Test Status |
+| `Ctrl+3` | Toggle Test Sequence |
+| `Ctrl+4` | Toggle Controls |
+| `Ctrl+Shift+A` | Show All Panels |
+| `Ctrl+Shift+F` | Focus on Plot (hide all panels) |
+| `Ctrl+Shift+R` | Reset Layout |
+| `F5` | Start Test |
+| `F6` | Stop Test |
+| `F1` | Keyboard Shortcuts Help |
+
+### Creating Dock Widgets
+```python
+def create_dock_widget(self, name, title, widget, area, shortcut):
+    dock = QDockWidget(title, self)
+    dock.setObjectName(name)  # Required for state saving
+    dock.setWidget(widget)
+    self.addDockWidget(area, dock)
+    # Toggle action is auto-created
+    toggle_action = dock.toggleViewAction()
+    toggle_action.setShortcut(shortcut)
+```
+
+### Layout Persistence
+```python
+# Save on close
+self.settings.setValue("geometry", self.saveGeometry())
+self.settings.setValue("windowState", self.saveState())
+
+# Restore on startup
+self.restoreGeometry(self.settings.value("geometry"))
+self.restoreState(self.settings.value("windowState"))
+```
 
 ## Code Patterns
 
@@ -76,6 +135,17 @@ self.instrument.write_registers(register_address, [value])  # Correct
 # NOT: self.instrument.write_register(register, value, functioncode=6)
 ```
 
+### PyQt5 Signal/Slot Pattern
+```python
+# In thread class
+class ControlThread(QThread):
+    stage_changed = pyqtSignal(int, int, str)  # current, total, name
+    io_state_changed = pyqtSignal(str, bool)   # device_name, state
+    
+# In main window
+self.control_thread.stage_changed.connect(self.on_stage_changed)
+```
+
 ## Hardware Configuration
 
 ### TLB4 Load Cell Transmitter (Modbus RTU)
@@ -102,6 +172,7 @@ self.instrument.write_registers(register_address, [value])  # Correct
 - PyQt5 signals/slots for thread communication
 - Dataclasses for configuration objects (`TLB4Config`, `TLB4ChannelConfig`)
 - YAML for configuration files
+- Stylesheets for Qt widget styling (avoid inline where possible)
 
 ## Testing Workflow
 
@@ -109,6 +180,7 @@ self.instrument.write_registers(register_address, [value])  # Correct
 2. Update `hardware_config.yaml` with correct registers and scaling
 3. Run `python -m epdm_vacuum.app_main` to test GUI
 4. Check terminal logs for Modbus communication errors
+5. Use View menu shortcuts to adjust layout for your workflow
 
 ## Common Issues
 
@@ -126,10 +198,13 @@ self.instrument.write_registers(register_address, [value])  # Correct
 - Software tare offsets are stored in `_channel_tare_offsets`
 - Total Force = sum of individual load cells (with software tare)
 
+### Layout issues after code changes
+- Delete saved settings: remove `HKEY_CURRENT_USER\Software\EPDM\VacuumTestFixture` (Windows Registry)
+- Or use View → Reset Layout in the app
+
 ## Environment
 
 - Windows 10/11 for development, Raspberry Pi 5 for deployment
 - Python 3.11+ (tested with 3.14)
 - VS Code with Remote-SSH for Pi development
-
-
+- Key dependencies: PyQt5, pyqtgraph, minimalmodbus, numpy, PyYAML
