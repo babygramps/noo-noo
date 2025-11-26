@@ -111,7 +111,7 @@ class MainWindow(QMainWindow):
         self.display_widget = DisplayWidget()
         self.create_dock_widget(
             "display_dock",
-            "📊 Sensor Display",
+            "Sensor Display",
             self.display_widget,
             Qt.TopDockWidgetArea,
             "Ctrl+1"
@@ -121,7 +121,7 @@ class MainWindow(QMainWindow):
         self.test_status_panel = TestStatusPanel()
         self.create_dock_widget(
             "status_dock",
-            "📋 Test Status",
+            "Test Status",
             self.test_status_panel,
             Qt.BottomDockWidgetArea,
             "Ctrl+2"
@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
         self.sequence_selector = SequenceSelectorWidget()
         self.create_dock_widget(
             "sequence_dock",
-            "🔄 Test Sequence",
+            "Test Sequence",
             self.sequence_selector,
             Qt.BottomDockWidgetArea,
             "Ctrl+3"
@@ -141,7 +141,7 @@ class MainWindow(QMainWindow):
         self.control_panel = ControlPanel()
         self.create_dock_widget(
             "control_dock",
-            "🎮 Controls",
+            "Controls",
             self.control_panel,
             Qt.BottomDockWidgetArea,
             "Ctrl+4"

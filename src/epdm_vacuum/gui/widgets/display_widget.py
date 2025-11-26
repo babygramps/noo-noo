@@ -116,7 +116,7 @@ class DisplayWidget(QWidget):
         Returns:
             QGroupBox: Vacuum display group
         """
-        group = QGroupBox("🌡️ Vacuum Pressure")
+        group = QGroupBox("Vacuum Pressure")
         group.setStyleSheet("""
             QGroupBox {
                 font-size: 12pt;
@@ -167,7 +167,7 @@ class DisplayWidget(QWidget):
         Returns:
             QGroupBox: Force display group
         """
-        group = QGroupBox("⚖️ Total Force")
+        group = QGroupBox("Total Force")
         group.setStyleSheet("""
             QGroupBox {
                 font-size: 14pt;
@@ -213,7 +213,7 @@ class DisplayWidget(QWidget):
         Returns:
             QGroupBox: Load cells display group
         """
-        group = QGroupBox("📊 Individual Load Cells (kg)")
+        group = QGroupBox("Individual Load Cells (kg)")
         group.setStyleSheet("""
             QGroupBox {
                 font-size: 12pt;
