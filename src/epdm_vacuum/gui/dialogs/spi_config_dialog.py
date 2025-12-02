@@ -2314,15 +2314,22 @@ class SPIConfigDialog(QDialog):
         return card
     
     def update_calibration_display(self) -> None:
-        """Update the live weight display in calibration tab."""
+        """Update the live weight display in calibration tab.
+        
+        Uses cached data from the DAQ thread to avoid serial port conflicts.
+        The modbus interface's get_calibration_status() returns the last
+        reading from the DAQ thread, which updates at ~10Hz.
+        """
         try:
             # Get parent main window to access modbus interface
             main_window = self.parent()
             if main_window and hasattr(main_window, 'modbus_interface') and main_window.modbus_interface:
                 interface = main_window.modbus_interface
-                if interface.is_connected():
-                    status = interface.get_calibration_status()
-                    
+                
+                # Get cached status - this doesn't make additional serial reads
+                status = interface.get_calibration_status()
+                
+                if status.get('connected', False):
                     # Update weight display
                     weight_kg = status.get('gross_weight_kg', 0.0)
                     raw_value = status.get('gross_weight_raw', 0)

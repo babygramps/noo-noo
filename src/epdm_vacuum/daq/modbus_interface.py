@@ -626,19 +626,32 @@ class ModbusInterface(HardwareInterface):
         """
         Check if TLB4 is connected and responding.
         
+        Uses cached data to avoid additional serial port access that could
+        conflict with the DAQ thread. Considers connected if we have a recent
+        successful read (within last 2 seconds).
+        
         Returns:
-            bool: True if device is responding
+            bool: True if device appears to be responding
         """
         try:
             if not self.initialized or self.instrument is None:
                 return False
             
-            # Try reading a register to verify connection
-            try:
-                _ = self.instrument.read_register(0, functioncode=3)
-                return True
-            except Exception:
-                return False
+            # Check if we have recent data (within last 2 seconds)
+            # This avoids making additional serial reads that conflict with DAQ thread
+            if self._last_read_time > 0:
+                time_since_read = time.time() - self._last_read_time
+                if time_since_read < 2.0:
+                    # We have recent data, assume connected
+                    return not self._last_reading.get("error", False)
+            
+            # No recent data, try a test read with lock to prevent collisions
+            with self._lock:
+                try:
+                    _ = self.instrument.read_register(0, functioncode=3)
+                    return True
+                except Exception:
+                    return False
             
         except Exception as e:
             self.handle_error(e)
@@ -1096,8 +1109,12 @@ class ModbusInterface(HardwareInterface):
         """
         Get current calibration-relevant readings for display.
         
+        Uses cached data from the last DAQ read to avoid additional serial port
+        access that could conflict with the DAQ thread. The DAQ thread already
+        reads at ~10Hz, so cached data is always fresh.
+        
         Returns:
-            Dict with gross_weight_raw, gross_weight_kg, and stability indicator
+            Dict with gross_weight_raw, gross_weight_kg, connected status, and stability indicator
         """
         try:
             if not self.initialized or self.instrument is None:
@@ -1108,7 +1125,21 @@ class ModbusInterface(HardwareInterface):
                     "stable": False,
                 }
             
-            data = self.read()
+            # Use cached data to avoid serial port conflicts with DAQ thread
+            # The DAQ thread updates _last_reading every ~100ms
+            data = self._last_reading
+            
+            # Check if data is recent (within 2 seconds)
+            time_since_read = time.time() - self._last_read_time if self._last_read_time > 0 else float('inf')
+            is_connected = time_since_read < 2.0 and not data.get("error", False)
+            
+            if not is_connected or not data:
+                return {
+                    "connected": False,
+                    "gross_weight_raw": 0,
+                    "gross_weight_kg": 0.0,
+                    "stable": False,
+                }
             
             return {
                 "connected": True,
@@ -1116,6 +1147,7 @@ class ModbusInterface(HardwareInterface):
                 "gross_weight_kg": data.get("gross_weight_kg", 0.0),
                 "net_weight_kg": data.get("net_weight_kg", 0.0),
                 "stable": True,  # Could be enhanced with stability detection
+                "data_age_ms": int(time_since_read * 1000),
             }
         except Exception as e:
             logger.warning(f"Error getting calibration status: {e}")
