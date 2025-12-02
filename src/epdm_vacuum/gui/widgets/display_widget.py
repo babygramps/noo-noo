@@ -298,16 +298,46 @@ class DisplayWidget(QWidget):
         Args:
             data: Dictionary containing sensor readings
         """
+        # Track update count for diagnostic logging
+        if not hasattr(self, '_update_count'):
+            self._update_count = 0
+        self._update_count += 1
+        
+        # Log first few updates at INFO level for debugging
+        if self._update_count <= 5:
+            pressure_keys = ["pressure_voltage", "pressure_psi", "vacuum_psi", "vacuum_bar"]
+            pressure_data = {k: data.get(k) for k in pressure_keys}
+            logger.info(f"[DisplayWidget update #{self._update_count}] Pressure data: {pressure_data}")
+        
         # Update vacuum displays
         if "vacuum_bar" in data:
-            self.vacuum_bar_lcd.display(f"{data['vacuum_bar']:.3f}")
+            vacuum_bar = data['vacuum_bar']
+            # Round to 3 decimal places and display as float
+            vacuum_bar_rounded = round(vacuum_bar, 3)
+            self.vacuum_bar_lcd.display(vacuum_bar_rounded)
+            if self._update_count <= 5:
+                logger.info(f"  vacuum_bar LCD set to: {vacuum_bar_rounded}")
+        else:
+            if self._update_count <= 5:
+                logger.warning(f"  vacuum_bar NOT in data!")
         
         if "vacuum_psi" in data:
-            self.vacuum_psi_lcd.display(f"{data['vacuum_psi']:.2f}")
+            vacuum_psi = data['vacuum_psi']
+            # Round to 2 decimal places and display as float
+            vacuum_psi_rounded = round(vacuum_psi, 2)
+            self.vacuum_psi_lcd.display(vacuum_psi_rounded)
+            if self._update_count <= 5:
+                logger.info(f"  vacuum_psi LCD set to: {vacuum_psi_rounded}")
         elif "pressure_psi" in data:
             # Calculate vacuum from pressure if not provided
             vacuum_psi = 14.7 - data["pressure_psi"]
-            self.vacuum_psi_lcd.display(f"{vacuum_psi:.2f}")
+            vacuum_psi_rounded = round(vacuum_psi, 2)
+            self.vacuum_psi_lcd.display(vacuum_psi_rounded)
+            if self._update_count <= 5:
+                logger.info(f"  vacuum_psi (calculated) LCD set to: {vacuum_psi_rounded}")
+        else:
+            if self._update_count <= 5:
+                logger.warning(f"  vacuum_psi NOT in data!")
         
         # Update raw voltage display for debugging
         if "pressure_voltage" in data:
