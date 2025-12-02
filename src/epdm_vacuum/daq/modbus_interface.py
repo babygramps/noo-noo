@@ -718,6 +718,13 @@ class ModbusInterface(HardwareInterface):
     CMD_GROSS = 9             # Switch back to Gross Weight display
     CMD_ENABLE_HIRES = 25     # Enable 4x HiRes Channel Reading (streams individual channels to R1-R8)
     
+    # Calibration Commands (from Communication Protocols Manual Section 2659 & 2684)
+    CMD_ZERO_CALIBRATION = 100   # "Tare Weight Zero Setting" - defines the zero point
+    CMD_SPAN_CALIBRATION = 101   # "Acquisition of a single calibration point" - span calibration
+    
+    # Calibration Registers
+    ADDR_CAL_WEIGHT = 64         # Register 40065: Sample Weight (32-bit signed) for span calibration
+    
     def _write_command(self, command: int) -> bool:
         """
         Write a command to the TLB4 command register.
@@ -890,6 +897,235 @@ class ModbusInterface(HardwareInterface):
         except Exception as e:
             self.handle_error(e)
             return False
+    
+    # =========================================================================
+    # Real Calibration Methods (Physical Weight Calibration)
+    # From Communication Protocols Manual Section 2659 & 2684
+    # =========================================================================
+    
+    def zero_calibration(self) -> Tuple[bool, str]:
+        """
+        Perform Zero Calibration (empty scale).
+        
+        This defines the "zero point" of the scale. The scale must be completely
+        unloaded and stable before calling this method.
+        
+        Procedure:
+        1. Ensure scale is EMPTY and STABLE
+        2. Send Command 100 to Register 5 (CMDR)
+        3. Verify by reading Gross Weight (should be 0)
+        
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        try:
+            if not self.initialized or self.instrument is None:
+                return False, "Modbus interface not connected"
+            
+            logger.info("=" * 50)
+            logger.info("ZERO CALIBRATION - Starting")
+            logger.info("=" * 50)
+            
+            # Read current weight before calibration
+            pre_weight = self._read_gross_weight_raw()
+            logger.info(f"Pre-calibration gross weight (raw): {pre_weight}")
+            
+            # Use lock to prevent collision with DAQ reads
+            with self._lock:
+                # Send Command 100 to Command Register
+                logger.info(f"Sending Zero Calibration Command ({self.CMD_ZERO_CALIBRATION}) to register {self.TLB4_COMMAND_REGISTER}...")
+                self.instrument.write_registers(
+                    self.TLB4_COMMAND_REGISTER,
+                    [self.CMD_ZERO_CALIBRATION]
+                )
+            
+            # Wait for TLB4 to process the command
+            time.sleep(2.0)
+            
+            # Verify calibration by reading gross weight
+            post_weight = self._read_gross_weight_raw()
+            logger.info(f"Post-calibration gross weight (raw): {post_weight}")
+            
+            # Check if weight is now at or near zero
+            if abs(post_weight) < 100:  # Within 100 divisions of zero
+                msg = f"Zero Calibration SUCCESS - Weight is now {post_weight} (raw)"
+                logger.info(f"✓ {msg}")
+                return True, msg
+            else:
+                msg = f"Zero Calibration completed but weight reads {post_weight}. May need adjustment."
+                logger.warning(f"⚠ {msg}")
+                return True, msg
+            
+        except Exception as e:
+            error_msg = f"Zero Calibration FAILED: {e}"
+            logger.error(f"✗ {error_msg}")
+            self.handle_error(e)
+            return False, error_msg
+    
+    def span_calibration(self, known_weight: float, decimal_places: int = 2) -> Tuple[bool, str, int]:
+        """
+        Perform Span Calibration (known weight).
+        
+        This defines a calibration point using a known weight. The known weight
+        must be placed on the scale and stable before calling this method.
+        Recommended: Use at least 50% of the load cell capacity.
+        
+        Procedure:
+        1. Place KNOWN WEIGHT on scale, wait for stability
+        2. Write known weight value to Register 64 (CALW) as 32-bit signed int
+        3. Send Command 101 to Register 5 (CMDR)
+        4. Read Register 64 (CALW) to check result:
+           - 0 = Success
+           - Non-zero = Error code
+        
+        Args:
+            known_weight: The known weight value (e.g., 50.00 for 50kg)
+            decimal_places: Number of decimal places (default 2, so 50.00 becomes 5000)
+        
+        Returns:
+            Tuple[bool, str, int]: (success, message, error_code)
+                                   error_code is 0 on success, otherwise the TLB4 error code
+        """
+        try:
+            if not self.initialized or self.instrument is None:
+                return False, "Modbus interface not connected", -1
+            
+            # Convert weight to integer with decimal places
+            # e.g., 50.00 kg with 2 decimals = 5000
+            weight_int = int(known_weight * (10 ** decimal_places))
+            
+            logger.info("=" * 50)
+            logger.info("SPAN CALIBRATION - Starting")
+            logger.info(f"Known weight: {known_weight} kg ({weight_int} with {decimal_places} decimals)")
+            logger.info("=" * 50)
+            
+            # Read current weight before calibration
+            pre_weight = self._read_gross_weight_raw()
+            logger.info(f"Pre-calibration gross weight (raw): {pre_weight}")
+            
+            with self._lock:
+                # Step 1: Write the known weight to CALW register (64)
+                # Must be 32-bit signed integer
+                logger.info(f"Writing known weight {weight_int} to register {self.ADDR_CAL_WEIGHT}...")
+                self._write_32bit_value(self.ADDR_CAL_WEIGHT, weight_int)
+                
+                time.sleep(0.5)
+                
+                # Step 2: Send Command 101 to Command Register
+                logger.info(f"Sending Span Calibration Command ({self.CMD_SPAN_CALIBRATION}) to register {self.TLB4_COMMAND_REGISTER}...")
+                self.instrument.write_registers(
+                    self.TLB4_COMMAND_REGISTER,
+                    [self.CMD_SPAN_CALIBRATION]
+                )
+            
+            # Wait for TLB4 to process the calibration
+            time.sleep(2.0)
+            
+            # Step 3: Check result by reading CALW register
+            # 0 = Success, non-zero = error code
+            with self._lock:
+                result_code = self._read_32bit_value(self.ADDR_CAL_WEIGHT, DataFormat.INT32)
+            
+            logger.info(f"Calibration result code from CALW register: {result_code}")
+            
+            if result_code == 0:
+                # Verify by reading current weight
+                post_weight = self._read_gross_weight_raw()
+                scaled_weight = post_weight / (10 ** decimal_places)
+                
+                msg = f"Span Calibration SUCCESS - Scale now reads {scaled_weight:.2f} kg"
+                logger.info(f"✓ {msg}")
+                return True, msg, 0
+            else:
+                msg = f"Span Calibration FAILED with error code: {result_code}"
+                logger.error(f"✗ {msg}")
+                return False, msg, int(result_code)
+            
+        except Exception as e:
+            error_msg = f"Span Calibration FAILED: {e}"
+            logger.error(f"✗ {error_msg}")
+            self.handle_error(e)
+            return False, error_msg, -1
+    
+    def _write_32bit_value(self, register: int, value: int) -> None:
+        """
+        Write a 32-bit signed integer to two consecutive registers.
+        
+        Args:
+            register: Starting register address
+            value: 32-bit signed integer value to write
+        """
+        if self.instrument is None:
+            raise RuntimeError("Instrument not initialized")
+        
+        # Pack value as 32-bit signed integer
+        if self.byteorder == "big":
+            raw_bytes = struct.pack('>i', value)
+        else:
+            raw_bytes = struct.pack('<i', value)
+        
+        # Unpack as two 16-bit words
+        if self.byteorder == "big":
+            high_word, low_word = struct.unpack('>HH', raw_bytes)
+        else:
+            low_word, high_word = struct.unpack('<HH', raw_bytes)
+        
+        # Write based on word order
+        if self.wordorder == "big":
+            self.instrument.write_registers(register, [high_word, low_word])
+        else:
+            self.instrument.write_registers(register, [low_word, high_word])
+        
+        logger.debug(f"Wrote 32-bit value {value} to registers {register}-{register+1}")
+    
+    def _read_gross_weight_raw(self) -> int:
+        """
+        Read the raw gross weight value (without scaling).
+        
+        Returns:
+            int: Raw gross weight value
+        """
+        if self.instrument is None:
+            raise RuntimeError("Instrument not initialized")
+        
+        cfg = self.tlb4_config
+        raw_value = self._read_value(cfg.reg_gross_weight, cfg.gross_weight_format)
+        return int(raw_value)
+    
+    def get_calibration_status(self) -> Dict[str, Any]:
+        """
+        Get current calibration-relevant readings for display.
+        
+        Returns:
+            Dict with gross_weight_raw, gross_weight_kg, and stability indicator
+        """
+        try:
+            if not self.initialized or self.instrument is None:
+                return {
+                    "connected": False,
+                    "gross_weight_raw": 0,
+                    "gross_weight_kg": 0.0,
+                    "stable": False,
+                }
+            
+            data = self.read()
+            
+            return {
+                "connected": True,
+                "gross_weight_raw": data.get("gross_weight_raw", 0),
+                "gross_weight_kg": data.get("gross_weight_kg", 0.0),
+                "net_weight_kg": data.get("net_weight_kg", 0.0),
+                "stable": True,  # Could be enhanced with stability detection
+            }
+        except Exception as e:
+            logger.warning(f"Error getting calibration status: {e}")
+            return {
+                "connected": False,
+                "gross_weight_raw": 0,
+                "gross_weight_kg": 0.0,
+                "stable": False,
+                "error": str(e),
+            }
     
     def get_individual_loads(self) -> List[float]:
         """

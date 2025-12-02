@@ -34,9 +34,12 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QWidget,
     QScrollArea,
+    QFrame,
+    QProgressBar,
+    QApplication,
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtGui import QFont, QColor
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +115,10 @@ class IOConfigDialog(QDialog):
         # Modbus tab
         modbus_tab = self.create_modbus_tab()
         self.tab_widget.addTab(modbus_tab, "Modbus/RS485")
+        
+        # Calibration tab
+        calibration_tab = self.create_calibration_tab()
+        self.tab_widget.addTab(calibration_tab, "⚖ Calibration")
         
         layout.addWidget(self.tab_widget)
         
@@ -595,6 +602,592 @@ class IOConfigDialog(QDialog):
         main_layout.addWidget(scroll)
         
         return tab
+    
+    def create_calibration_tab(self) -> QWidget:
+        """Create the Calibration tab for TLB4 load cell real calibration."""
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+        main_layout.setSpacing(16)
+        
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        
+        scroll_widget = QWidget()
+        layout = QVBoxLayout(scroll_widget)
+        layout.setSpacing(20)
+        
+        # =====================================================================
+        # Header with live weight display
+        # =====================================================================
+        header_frame = QFrame()
+        header_frame.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #1a237e, stop:1 #283593);
+                border-radius: 12px;
+                padding: 20px;
+            }
+        """)
+        header_layout = QVBoxLayout(header_frame)
+        
+        # Title
+        title_label = QLabel("⚖ Scale Calibration")
+        title_label.setStyleSheet("""
+            font-size: 22px;
+            font-weight: bold;
+            color: #ffffff;
+            letter-spacing: 1px;
+        """)
+        title_label.setAlignment(Qt.AlignCenter)
+        header_layout.addWidget(title_label)
+        
+        # Subtitle
+        subtitle_label = QLabel("Real calibration using physical reference weights")
+        subtitle_label.setStyleSheet("font-size: 11px; color: #b3b3ff; margin-bottom: 15px;")
+        subtitle_label.setAlignment(Qt.AlignCenter)
+        header_layout.addWidget(subtitle_label)
+        
+        # Live weight display panel
+        weight_panel = QFrame()
+        weight_panel.setStyleSheet("""
+            QFrame {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+                padding: 15px;
+            }
+        """)
+        weight_layout = QHBoxLayout(weight_panel)
+        
+        # Current weight display
+        self.cal_weight_display = QLabel("---")
+        self.cal_weight_display.setStyleSheet("""
+            font-size: 48px;
+            font-weight: bold;
+            color: #64ffda;
+            font-family: 'Consolas', 'Monaco', monospace;
+        """)
+        self.cal_weight_display.setAlignment(Qt.AlignCenter)
+        weight_layout.addWidget(self.cal_weight_display, stretch=2)
+        
+        # Weight unit
+        unit_label = QLabel("kg")
+        unit_label.setStyleSheet("font-size: 24px; color: #80cbc4; margin-left: -10px;")
+        weight_layout.addWidget(unit_label)
+        
+        weight_layout.addSpacing(30)
+        
+        # Raw value display
+        raw_layout = QVBoxLayout()
+        raw_title = QLabel("RAW VALUE")
+        raw_title.setStyleSheet("font-size: 10px; color: #90caf9; letter-spacing: 2px;")
+        raw_layout.addWidget(raw_title)
+        
+        self.cal_raw_display = QLabel("---")
+        self.cal_raw_display.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            color: #e3f2fd;
+            font-family: 'Consolas', 'Monaco', monospace;
+        """)
+        raw_layout.addWidget(self.cal_raw_display)
+        weight_layout.addLayout(raw_layout)
+        
+        weight_layout.addSpacing(20)
+        
+        # Connection status
+        status_layout = QVBoxLayout()
+        status_title = QLabel("STATUS")
+        status_title.setStyleSheet("font-size: 10px; color: #90caf9; letter-spacing: 2px;")
+        status_layout.addWidget(status_title)
+        
+        self.cal_status_indicator = QLabel("● Disconnected")
+        self.cal_status_indicator.setStyleSheet("font-size: 14px; color: #ef5350;")
+        status_layout.addWidget(self.cal_status_indicator)
+        weight_layout.addLayout(status_layout)
+        
+        header_layout.addWidget(weight_panel)
+        layout.addWidget(header_frame)
+        
+        # =====================================================================
+        # Calibration Steps Container
+        # =====================================================================
+        steps_container = QHBoxLayout()
+        steps_container.setSpacing(20)
+        
+        # ---------------------------------------------------------------------
+        # Step 1: Zero Calibration
+        # ---------------------------------------------------------------------
+        zero_card = self._create_calibration_card(
+            step_num="1",
+            title="Zero Calibration",
+            icon="○",
+            color="#00897b",
+            description="Define the zero point (empty scale)",
+            instructions=[
+                "Remove ALL weight from the scale",
+                "Ensure scale platform is clean and stable",
+                "Wait for reading to stabilize",
+                "Click 'Calibrate Zero' button"
+            ]
+        )
+        
+        # Zero calibration button
+        zero_btn_layout = QHBoxLayout()
+        self.zero_cal_btn = QPushButton("Calibrate Zero")
+        self.zero_cal_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #00897b;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 14px 28px;
+                border-radius: 8px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #00796b;
+            }
+            QPushButton:pressed {
+                background-color: #00695c;
+            }
+            QPushButton:disabled {
+                background-color: #b2dfdb;
+                color: #80cbc4;
+            }
+        """)
+        self.zero_cal_btn.clicked.connect(self.perform_zero_calibration)
+        zero_btn_layout.addWidget(self.zero_cal_btn)
+        zero_card.layout().addLayout(zero_btn_layout)
+        
+        # Zero result label
+        self.zero_result_label = QLabel("")
+        self.zero_result_label.setStyleSheet("font-size: 11px; color: #666; margin-top: 8px;")
+        self.zero_result_label.setWordWrap(True)
+        zero_card.layout().addWidget(self.zero_result_label)
+        
+        steps_container.addWidget(zero_card)
+        
+        # ---------------------------------------------------------------------
+        # Step 2: Span Calibration
+        # ---------------------------------------------------------------------
+        span_card = self._create_calibration_card(
+            step_num="2",
+            title="Span Calibration",
+            icon="◉",
+            color="#1565c0",
+            description="Define a calibration point using known weight",
+            instructions=[
+                "Complete Zero Calibration first",
+                "Place a known reference weight on scale",
+                "Enter the exact weight value below",
+                "Recommended: Use 50%+ of full capacity",
+                "Click 'Calibrate Span' button"
+            ]
+        )
+        
+        # Weight input
+        weight_input_layout = QFormLayout()
+        weight_input_layout.setSpacing(10)
+        
+        self.known_weight_spin = QDoubleSpinBox()
+        self.known_weight_spin.setRange(0.01, 10000.0)
+        self.known_weight_spin.setDecimals(2)
+        self.known_weight_spin.setValue(10.0)
+        self.known_weight_spin.setSuffix(" kg")
+        self.known_weight_spin.setStyleSheet("""
+            QDoubleSpinBox {
+                font-size: 16px;
+                font-weight: bold;
+                padding: 10px 15px;
+                border: 2px solid #1565c0;
+                border-radius: 6px;
+                background-color: #e3f2fd;
+                color: #1565c0;
+            }
+            QDoubleSpinBox:focus {
+                border-color: #0d47a1;
+            }
+        """)
+        
+        weight_label = QLabel("Reference Weight:")
+        weight_label.setStyleSheet("font-weight: bold; color: #1565c0;")
+        weight_input_layout.addRow(weight_label, self.known_weight_spin)
+        span_card.layout().addLayout(weight_input_layout)
+        
+        # Span calibration button
+        span_btn_layout = QHBoxLayout()
+        self.span_cal_btn = QPushButton("Calibrate Span")
+        self.span_cal_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1565c0;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 14px 28px;
+                border-radius: 8px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #0d47a1;
+            }
+            QPushButton:pressed {
+                background-color: #0a3d91;
+            }
+            QPushButton:disabled {
+                background-color: #bbdefb;
+                color: #90caf9;
+            }
+        """)
+        self.span_cal_btn.clicked.connect(self.perform_span_calibration)
+        span_btn_layout.addWidget(self.span_cal_btn)
+        span_card.layout().addLayout(span_btn_layout)
+        
+        # Span result label
+        self.span_result_label = QLabel("")
+        self.span_result_label.setStyleSheet("font-size: 11px; color: #666; margin-top: 8px;")
+        self.span_result_label.setWordWrap(True)
+        span_card.layout().addWidget(self.span_result_label)
+        
+        steps_container.addWidget(span_card)
+        
+        layout.addLayout(steps_container)
+        
+        # =====================================================================
+        # Important Notes Section
+        # =====================================================================
+        notes_frame = QFrame()
+        notes_frame.setStyleSheet("""
+            QFrame {
+                background-color: #fff8e1;
+                border: 2px solid #ffb300;
+                border-radius: 8px;
+                padding: 15px;
+            }
+        """)
+        notes_layout = QVBoxLayout(notes_frame)
+        
+        notes_title = QLabel("⚠ Important Calibration Notes")
+        notes_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #ff6f00;")
+        notes_layout.addWidget(notes_title)
+        
+        notes_text = QLabel(
+            "• <b>Stability:</b> Ensure readings are stable before calibrating. Unstable weights will cause errors.\n"
+            "• <b>Reference Weight:</b> Use certified calibration weights for accurate results.\n"
+            "• <b>Capacity:</b> Reference weight should be 50% or more of full scale capacity.\n"
+            "• <b>Order:</b> Always perform Zero Calibration before Span Calibration.\n"
+            "• <b>Environment:</b> Avoid vibrations, air currents, and temperature changes during calibration.\n"
+            "• <b>Error Codes:</b> If calibration fails, check the error code and ensure all conditions are met."
+        )
+        notes_text.setStyleSheet("font-size: 11px; color: #5d4037; line-height: 1.5;")
+        notes_text.setWordWrap(True)
+        notes_layout.addWidget(notes_text)
+        
+        layout.addWidget(notes_frame)
+        
+        # =====================================================================
+        # Error Code Reference
+        # =====================================================================
+        error_group = QGroupBox("Calibration Error Codes Reference")
+        error_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 11px;
+                font-weight: bold;
+                border: 1px solid #ccc;
+                border-radius: 6px;
+                margin-top: 12px;
+                padding-top: 10px;
+                background-color: #fafafa;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        error_layout = QVBoxLayout()
+        
+        error_text = QLabel(
+            "<table style='font-size: 10px;'>"
+            "<tr><td><b>Code 0:</b></td><td style='color: #2e7d32;'>Success - Calibration completed successfully</td></tr>"
+            "<tr><td><b>Non-zero:</b></td><td style='color: #c62828;'>Error - Check stability, weight value, and hardware connections</td></tr>"
+            "</table>"
+        )
+        error_text.setStyleSheet("font-size: 10px;")
+        error_layout.addWidget(error_text)
+        error_group.setLayout(error_layout)
+        
+        layout.addWidget(error_group)
+        
+        layout.addStretch()
+        
+        scroll.setWidget(scroll_widget)
+        main_layout.addWidget(scroll)
+        
+        # Setup calibration update timer
+        self.cal_update_timer = QTimer()
+        self.cal_update_timer.timeout.connect(self.update_calibration_display)
+        
+        return tab
+    
+    def _create_calibration_card(
+        self,
+        step_num: str,
+        title: str,
+        icon: str,
+        color: str,
+        description: str,
+        instructions: list
+    ) -> QFrame:
+        """Create a styled calibration step card."""
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: white;
+                border: 2px solid {color};
+                border-radius: 12px;
+                padding: 20px;
+            }}
+        """)
+        card.setMinimumWidth(350)
+        
+        layout = QVBoxLayout(card)
+        layout.setSpacing(12)
+        
+        # Step header
+        header_layout = QHBoxLayout()
+        
+        step_badge = QLabel(f"STEP {step_num}")
+        step_badge.setStyleSheet(f"""
+            background-color: {color};
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 4px 10px;
+            border-radius: 10px;
+            letter-spacing: 1px;
+        """)
+        step_badge.setFixedWidth(70)
+        header_layout.addWidget(step_badge)
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
+        
+        # Title
+        title_label = QLabel(f"{icon} {title}")
+        title_label.setStyleSheet(f"""
+            font-size: 18px;
+            font-weight: bold;
+            color: {color};
+        """)
+        layout.addWidget(title_label)
+        
+        # Description
+        desc_label = QLabel(description)
+        desc_label.setStyleSheet("font-size: 11px; color: #666; margin-bottom: 10px;")
+        layout.addWidget(desc_label)
+        
+        # Divider
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setStyleSheet(f"background-color: {color}; opacity: 0.3;")
+        divider.setFixedHeight(1)
+        layout.addWidget(divider)
+        
+        # Instructions
+        instructions_label = QLabel("Instructions:")
+        instructions_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #333; margin-top: 5px;")
+        layout.addWidget(instructions_label)
+        
+        for i, instruction in enumerate(instructions, 1):
+            instr_label = QLabel(f"  {i}. {instruction}")
+            instr_label.setStyleSheet("font-size: 10px; color: #555; margin-left: 10px;")
+            layout.addWidget(instr_label)
+        
+        layout.addSpacing(10)
+        
+        return card
+    
+    def update_calibration_display(self) -> None:
+        """Update the live weight display in calibration tab."""
+        try:
+            # Get parent main window to access modbus interface
+            main_window = self.parent()
+            if main_window and hasattr(main_window, 'modbus_interface') and main_window.modbus_interface:
+                interface = main_window.modbus_interface
+                if interface.is_connected():
+                    status = interface.get_calibration_status()
+                    
+                    # Update weight display
+                    weight_kg = status.get('gross_weight_kg', 0.0)
+                    raw_value = status.get('gross_weight_raw', 0)
+                    
+                    self.cal_weight_display.setText(f"{weight_kg:.2f}")
+                    self.cal_raw_display.setText(f"{raw_value}")
+                    
+                    # Update status indicator
+                    self.cal_status_indicator.setText("● Connected")
+                    self.cal_status_indicator.setStyleSheet("font-size: 14px; color: #4caf50;")
+                    
+                    # Enable calibration buttons
+                    self.zero_cal_btn.setEnabled(True)
+                    self.span_cal_btn.setEnabled(True)
+                    return
+            
+            # Not connected state
+            self.cal_weight_display.setText("---")
+            self.cal_raw_display.setText("---")
+            self.cal_status_indicator.setText("● Disconnected")
+            self.cal_status_indicator.setStyleSheet("font-size: 14px; color: #ef5350;")
+            self.zero_cal_btn.setEnabled(False)
+            self.span_cal_btn.setEnabled(False)
+            
+        except Exception as e:
+            logger.warning(f"Error updating calibration display: {e}")
+    
+    def perform_zero_calibration(self) -> None:
+        """Perform zero calibration on the TLB4."""
+        try:
+            # Confirm with user
+            reply = QMessageBox.question(
+                self,
+                "Zero Calibration",
+                "⚠ ZERO CALIBRATION\n\n"
+                "Please confirm:\n"
+                "• The scale is completely EMPTY\n"
+                "• The reading is STABLE\n"
+                "• No vibrations or air currents\n\n"
+                "Proceed with zero calibration?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Get modbus interface from parent
+            main_window = self.parent()
+            if not main_window or not hasattr(main_window, 'modbus_interface') or not main_window.modbus_interface:
+                QMessageBox.warning(self, "Error", "Modbus interface not available.\n\nPlease ensure:\n• Modbus is enabled in settings\n• TLB4 is connected and powered")
+                return
+            
+            interface = main_window.modbus_interface
+            if not interface.is_connected():
+                QMessageBox.warning(self, "Error", "TLB4 is not connected.\n\nCheck serial port and connection.")
+                return
+            
+            # Disable buttons during calibration
+            self.zero_cal_btn.setEnabled(False)
+            self.span_cal_btn.setEnabled(False)
+            self.zero_cal_btn.setText("Calibrating...")
+            QApplication.processEvents()
+            
+            # Perform calibration
+            logger.info("User initiated Zero Calibration")
+            success, message = interface.zero_calibration()
+            
+            # Re-enable buttons
+            self.zero_cal_btn.setEnabled(True)
+            self.span_cal_btn.setEnabled(True)
+            self.zero_cal_btn.setText("Calibrate Zero")
+            
+            # Show result
+            if success:
+                self.zero_result_label.setText(f"✓ {message}")
+                self.zero_result_label.setStyleSheet("font-size: 11px; color: #2e7d32; font-weight: bold; margin-top: 8px;")
+                QMessageBox.information(self, "Zero Calibration", f"✓ SUCCESS\n\n{message}")
+            else:
+                self.zero_result_label.setText(f"✗ {message}")
+                self.zero_result_label.setStyleSheet("font-size: 11px; color: #c62828; font-weight: bold; margin-top: 8px;")
+                QMessageBox.critical(self, "Zero Calibration Failed", f"✗ FAILED\n\n{message}")
+            
+        except Exception as e:
+            logger.error(f"Zero calibration error: {e}", exc_info=True)
+            self.zero_cal_btn.setEnabled(True)
+            self.span_cal_btn.setEnabled(True)
+            self.zero_cal_btn.setText("Calibrate Zero")
+            QMessageBox.critical(self, "Error", f"Calibration failed with error:\n{e}")
+    
+    def perform_span_calibration(self) -> None:
+        """Perform span calibration on the TLB4 with known weight."""
+        try:
+            known_weight = self.known_weight_spin.value()
+            
+            # Confirm with user
+            reply = QMessageBox.question(
+                self,
+                "Span Calibration",
+                f"⚖ SPAN CALIBRATION\n\n"
+                f"Reference weight: {known_weight:.2f} kg\n\n"
+                f"Please confirm:\n"
+                f"• Zero calibration has been completed\n"
+                f"• {known_weight:.2f} kg reference weight is on the scale\n"
+                f"• The reading is STABLE\n"
+                f"• No vibrations or air currents\n\n"
+                f"Proceed with span calibration?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Get modbus interface from parent
+            main_window = self.parent()
+            if not main_window or not hasattr(main_window, 'modbus_interface') or not main_window.modbus_interface:
+                QMessageBox.warning(self, "Error", "Modbus interface not available.\n\nPlease ensure:\n• Modbus is enabled in settings\n• TLB4 is connected and powered")
+                return
+            
+            interface = main_window.modbus_interface
+            if not interface.is_connected():
+                QMessageBox.warning(self, "Error", "TLB4 is not connected.\n\nCheck serial port and connection.")
+                return
+            
+            # Disable buttons during calibration
+            self.zero_cal_btn.setEnabled(False)
+            self.span_cal_btn.setEnabled(False)
+            self.span_cal_btn.setText("Calibrating...")
+            QApplication.processEvents()
+            
+            # Perform calibration
+            logger.info(f"User initiated Span Calibration with {known_weight:.2f} kg")
+            success, message, error_code = interface.span_calibration(known_weight)
+            
+            # Re-enable buttons
+            self.zero_cal_btn.setEnabled(True)
+            self.span_cal_btn.setEnabled(True)
+            self.span_cal_btn.setText("Calibrate Span")
+            
+            # Show result
+            if success:
+                self.span_result_label.setText(f"✓ {message}")
+                self.span_result_label.setStyleSheet("font-size: 11px; color: #2e7d32; font-weight: bold; margin-top: 8px;")
+                QMessageBox.information(self, "Span Calibration", f"✓ SUCCESS\n\n{message}")
+            else:
+                error_info = f"\nError code: {error_code}" if error_code != -1 else ""
+                self.span_result_label.setText(f"✗ {message}")
+                self.span_result_label.setStyleSheet("font-size: 11px; color: #c62828; font-weight: bold; margin-top: 8px;")
+                QMessageBox.critical(self, "Span Calibration Failed", f"✗ FAILED\n\n{message}{error_info}")
+            
+        except Exception as e:
+            logger.error(f"Span calibration error: {e}", exc_info=True)
+            self.zero_cal_btn.setEnabled(True)
+            self.span_cal_btn.setEnabled(True)
+            self.span_cal_btn.setText("Calibrate Span")
+            QMessageBox.critical(self, "Error", f"Calibration failed with error:\n{e}")
+    
+    def showEvent(self, event):
+        """Handle dialog show event to start calibration timer if on calibration tab."""
+        super().showEvent(event)
+        # Start timer when dialog is shown and calibration tab is selected
+        if hasattr(self, 'cal_update_timer'):
+            self.cal_update_timer.start(500)  # Update every 500ms
+    
+    def hideEvent(self, event):
+        """Handle dialog hide event to stop calibration timer."""
+        super().hideEvent(event)
+        if hasattr(self, 'cal_update_timer'):
+            self.cal_update_timer.stop()
     
     def create_hardware_banner(self) -> QGroupBox:
         """Create hardware information banner."""
