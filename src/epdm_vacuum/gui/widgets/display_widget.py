@@ -20,11 +20,24 @@ from PyQt5.QtWidgets import (
     QGridLayout,
     QSizePolicy,
     QFrame,
+    QComboBox,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtGui import QPalette, QColor, QFont
 
 logger = logging.getLogger(__name__)
+
+
+# Pressure unit conversion factors (from PSI)
+PRESSURE_UNITS = {
+    "PSIG": {"factor": 1.0, "decimals": 2, "label": "PSIG"},
+    "bar": {"factor": 0.0689476, "decimals": 4, "label": "bar"},
+    "mbar": {"factor": 68.9476, "decimals": 1, "label": "mbar"},
+    "kPa": {"factor": 6.89476, "decimals": 2, "label": "kPa"},
+    "Torr": {"factor": 51.7149, "decimals": 1, "label": "Torr"},
+    "inHg": {"factor": 2.03602, "decimals": 2, "label": "inHg"},
+    "atm": {"factor": 0.068046, "decimals": 4, "label": "atm"},
+}
 
 
 class DisplayWidget(QWidget):
@@ -32,7 +45,7 @@ class DisplayWidget(QWidget):
     Widget for displaying real-time sensor values.
     
     Displays:
-    - Vacuum pressure (bar and PSI)
+    - Pressure (gauge) with selectable units
     - Total force (kg) - LARGE prominent display
     - Individual load cell readings
     """
@@ -41,7 +54,20 @@ class DisplayWidget(QWidget):
         """Initialize the display widget."""
         super().__init__()
         
+        # Settings for persistence
+        self.settings = QSettings("EPDM", "VacuumTestFixture")
+        
+        # Current pressure in PSIG (base unit)
+        self._current_pressure_psig = 0.0
+        
         self.init_ui()
+        
+        # Restore saved unit preference
+        saved_unit = self.settings.value("pressure_unit", "PSIG")
+        if saved_unit in PRESSURE_UNITS:
+            index = list(PRESSURE_UNITS.keys()).index(saved_unit)
+            self.unit_selector.setCurrentIndex(index)
+        
         logger.info("DisplayWidget initialized")
     
     def init_ui(self) -> None:
@@ -111,9 +137,9 @@ class DisplayWidget(QWidget):
     
     def create_vacuum_display(self) -> QGroupBox:
         """
-        Create pressure display group.
+        Create pressure display group with unit selector.
         
-        Shows gauge pressure (PSIG):
+        Shows gauge pressure with user-selectable units:
         - Positive = above atmospheric
         - Negative = vacuum (below atmospheric)
         
@@ -141,31 +167,49 @@ class DisplayWidget(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(8)
         
-        # Pressure in millibar (negative = vacuum)
-        mbar_layout = QHBoxLayout()
-        mbar_label = QLabel("mbar:")
-        mbar_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #555;")
-        mbar_label.setFixedWidth(45)
-        self.pressure_mbar_lcd = self.create_styled_lcd(digits=7, height=45)
-        mbar_layout.addWidget(mbar_label)
-        mbar_layout.addWidget(self.pressure_mbar_lcd)
-        layout.addLayout(mbar_layout)
+        # Unit selector row
+        unit_layout = QHBoxLayout()
+        unit_label = QLabel("Unit:")
+        unit_label.setStyleSheet("font-size: 10pt; color: #555;")
+        self.unit_selector = QComboBox()
+        self.unit_selector.addItems(list(PRESSURE_UNITS.keys()))
+        self.unit_selector.setStyleSheet("""
+            QComboBox {
+                font-size: 10pt;
+                padding: 4px 8px;
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QComboBox:hover {
+                border-color: #3498db;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+        """)
+        self.unit_selector.currentTextChanged.connect(self._on_unit_changed)
+        unit_layout.addWidget(unit_label)
+        unit_layout.addWidget(self.unit_selector)
+        unit_layout.addStretch()
+        layout.addLayout(unit_layout)
         
-        # Pressure in PSI (negative = vacuum)
-        psi_layout = QHBoxLayout()
-        psi_label = QLabel("PSI:")
-        psi_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #555;")
-        psi_label.setFixedWidth(45)
-        self.pressure_psi_lcd = self.create_styled_lcd(digits=7, height=45)
-        psi_layout.addWidget(psi_label)
-        psi_layout.addWidget(self.pressure_psi_lcd)
-        layout.addLayout(psi_layout)
+        # Main pressure display with dynamic unit label
+        pressure_layout = QHBoxLayout()
+        self.pressure_unit_label = QLabel("PSIG:")
+        self.pressure_unit_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #555;")
+        self.pressure_unit_label.setFixedWidth(50)
+        self.pressure_lcd = self.create_styled_lcd(digits=8, height=55)
+        pressure_layout.addWidget(self.pressure_unit_label)
+        pressure_layout.addWidget(self.pressure_lcd)
+        layout.addLayout(pressure_layout)
         
         # Raw current display (4-20mA transmitter)
         raw_layout = QHBoxLayout()
         raw_label = QLabel("mA:")
         raw_label.setStyleSheet("font-size: 9pt; color: #888;")
-        raw_label.setFixedWidth(45)
+        raw_label.setFixedWidth(50)
         self.raw_current_label = QLabel("-- mA")
         self.raw_current_label.setStyleSheet("font-size: 9pt; color: #888; font-family: monospace;")
         self.raw_current_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -175,6 +219,37 @@ class DisplayWidget(QWidget):
         
         group.setLayout(layout)
         return group
+    
+    def _on_unit_changed(self, unit_name: str) -> None:
+        """
+        Handle unit selector change.
+        
+        Args:
+            unit_name: Selected unit name
+        """
+        # Save preference
+        self.settings.setValue("pressure_unit", unit_name)
+        
+        # Update label
+        unit_info = PRESSURE_UNITS.get(unit_name, PRESSURE_UNITS["PSIG"])
+        self.pressure_unit_label.setText(f"{unit_info['label']}:")
+        
+        # Update display with current pressure
+        self._update_pressure_display()
+        
+        logger.info(f"Pressure unit changed to: {unit_name}")
+    
+    def _update_pressure_display(self) -> None:
+        """Update the pressure display with the current unit."""
+        unit_name = self.unit_selector.currentText()
+        unit_info = PRESSURE_UNITS.get(unit_name, PRESSURE_UNITS["PSIG"])
+        
+        # Convert from PSIG to selected unit
+        converted_value = self._current_pressure_psig * unit_info["factor"]
+        decimals = unit_info["decimals"]
+        
+        # Display the converted value
+        self.pressure_lcd.display(round(converted_value, decimals))
     
     def create_force_display(self) -> QGroupBox:
         """
@@ -313,26 +388,23 @@ class DisplayWidget(QWidget):
             logger.info(f"  vacuum_bar={data.get('vacuum_bar')}, vacuum_psi={data.get('vacuum_psi')}")
             logger.info(f"  pressure_voltage={data.get('pressure_voltage')}, pressure_psi={data.get('pressure_psi')}")
         
-        # Update pressure displays - show gauge pressure directly
+        # Update pressure display - show gauge pressure in user-selected units
         # Positive = above atmospheric, Negative = vacuum
         if "pressure_psig" in data:
-            pressure_psig = data['pressure_psig']
-            self.pressure_psi_lcd.display(round(pressure_psig, 2))
-            
-            # Convert PSI to millibar (1 PSI = 68.9476 mbar)
-            pressure_mbar = pressure_psig * 68.9476
-            self.pressure_mbar_lcd.display(round(pressure_mbar, 1))
+            self._current_pressure_psig = data['pressure_psig']
+            self._update_pressure_display()
             
             if self._update_count <= 5:
-                logger.info(f"  -> pressure: {pressure_psig:.2f} PSIG = {pressure_mbar:.1f} mbar")
+                unit_name = self.unit_selector.currentText()
+                unit_info = PRESSURE_UNITS.get(unit_name, PRESSURE_UNITS["PSIG"])
+                converted = self._current_pressure_psig * unit_info["factor"]
+                logger.info(f"  -> pressure: {self._current_pressure_psig:.2f} PSIG = {converted:.2f} {unit_name}")
         elif "pressure_psi" in data:
             # Legacy fallback
-            pressure_psig = data['pressure_psi']
-            self.pressure_psi_lcd.display(round(pressure_psig, 2))
-            pressure_mbar = pressure_psig * 68.9476
-            self.pressure_mbar_lcd.display(round(pressure_mbar, 1))
+            self._current_pressure_psig = data['pressure_psi']
+            self._update_pressure_display()
             if self._update_count <= 5:
-                logger.info(f"  -> pressure (legacy): {pressure_psig:.2f} PSI = {pressure_mbar:.1f} mbar")
+                logger.info(f"  -> pressure (legacy): {self._current_pressure_psig:.2f} PSIG")
         else:
             if self._update_count <= 5:
                 logger.warning(f"  -> pressure_psig NOT in data!")
