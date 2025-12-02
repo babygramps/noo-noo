@@ -907,13 +907,20 @@ class WidgetLordsInterface(HardwareInterface):
                     raw_voltage = raw_readings.get("pressure_sensor", 0.0)
                     
                     # Convert voltage to mA for 4-20mA transmitter
-                    # PI-SPI-DIN-8AI uses 500Ω resistor: 4mA=2V, 20mA=10V
-                    if raw_voltage < 2.0:
+                    # PI-SPI-DIN-8AI uses ~458Ω sense resistor (not exactly 500Ω)
+                    # Measured: 9.2mA = 4.21V, so R = 457.6Ω
+                    # At 458Ω: 4mA = 1.832V, 20mA = 9.16V
+                    SENSE_RESISTOR = 458.0  # Ohms (calibrated from measurement)
+                    V_4MA = 4.0 * SENSE_RESISTOR / 1000.0   # ~1.832V
+                    V_20MA = 20.0 * SENSE_RESISTOR / 1000.0  # ~9.16V
+                    
+                    if raw_voltage <= V_4MA:
                         raw_mA = 4.0
-                    elif raw_voltage > 10.0:
+                    elif raw_voltage >= V_20MA:
                         raw_mA = 20.0
                     else:
-                        raw_mA = 4.0 + (raw_voltage - 2.0) * 16.0 / 8.0
+                        # Linear interpolation: mA = 4 + (V - V_4mA) / R * 1000
+                        raw_mA = raw_voltage / SENSE_RESISTOR * 1000.0
                     
                     # Convert PSI to millibar (1 PSI = 68.9476 mbar)
                     pressure_mbar = pressure_psig * 68.9476

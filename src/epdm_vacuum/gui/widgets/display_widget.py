@@ -410,24 +410,23 @@ class DisplayWidget(QWidget):
                 logger.warning(f"  -> pressure_psig NOT in data!")
         
         # Update raw current display (4-20mA transmitter)
-        # PI-SPI-DIN-8AI uses 500Ω resistor: 4mA=2V, 20mA=10V
-        # Formula: mA = 4 + (voltage - 2) * 16 / 8
+        # PI-SPI-DIN-8AI uses ~458Ω sense resistor (calibrated from measurement)
+        # Formula: mA = V / R * 1000
         if "pressure_voltage" in data:
             raw_v = data["pressure_voltage"]
-            # Convert voltage to mA (2V=4mA, 10V=20mA for 4-20mA mode)
-            if raw_v < 2.0:
-                raw_mA = 4.0  # Below minimum
-            elif raw_v > 10.0:
-                raw_mA = 20.0  # Above maximum
-            else:
-                raw_mA = 4.0 + (raw_v - 2.0) * 16.0 / 8.0
+            # Convert voltage to mA using calibrated resistor value
+            SENSE_RESISTOR = 458.0  # Ohms (calibrated: 9.2mA @ 4.21V)
+            raw_mA = raw_v / SENSE_RESISTOR * 1000.0
+            
+            # Clamp to reasonable range
+            raw_mA = max(0.0, min(25.0, raw_mA))
             
             self.raw_current_label.setText(f"{raw_mA:.2f} mA")
             
-            # Color code: green if in valid range (4-20mA), yellow if at limits, red if out of range
-            if raw_mA < 4.0 or raw_mA > 20.0:
+            # Color code: green if in valid range (4-20mA), yellow if near limits, red if out of range
+            if raw_mA < 3.8 or raw_mA > 20.5:
                 self.raw_current_label.setStyleSheet("font-size: 9pt; color: #e74c3c; font-family: monospace;")
-            elif raw_mA < 4.5 or raw_mA > 19.5:
+            elif raw_mA < 4.2 or raw_mA > 19.5:
                 self.raw_current_label.setStyleSheet("font-size: 9pt; color: #f39c12; font-family: monospace;")
             else:
                 self.raw_current_label.setStyleSheet("font-size: 9pt; color: #27ae60; font-family: monospace;")

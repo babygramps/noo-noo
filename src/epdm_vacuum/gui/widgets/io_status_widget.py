@@ -545,20 +545,17 @@ class IOStatusWidget(QWidget):
         value_label.setText(f"{value:.2f} {units}")
         
         # Update raw current label if available (convert voltage to mA for 4-20mA transmitters)
-        # PI-SPI-DIN-8AI uses 500Ω resistor: 4mA=2V, 20mA=10V
+        # PI-SPI-DIN-8AI uses ~458Ω sense resistor (calibrated from measurement)
         if raw_current_label and raw_voltage is not None:
-            if raw_voltage < 2.0:
-                raw_mA = 4.0
-            elif raw_voltage > 10.0:
-                raw_mA = 20.0
-            else:
-                raw_mA = 4.0 + (raw_voltage - 2.0) * 16.0 / 8.0
+            SENSE_RESISTOR = 458.0  # Ohms (calibrated: 9.2mA @ 4.21V)
+            raw_mA = raw_voltage / SENSE_RESISTOR * 1000.0
+            raw_mA = max(0.0, min(25.0, raw_mA))  # Clamp to reasonable range
             
             raw_current_label.setText(f"Raw: {raw_mA:.2f} mA")
-            # Color code: green if in valid range (4-20mA), yellow if at limits, red if out of range
-            if raw_mA < 4.0 or raw_mA > 20.0:
+            # Color code: green if in valid range (4-20mA), yellow if near limits, red if out of range
+            if raw_mA < 3.8 or raw_mA > 20.5:
                 raw_current_label.setStyleSheet("font-size: 9pt; color: #e74c3c; font-family: monospace;")
-            elif raw_mA < 4.5 or raw_mA > 19.5:
+            elif raw_mA < 4.2 or raw_mA > 19.5:
                 raw_current_label.setStyleSheet("font-size: 9pt; color: #f39c12; font-family: monospace;")
             else:
                 raw_current_label.setStyleSheet("font-size: 9pt; color: #27ae60; font-family: monospace;")
