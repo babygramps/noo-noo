@@ -410,23 +410,22 @@ class DisplayWidget(QWidget):
                 logger.warning(f"  -> pressure_psig NOT in data!")
         
         # Update raw current display (4-20mA transmitter)
-        # PI-SPI-DIN-8AI uses ~458Ω sense resistor (calibrated from measurement)
-        # Formula: mA = V / R * 1000
+        # PI-SPI-DIN-8AI uses a sense resistor to convert current to voltage
+        # Formula: mA = V / R * 1000 (Ohm's law)
+        # Calibrated resistor value: 454Ω (measured: 9.27mA @ 4.21V = 454Ω)
         if "pressure_voltage" in data:
             raw_v = data["pressure_voltage"]
-            # Convert voltage to mA using calibrated resistor value
-            SENSE_RESISTOR = 458.0  # Ohms (calibrated: 9.2mA @ 4.21V)
-            raw_mA = raw_v / SENSE_RESISTOR * 1000.0
             
-            # Clamp to reasonable range
-            raw_mA = max(0.0, min(25.0, raw_mA))
+            # Convert voltage to mA using Ohm's law with calibrated resistor
+            SENSE_RESISTOR_OHMS = 454.0  # Calibrated from multimeter measurement
+            raw_mA = (raw_v / SENSE_RESISTOR_OHMS) * 1000.0
             
             self.raw_current_label.setText(f"{raw_mA:.2f} mA")
             
             # Color code: green if in valid range (4-20mA), yellow if near limits, red if out of range
             if raw_mA < 3.8 or raw_mA > 20.5:
                 self.raw_current_label.setStyleSheet("font-size: 9pt; color: #e74c3c; font-family: monospace;")
-            elif raw_mA < 4.2 or raw_mA > 19.5:
+            elif raw_mA < 4.2 or raw_mA > 19.8:
                 self.raw_current_label.setStyleSheet("font-size: 9pt; color: #f39c12; font-family: monospace;")
             else:
                 self.raw_current_label.setStyleSheet("font-size: 9pt; color: #27ae60; font-family: monospace;")
