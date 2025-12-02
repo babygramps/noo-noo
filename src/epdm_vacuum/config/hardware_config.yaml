@@ -43,12 +43,12 @@ hardware:
             name: pressure_sensor
             enabled: true
             input_type: 4-20mA    # Input signal type: 4-20mA, 0-10V, or 0-5V
-            low_input: 4.0        # Low span input value (mA or V)
-            low_output: 0.0       # Low span output value (engineering units)
-            high_input: 20.0      # High span input value (mA or V)
-            high_output: 14.0     # High span output value (engineering units)
-            units: PSI            # Engineering units label
-            description: Chamber pressure sensor
+            low_input: 4.0        # Low span input value (mA)
+            low_output: -14.7     # Low span = full vacuum (-14.7 PSIG)
+            high_input: 20.0      # High span input value (mA)
+            high_output: 30.0     # High span = +30 PSIG
+            units: PSIG           # Gauge pressure
+            description: Chamber pressure sensor (vacuum to 30 PSIG)
           - channel: 1
             name: analog_spare_1
             enabled: false

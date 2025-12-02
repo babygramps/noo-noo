@@ -147,13 +147,13 @@ class DisplayWidget(QWidget):
         bar_layout.addWidget(self.vacuum_bar_lcd)
         layout.addLayout(bar_layout)
         
-        # Vacuum in PSI
+        # Vacuum in PSI (or gauge pressure when positive)
         psi_layout = QHBoxLayout()
-        psi_label = QLabel("PSI:")
-        psi_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #555;")
-        psi_label.setFixedWidth(35)
+        self.psi_label = QLabel("PSI:")
+        self.psi_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #555;")
+        self.psi_label.setFixedWidth(35)
         self.vacuum_psi_lcd = self.create_styled_lcd(digits=7, height=45)
-        psi_layout.addWidget(psi_label)
+        psi_layout.addWidget(self.psi_label)
         psi_layout.addWidget(self.vacuum_psi_lcd)
         layout.addLayout(psi_layout)
         
@@ -312,25 +312,32 @@ class DisplayWidget(QWidget):
         
         # Update vacuum displays - use float directly for QLCDNumber
         if "vacuum_bar" in data:
-            vacuum_bar = round(data['vacuum_bar'], 3)
-            self.vacuum_bar_lcd.display(vacuum_bar)
+            vacuum_bar = data['vacuum_bar']
+            # vacuum_bar > 0 means actual vacuum, < 0 means positive pressure
+            self.vacuum_bar_lcd.display(round(abs(vacuum_bar), 3))
             if self._update_count <= 5:
-                logger.info(f"  -> vacuum_bar LCD = {vacuum_bar}")
+                logger.info(f"  -> vacuum_bar LCD = {vacuum_bar:.3f} ({'vacuum' if vacuum_bar >= 0 else 'pressure'})")
         else:
             if self._update_count <= 5:
                 logger.warning(f"  -> vacuum_bar NOT in data!")
         
         if "vacuum_psi" in data:
-            vacuum_psi = round(data['vacuum_psi'], 2)
-            self.vacuum_psi_lcd.display(vacuum_psi)
+            vacuum_psi = data['vacuum_psi']
+            # vacuum_psi > 0 means actual vacuum (below atmospheric)
+            # vacuum_psi < 0 means positive pressure (above atmospheric)
+            if vacuum_psi >= 0:
+                # Vacuum - show as positive vacuum
+                self.psi_label.setText("vac:")
+                self.psi_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #3498db;")
+                self.vacuum_psi_lcd.display(round(vacuum_psi, 2))
+            else:
+                # Positive gauge pressure - show as pressure
+                self.psi_label.setText("psi+:")
+                self.psi_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #e74c3c;")
+                self.vacuum_psi_lcd.display(round(-vacuum_psi, 2))  # Show as positive
+            
             if self._update_count <= 5:
-                logger.info(f"  -> vacuum_psi LCD = {vacuum_psi}")
-        elif "pressure_psi" in data:
-            # Calculate vacuum from pressure if not provided
-            vacuum_psi = round(14.7 - data["pressure_psi"], 2)
-            self.vacuum_psi_lcd.display(vacuum_psi)
-            if self._update_count <= 5:
-                logger.info(f"  -> vacuum_psi LCD (calculated) = {vacuum_psi}")
+                logger.info(f"  -> vacuum_psi LCD = {vacuum_psi:.2f} ({'vacuum' if vacuum_psi >= 0 else 'pressure'})")
         else:
             if self._update_count <= 5:
                 logger.warning(f"  -> vacuum_psi NOT in data!")

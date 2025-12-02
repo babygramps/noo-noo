@@ -901,8 +901,9 @@ class WidgetLordsInterface(HardwareInterface):
                     logger.info(f"  Scaled values: {scaled_readings}")
                 
                 if "pressure_sensor" in scaled_readings:
-                    # The scaled reading is already in engineering units (e.g., PSI)
-                    pressure_psi = scaled_readings["pressure_sensor"]
+                    # The scaled reading is in GAUGE pressure (PSIG)
+                    # Negative = vacuum, Positive = above atmospheric
+                    pressure_psig = scaled_readings["pressure_sensor"]
                     raw_voltage = raw_readings.get("pressure_sensor", 0.0)
                     
                     # Convert voltage to mA for 4-20mA transmitter
@@ -917,11 +918,15 @@ class WidgetLordsInterface(HardwareInterface):
                     # Store in data dict for display widgets
                     data["pressure_voltage"] = raw_voltage
                     data["pressure_mA"] = raw_mA
-                    data["pressure_psi"] = pressure_psi
+                    data["pressure_psig"] = pressure_psig
+                    data["pressure_psi"] = pressure_psig  # Legacy key
                     
-                    # Calculate vacuum: atmospheric pressure (14.7 PSI) minus absolute pressure
-                    # Vacuum in PSI (negative gauge pressure)
-                    vacuum_psi = 14.7 - pressure_psi
+                    # Calculate vacuum from gauge pressure
+                    # PSIG is already relative to atmosphere:
+                    #   0 PSIG = atmospheric (no vacuum)
+                    #   -14.7 PSIG = full vacuum
+                    # Vacuum is positive when below atmospheric (negative gauge pressure)
+                    vacuum_psi = -pressure_psig  # Negate: -(-10 PSIG) = 10 PSI vacuum
                     data["vacuum_psi"] = vacuum_psi
                     
                     # Convert vacuum to bar (1 PSI = 0.0689476 bar)
@@ -929,11 +934,11 @@ class WidgetLordsInterface(HardwareInterface):
                     data["vacuum_bar"] = vacuum_bar
                     
                     if self._data_read_count <= 5:
-                        logger.info(f"  Pressure: raw_V={raw_voltage:.4f}V -> {raw_mA:.2f}mA -> PSI={pressure_psi:.2f}")
-                        logger.info(f"  Vacuum: PSI={vacuum_psi:.2f}, bar={vacuum_bar:.4f}")
+                        logger.info(f"  Pressure: raw_V={raw_voltage:.4f}V -> {raw_mA:.2f}mA -> {pressure_psig:.2f} PSIG")
+                        logger.info(f"  Vacuum: {vacuum_psi:.2f} PSI = {vacuum_bar:.4f} bar")
+                        logger.info(f"  (At sea level, expect ~0 PSIG, ~0 vacuum)")
                     else:
-                        logger.debug(f"Pressure: raw_V={raw_voltage:.3f}V ({raw_mA:.2f}mA), PSI={pressure_psi:.2f}, "
-                                   f"vacuum_PSI={vacuum_psi:.2f}, vacuum_bar={vacuum_bar:.4f}")
+                        logger.debug(f"Pressure: {raw_mA:.2f}mA -> {pressure_psig:.2f} PSIG, vacuum={vacuum_psi:.2f} PSI")
             
             return data
             
