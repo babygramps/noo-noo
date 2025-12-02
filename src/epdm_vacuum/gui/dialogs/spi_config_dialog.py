@@ -130,11 +130,13 @@ class ChannelWidget(QFrame):
         self.init_ui()
     
     def init_ui(self):
-        self.setFixedHeight(44)
+        # Taller height for analog inputs to fit span configuration
+        height = 72 if self.io_type == "analog_input" else 44
+        self.setFixedHeight(height)
         self.setStyleSheet(f"""
             ChannelWidget {{
                 background-color: {COLORS['bg_dark']};
-                border: 1px solid {COLORS['bg_hover']};
+                border: 1px solid {COLORS['border']};
                 border-radius: 6px;
                 margin: 2px 0;
             }}
@@ -142,15 +144,15 @@ class ChannelWidget(QFrame):
                 border-color: {self.color};
             }}
             QLineEdit {{
-                background-color: transparent;
-                border: none;
+                background-color: {COLORS['bg_card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 3px;
                 color: {COLORS['text_primary']};
                 font-size: 11px;
                 padding: 2px 4px;
             }}
             QLineEdit:focus {{
-                background-color: {COLORS['bg_hover']};
-                border-radius: 3px;
+                border-color: {self.color};
             }}
             QCheckBox {{
                 spacing: 4px;
@@ -166,17 +168,40 @@ class ChannelWidget(QFrame):
                 border-color: {self.color};
             }}
             QDoubleSpinBox, QSpinBox {{
-                background-color: transparent;
-                border: none;
-                color: {COLORS['text_secondary']};
+                background-color: {COLORS['bg_card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 3px;
+                color: {COLORS['text_primary']};
                 font-size: 10px;
-                padding: 0 2px;
+                padding: 1px 2px;
+            }}
+            QDoubleSpinBox:focus, QSpinBox:focus {{
+                border-color: {self.color};
+            }}
+            QComboBox {{
+                background-color: {COLORS['bg_card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 3px;
+                color: {COLORS['text_primary']};
+                font-size: 10px;
+                padding: 2px 4px;
+            }}
+            QComboBox:focus {{
+                border-color: {self.color};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 16px;
             }}
         """)
         
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(8)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 4, 8, 4)
+        main_layout.setSpacing(4)
+        
+        # Top row: channel indicator, enabled, name, description
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
         
         # Channel indicator
         ch_label = QLabel(f"{self.channel_num}")
@@ -190,74 +215,144 @@ class ChannelWidget(QFrame):
             border-radius: 10px;
             padding: 2px;
         """)
-        layout.addWidget(ch_label)
+        top_row.addWidget(ch_label)
         
         # Enabled checkbox
         self.enabled_check = QCheckBox()
         self.enabled_check.setChecked(self.config.get("enabled", True))
         self.enabled_check.setToolTip("Enable/disable this channel")
         self.enabled_check.stateChanged.connect(self._on_change)
-        layout.addWidget(self.enabled_check)
+        top_row.addWidget(self.enabled_check)
         
         # Name input
         self.name_edit = QLineEdit(self.config.get("name", f"Channel {self.channel_num}"))
         self.name_edit.setPlaceholderText("Channel name...")
-        self.name_edit.setMinimumWidth(120)
+        self.name_edit.setMinimumWidth(100)
         self.name_edit.textChanged.connect(self._on_change)
-        layout.addWidget(self.name_edit, stretch=2)
+        top_row.addWidget(self.name_edit, stretch=2)
         
-        # Type-specific controls
-        if self.io_type == "analog_input":
-            # Voltage range
-            range_label = QLabel("Range:")
-            range_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
-            layout.addWidget(range_label)
-            
-            self.min_spin = QDoubleSpinBox()
-            self.min_spin.setRange(-100, 100)
-            self.min_spin.setValue(self.config.get("min_value", 0.0))
-            self.min_spin.setFixedWidth(50)
-            self.min_spin.setSuffix("V")
-            self.min_spin.valueChanged.connect(self._on_change)
-            layout.addWidget(self.min_spin)
-            
-            dash = QLabel("-")
-            dash.setStyleSheet(f"color: {COLORS['text_muted']};")
-            layout.addWidget(dash)
-            
-            self.max_spin = QDoubleSpinBox()
-            self.max_spin.setRange(-100, 100)
-            self.max_spin.setValue(self.config.get("max_value", 10.0))
-            self.max_spin.setFixedWidth(50)
-            self.max_spin.setSuffix("V")
-            self.max_spin.valueChanged.connect(self._on_change)
-            layout.addWidget(self.max_spin)
-            
-        elif self.io_type == "digital_input":
-            # Invert option
+        # Description (for non-analog types, or as tooltip for analog)
+        if self.io_type != "analog_input":
+            self.desc_edit = QLineEdit(self.config.get("description", ""))
+            self.desc_edit.setPlaceholderText("Description...")
+            self.desc_edit.setStyleSheet(f"color: {COLORS['text_secondary']}; font-style: italic;")
+            self.desc_edit.textChanged.connect(self._on_change)
+            top_row.addWidget(self.desc_edit, stretch=2)
+        
+        # Digital input: Invert option
+        if self.io_type == "digital_input":
             self.invert_check = QCheckBox("Invert")
             self.invert_check.setChecked(self.config.get("inverted", False))
             self.invert_check.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
             self.invert_check.stateChanged.connect(self._on_change)
-            layout.addWidget(self.invert_check)
+            top_row.addWidget(self.invert_check)
         
-        # Description
-        self.desc_edit = QLineEdit(self.config.get("description", ""))
-        self.desc_edit.setPlaceholderText("Description...")
-        self.desc_edit.setStyleSheet(f"color: {COLORS['text_secondary']}; font-style: italic;")
-        self.desc_edit.textChanged.connect(self._on_change)
-        layout.addWidget(self.desc_edit, stretch=2)
+        main_layout.addLayout(top_row)
+        
+        # Analog input: Second row with span configuration
+        if self.io_type == "analog_input":
+            span_row = QHBoxLayout()
+            span_row.setSpacing(6)
+            
+            # Input type selector
+            type_label = QLabel("Input:")
+            type_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
+            span_row.addWidget(type_label)
+            
+            self.input_type_combo = QComboBox()
+            self.input_type_combo.addItems(["4-20mA", "0-10V", "0-5V"])
+            self.input_type_combo.setCurrentText(self.config.get("input_type", "4-20mA"))
+            self.input_type_combo.setFixedWidth(70)
+            self.input_type_combo.currentTextChanged.connect(self._on_change)
+            span_row.addWidget(self.input_type_combo)
+            
+            span_row.addSpacing(8)
+            
+            # Low span: input value = output value
+            low_label = QLabel("Low:")
+            low_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
+            span_row.addWidget(low_label)
+            
+            self.low_input_spin = QDoubleSpinBox()
+            self.low_input_spin.setRange(0, 100)
+            self.low_input_spin.setDecimals(1)
+            self.low_input_spin.setValue(self.config.get("low_input", 4.0))
+            self.low_input_spin.setFixedWidth(50)
+            self.low_input_spin.valueChanged.connect(self._on_change)
+            span_row.addWidget(self.low_input_spin)
+            
+            eq1 = QLabel("=")
+            eq1.setStyleSheet(f"color: {COLORS['text_muted']};")
+            span_row.addWidget(eq1)
+            
+            self.low_output_spin = QDoubleSpinBox()
+            self.low_output_spin.setRange(-10000, 10000)
+            self.low_output_spin.setDecimals(2)
+            self.low_output_spin.setValue(self.config.get("low_output", 0.0))
+            self.low_output_spin.setFixedWidth(60)
+            self.low_output_spin.valueChanged.connect(self._on_change)
+            span_row.addWidget(self.low_output_spin)
+            
+            span_row.addSpacing(8)
+            
+            # High span: input value = output value
+            high_label = QLabel("High:")
+            high_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
+            span_row.addWidget(high_label)
+            
+            self.high_input_spin = QDoubleSpinBox()
+            self.high_input_spin.setRange(0, 100)
+            self.high_input_spin.setDecimals(1)
+            self.high_input_spin.setValue(self.config.get("high_input", 20.0))
+            self.high_input_spin.setFixedWidth(50)
+            self.high_input_spin.valueChanged.connect(self._on_change)
+            span_row.addWidget(self.high_input_spin)
+            
+            eq2 = QLabel("=")
+            eq2.setStyleSheet(f"color: {COLORS['text_muted']};")
+            span_row.addWidget(eq2)
+            
+            self.high_output_spin = QDoubleSpinBox()
+            self.high_output_spin.setRange(-10000, 10000)
+            self.high_output_spin.setDecimals(2)
+            self.high_output_spin.setValue(self.config.get("high_output", 100.0))
+            self.high_output_spin.setFixedWidth(60)
+            self.high_output_spin.valueChanged.connect(self._on_change)
+            span_row.addWidget(self.high_output_spin)
+            
+            span_row.addSpacing(8)
+            
+            # Units
+            units_label = QLabel("Units:")
+            units_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
+            span_row.addWidget(units_label)
+            
+            self.units_edit = QLineEdit(self.config.get("units", ""))
+            self.units_edit.setPlaceholderText("PSI")
+            self.units_edit.setFixedWidth(50)
+            self.units_edit.textChanged.connect(self._on_change)
+            span_row.addWidget(self.units_edit)
+            
+            span_row.addStretch()
+            main_layout.addLayout(span_row)
     
     def _on_change(self):
         self.config["enabled"] = self.enabled_check.isChecked()
         self.config["name"] = self.name_edit.text()
-        self.config["description"] = self.desc_edit.text()
         
         if self.io_type == "analog_input":
-            self.config["min_value"] = self.min_spin.value()
-            self.config["max_value"] = self.max_spin.value()
+            self.config["input_type"] = self.input_type_combo.currentText()
+            self.config["low_input"] = self.low_input_spin.value()
+            self.config["low_output"] = self.low_output_spin.value()
+            self.config["high_input"] = self.high_input_spin.value()
+            self.config["high_output"] = self.high_output_spin.value()
+            self.config["units"] = self.units_edit.text()
         elif self.io_type == "digital_input":
+            self.config["description"] = self.desc_edit.text()
             self.config["inverted"] = self.invert_check.isChecked()
+        else:
+            if hasattr(self, 'desc_edit'):
+                self.config["description"] = self.desc_edit.text()
         
         self.changed.emit()
     
@@ -1065,8 +1160,12 @@ class SPIConfigDialog(QDialog):
                     if ch.get("enabled", True):
                         ch_name = ch.get("name", f"AI{ch.get('channel', 0)}")
                         ch_desc = ch.get("description", "")
+                        ch_units = ch.get("units", "V")
+                        ch_input_type = ch.get("input_type", "4-20mA")
                         
-                        reading_widget = self.create_analog_reading_widget(mod_name, ch_name, ch_desc)
+                        reading_widget = self.create_analog_reading_widget(
+                            mod_name, ch_name, ch_desc, ch_units, ch_input_type
+                        )
                         row = analog_count // 2
                         col = analog_count % 2
                         self.analog_readings_layout.addWidget(reading_widget, row, col)
@@ -1154,7 +1253,8 @@ class SPIConfigDialog(QDialog):
         
         return frame
     
-    def create_analog_reading_widget(self, module_name: str, channel_name: str, description: str) -> QFrame:
+    def create_analog_reading_widget(self, module_name: str, channel_name: str, description: str, 
+                                      units: str = "", input_type: str = "4-20mA") -> QFrame:
         """Create an analog reading display widget."""
         frame = QFrame()
         frame.setStyleSheet(f"""
@@ -1173,14 +1273,18 @@ class SPIConfigDialog(QDialog):
         name_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px;")
         layout.addWidget(name_label)
         
-        # Description
-        if description:
-            desc_label = QLabel(description)
+        # Description with input type
+        desc_text = description if description else ""
+        if input_type:
+            desc_text = f"{desc_text} ({input_type})" if desc_text else input_type
+        if desc_text:
+            desc_label = QLabel(desc_text)
             desc_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
             layout.addWidget(desc_label)
         
-        # Reading value
-        reading_label = QLabel("-- V")
+        # Reading value with units
+        unit_text = units if units else "V"
+        reading_label = QLabel(f"-- {unit_text}")
         reading_label.setStyleSheet(f"""
             color: {COLORS['analog_in']};
             font-size: 20px;
@@ -1188,6 +1292,7 @@ class SPIConfigDialog(QDialog):
             padding: 8px;
         """)
         reading_label.setAlignment(Qt.AlignCenter)
+        reading_label.setProperty("units", unit_text)
         layout.addWidget(reading_label)
         
         # Store reference
@@ -1281,13 +1386,15 @@ class SPIConfigDialog(QDialog):
             try:
                 data = self.test_interface.read()
                 
-                # Update analog readings
+                # Update analog readings (already scaled by interface)
                 analog_data = data.get("analog_inputs", {})
                 for mod_name, readings in analog_data.items():
                     for ch_name, value in readings.items():
                         key = f"{mod_name}:{ch_name}"
                         if key in self.analog_reading_labels:
-                            self.analog_reading_labels[key].setText(f"{value:.2f} V")
+                            label = self.analog_reading_labels[key]
+                            units = label.property("units") or "V"
+                            label.setText(f"{value:.2f} {units}")
                 
                 # Update digital readings
                 digital_data = data.get("digital_inputs", {})
@@ -1308,9 +1415,10 @@ class SPIConfigDialog(QDialog):
             except Exception as e:
                 logger.error(f"Error reading inputs: {e}")
         else:
-            # Mock mode - show placeholder values
+            # Mock mode - show placeholder values with units
             for key, label in self.analog_reading_labels.items():
-                label.setText("0.00 V")
+                units = label.property("units") or "V"
+                label.setText(f"0.00 {units}")
             for key, (status_label, state_text) in self.digital_indicator_labels.items():
                 status_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 32px;")
                 state_text.setText("--")

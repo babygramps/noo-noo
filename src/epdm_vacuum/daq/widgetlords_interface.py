@@ -45,7 +45,14 @@ class ChannelConfig:
     name: str = ""
     enabled: bool = True
     description: str = ""
-    # Analog-specific
+    # Analog input span configuration
+    input_type: str = "4-20mA"  # "4-20mA", "0-10V", "0-5V"
+    low_input: float = 4.0      # Low span input value (mA or V)
+    low_output: float = 0.0     # Low span output (engineering units)
+    high_input: float = 20.0    # High span input value (mA or V)
+    high_output: float = 100.0  # High span output (engineering units)
+    units: str = ""             # Engineering units label (e.g., "PSI", "bar")
+    # Legacy analog fields (for backward compatibility)
     min_value: float = 0.0
     max_value: float = 10.0
     # Digital input specific
@@ -241,6 +248,7 @@ class AnalogInputModule(SPIModule):
     PI-SPI-DIN-8AI Analog Input Module.
     
     8 analog input channels, 0-10V or 4-20mA (jumper selectable).
+    Supports span scaling to convert raw readings to engineering units.
     """
     
     def __init__(self, config: SPIModuleConfig):
@@ -278,9 +286,58 @@ class AnalogInputModule(SPIModule):
             logger.error(f"Failed to initialize analog module '{self.name}': {e}", exc_info=True)
             return False
     
+    def _apply_span_scaling(self, raw_value: float, ch_config: ChannelConfig) -> float:
+        """
+        Apply span scaling to convert raw input to engineering units.
+        
+        The PI-SPI-DIN-8AI module returns voltage (0-10V).
+        For 4-20mA mode, the module uses a 500 ohm resistor, so:
+          4mA = 2V, 20mA = 10V (linear mapping)
+        
+        Args:
+            raw_value: Raw voltage reading from module (0-10V)
+            ch_config: Channel configuration with span settings
+        
+        Returns:
+            Scaled value in engineering units
+        """
+        # Map raw voltage to input value based on input type
+        input_type = ch_config.input_type
+        
+        if input_type == "4-20mA":
+            # PI-SPI-DIN-8AI: 4-20mA mode uses 500 ohm resistor
+            # 4mA * 500ohm = 2V, 20mA * 500ohm = 10V
+            # So raw voltage 2-10V maps to 4-20mA
+            if raw_value <= 2.0:
+                input_value = 4.0
+            elif raw_value >= 10.0:
+                input_value = 20.0
+            else:
+                input_value = 4.0 + (raw_value - 2.0) * (20.0 - 4.0) / (10.0 - 2.0)
+        elif input_type == "0-5V":
+            # 0-5V maps directly to voltage
+            input_value = raw_value
+        else:  # "0-10V" or default
+            # 0-10V maps directly to voltage
+            input_value = raw_value
+        
+        # Apply span scaling: linear interpolation
+        low_in = ch_config.low_input
+        high_in = ch_config.high_input
+        low_out = ch_config.low_output
+        high_out = ch_config.high_output
+        
+        # Avoid division by zero
+        if abs(high_in - low_in) < 0.001:
+            return low_out
+        
+        # Linear interpolation
+        scaled = low_out + (input_value - low_in) * (high_out - low_out) / (high_in - low_in)
+        return scaled
+    
     def read_channel(self, channel: int) -> Optional[float]:
         """
-        Read a single analog channel.
+        Read a single analog channel (raw voltage).
         
         Args:
             channel: Channel number (0-7)
@@ -305,32 +362,56 @@ class AnalogInputModule(SPIModule):
             logger.error(f"Failed to read analog channel {channel}: {e}")
             return None
     
-    def read_by_name(self, channel_name: str) -> Optional[float]:
+    def read_by_name(self, channel_name: str, scaled: bool = True) -> Optional[float]:
         """
         Read an analog channel by name.
         
         Args:
             channel_name: Name of the channel (from config)
+            scaled: If True, apply span scaling to engineering units
         
         Returns:
-            float: Voltage reading, or None if not found
+            float: Reading (scaled or raw voltage), or None if not found
         """
         for ch in self.channels:
             if ch.name == channel_name and ch.enabled:
-                return self.read_channel(ch.channel)
+                raw_voltage = self.read_channel(ch.channel)
+                if raw_voltage is None:
+                    return None
+                if scaled:
+                    return self._apply_span_scaling(raw_voltage, ch)
+                return raw_voltage
         
         logger.warning(f"Channel '{channel_name}' not found in analog module '{self.name}'")
         return None
     
-    def read_all_enabled(self) -> Dict[str, float]:
-        """Read all enabled channels by name."""
+    def read_all_enabled(self, scaled: bool = True) -> Dict[str, float]:
+        """
+        Read all enabled channels by name.
+        
+        Args:
+            scaled: If True, apply span scaling to engineering units
+        
+        Returns:
+            Dict mapping channel names to values
+        """
         readings = {}
         for ch in self.channels:
             if ch.enabled and 0 <= ch.channel <= 7:
-                voltage = self.read_channel(ch.channel)
-                if voltage is not None:
-                    readings[ch.name] = voltage
+                raw_voltage = self.read_channel(ch.channel)
+                if raw_voltage is not None:
+                    if scaled:
+                        readings[ch.name] = self._apply_span_scaling(raw_voltage, ch)
+                    else:
+                        readings[ch.name] = raw_voltage
         return readings
+    
+    def get_channel_units(self, channel_name: str) -> str:
+        """Get the engineering units for a channel."""
+        for ch in self.channels:
+            if ch.name == channel_name:
+                return ch.units
+        return ""
 
 
 class DigitalInputModule(SPIModule):

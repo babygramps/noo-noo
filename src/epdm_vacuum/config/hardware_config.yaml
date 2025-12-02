@@ -42,50 +42,82 @@ hardware:
           - channel: 0
             name: pressure_sensor
             enabled: true
-            min_value: 0.0
-            max_value: 10.0
-            description: Chamber pressure sensor (0-30 PSI)
+            input_type: 4-20mA    # Input signal type: 4-20mA, 0-10V, or 0-5V
+            low_input: 4.0        # Low span input value (mA or V)
+            low_output: 0.0       # Low span output value (engineering units)
+            high_input: 20.0      # High span input value (mA or V)
+            high_output: 14.0     # High span output value (engineering units)
+            units: PSI            # Engineering units label
+            description: Chamber pressure sensor
           - channel: 1
             name: analog_spare_1
             enabled: false
-            min_value: 0.0
-            max_value: 10.0
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
             description: Spare analog input
           - channel: 2
             name: analog_spare_2
             enabled: false
-            min_value: 0.0
-            max_value: 10.0
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
             description: Spare analog input
           - channel: 3
             name: analog_spare_3
             enabled: false
-            min_value: 0.0
-            max_value: 10.0
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
             description: Spare analog input
           - channel: 4
             name: analog_spare_4
             enabled: false
-            min_value: 0.0
-            max_value: 10.0
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
             description: Spare analog input
           - channel: 5
             name: analog_spare_5
             enabled: false
-            min_value: 0.0
-            max_value: 10.0
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
             description: Spare analog input
           - channel: 6
             name: analog_spare_6
             enabled: false
-            min_value: 0.0
-            max_value: 10.0
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
             description: Spare analog input
           - channel: 7
             name: analog_spare_7
             enabled: false
-            min_value: 0.0
-            max_value: 10.0
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
             description: Spare analog input
   
   modbus:
