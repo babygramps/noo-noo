@@ -36,6 +36,7 @@ from .threads.daq_thread import DataAcquisitionThread
 from .threads.control_thread import ControlThread
 from .dialogs.sequence_editor import SequenceEditorDialog
 from .dialogs.io_config_dialog import IOConfigDialog
+from .dialogs.spi_config_dialog import SPIConfigDialog
 from .dialogs.test_metadata_dialog import TestMetadataDialog
 from ..control.sequence_manager import SequenceManager
 from ..logging.data_logger import DataLogger
@@ -357,6 +358,11 @@ class MainWindow(QMainWindow):
         # Settings menu
         settings_menu = menubar.addMenu("&Settings")
         
+        spi_config_action = QAction("&SPI Module Configuration", self)
+        spi_config_action.setShortcut("Ctrl+Shift+I")
+        spi_config_action.triggered.connect(self.open_spi_config)
+        settings_menu.addAction(spi_config_action)
+        
         io_config_action = QAction("&IO Device Configuration", self)
         io_config_action.setShortcut("Ctrl+I")
         io_config_action.triggered.connect(self.open_io_config)
@@ -548,9 +554,11 @@ class MainWindow(QMainWindow):
         widgetlords_config = settings.get("hardware", "widgetlords", default={})
         if widgetlords_config.get("enabled", False):
             try:
-                widgetlords_iface = WidgetLordsInterface()
+                # Pass SPI modules configuration to the interface
+                spi_modules = widgetlords_config.get("spi_modules", [])
+                widgetlords_iface = WidgetLordsInterface(spi_modules_config=spi_modules)
                 widgetlords_iface.connect()
-                logger.info("WidgetLords interface initialized")
+                logger.info(f"WidgetLords interface initialized with {len(spi_modules)} SPI module(s)")
             except Exception as e:
                 logger.error(f"Failed to initialize WidgetLords interface: {e}")
         
@@ -1119,6 +1127,20 @@ class MainWindow(QMainWindow):
                     "Save Error",
                     f"Failed to save sequence '{sequence.name}'"
                 )
+    
+    def open_spi_config(self) -> None:
+        """Open SPI module configuration dialog."""
+        logger.info("Opening SPI module configuration dialog...")
+        
+        dialog = SPIConfigDialog(self)
+        dialog.config_saved.connect(self.on_spi_config_saved)
+        dialog.exec_()
+    
+    def on_spi_config_saved(self) -> None:
+        """Handle SPI configuration saved."""
+        logger.info("SPI configuration saved - reloading hardware settings")
+        self.statusBar().showMessage("SPI configuration saved", 5000)
+        # TODO: Reinitialize WidgetLords interface with new configuration
     
     def open_io_config(self) -> None:
         """Open IO device configuration dialog."""

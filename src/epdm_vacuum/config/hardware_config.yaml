@@ -5,8 +5,88 @@
 hardware:
   widgetlords:
     enabled: true
-    pressure_channel: 0  # Analog input channel for pressure sensor
-    pump_relay: 0  # Relay channel for vacuum pump control
+    pressure_channel: 0  # Analog input channel for pressure sensor (legacy)
+    pump_relay: 0  # Relay channel for vacuum pump control (legacy)
+    
+    # SPI Module Configuration
+    # Each module is assigned to a Chip Enable (CE0-CE4) line
+    # PI-SPI-DIN-4KO supports stacking up to 4 modules per CE using addresses 0-3
+    spi_modules:
+      - name: relay_module
+        module_type: PI-SPI-DIN-4KO
+        chip_enable: CE0
+        address: 0
+        channels:
+          - channel: 0
+            name: vacuum_pump
+            enabled: true
+            description: Main vacuum pump relay
+          - channel: 1
+            name: vent_valve
+            enabled: true
+            description: Chamber vent valve
+          - channel: 2
+            name: vacuum_valve
+            enabled: true
+            description: Vacuum line isolation valve
+          - channel: 3
+            name: spare_relay
+            enabled: false
+            description: Spare relay output
+      
+      - name: analog_inputs
+        module_type: PI-SPI-DIN-8AI
+        chip_enable: CE1
+        address: 0
+        channels:
+          - channel: 0
+            name: pressure_sensor
+            enabled: true
+            min_value: 0.0
+            max_value: 10.0
+            description: Chamber pressure sensor (0-30 PSI)
+          - channel: 1
+            name: analog_spare_1
+            enabled: false
+            min_value: 0.0
+            max_value: 10.0
+            description: Spare analog input
+          - channel: 2
+            name: analog_spare_2
+            enabled: false
+            min_value: 0.0
+            max_value: 10.0
+            description: Spare analog input
+          - channel: 3
+            name: analog_spare_3
+            enabled: false
+            min_value: 0.0
+            max_value: 10.0
+            description: Spare analog input
+          - channel: 4
+            name: analog_spare_4
+            enabled: false
+            min_value: 0.0
+            max_value: 10.0
+            description: Spare analog input
+          - channel: 5
+            name: analog_spare_5
+            enabled: false
+            min_value: 0.0
+            max_value: 10.0
+            description: Spare analog input
+          - channel: 6
+            name: analog_spare_6
+            enabled: false
+            min_value: 0.0
+            max_value: 10.0
+            description: Spare analog input
+          - channel: 7
+            name: analog_spare_7
+            enabled: false
+            min_value: 0.0
+            max_value: 10.0
+            description: Spare analog input
   
   modbus:
     enabled: true
