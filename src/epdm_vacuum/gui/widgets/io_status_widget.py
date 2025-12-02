@@ -591,12 +591,26 @@ class IOStatusWidget(QWidget):
         
         self.device_states[device_name] = None
         
-        indicator, state_label = self.device_widgets[device_name]
+        widget_tuple = self.device_widgets[device_name]
         
-        # Update to NOT SET
-        self._update_indicator_color(indicator, None)
-        state_label.setText("NOT SET")
-        state_label.setStyleSheet("font-size: 10pt; color: #666;")
+        # Handle analog inputs (4 elements) vs digital/analog outputs (2 elements)
+        if len(widget_tuple) == 4:
+            # Analog input: (indicator, value_label, progress_bar, device_info)
+            indicator, value_label, progress_bar, device_info = widget_tuple
+            indicator.setStyleSheet("color: #9E9E9E;")  # Gray
+            units = device_info.get("units", "")
+            value_label.setText(f"-- {units}")
+            value_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #9E9E9E;")
+            progress_bar.setValue(0)
+            # Reset analog input value tracking
+            if device_name in self.analog_input_values:
+                self.analog_input_values[device_name] = None
+        else:
+            # Digital/analog output: (indicator, state_label)
+            indicator, state_label = widget_tuple
+            self._update_indicator_color(indicator, None)
+            state_label.setText("NOT SET")
+            state_label.setStyleSheet("font-size: 10pt; color: #666;")
         
         logger.debug(f"Reset device '{device_name}' to NOT SET")
     
