@@ -327,6 +327,12 @@ class ModbusInterface(HardwareInterface):
             "status": 0,
         }
         
+        # Debug logging for channel discovery (first few reads only)
+        if not hasattr(self, '_read_count'):
+            self._read_count = 0
+        self._read_count += 1
+        debug_this_read = self._read_count <= 3 or self.debug
+        
         # Read gross weight (format depends on config)
         try:
             gross_raw = self._read_value(
@@ -369,6 +375,11 @@ class ModbusInterface(HardwareInterface):
             cfg.reg_channel_4
         ]
         
+        if debug_this_read:
+            logger.info(f"[TLB4 Read #{self._read_count}] Channel registers: {channel_regs}")
+            logger.info(f"  Channel configs: " + 
+                ", ".join(f"CH{i+1}:{ch.enabled}" for i, ch in enumerate(cfg.channels)))
+        
         for i, (reg, ch_cfg) in enumerate(zip(channel_regs, cfg.channels), start=1):
             try:
                 if ch_cfg.enabled:
@@ -385,11 +396,16 @@ class ModbusInterface(HardwareInterface):
                     # Apply software tare offset (TLB4 only tares total, not channels)
                     kg_value -= self._channel_tare_offsets[i - 1]
                     result[f"load_cell_{i}_kg"] = kg_value
+                    
+                    if debug_this_read:
+                        logger.info(f"  CH{i} @ reg {reg}: raw={raw_value}, kg={kg_value:.2f}")
                 else:
                     result[f"load_cell_{i}_raw"] = 0
                     result[f"load_cell_{i}_kg"] = 0.0
+                    if debug_this_read:
+                        logger.info(f"  CH{i} @ reg {reg}: DISABLED")
             except Exception as e:
-                logger.debug(f"Failed to read channel {i}: {e}")
+                logger.warning(f"Failed to read channel {i} @ register {reg}: {e}")
                 result[f"load_cell_{i}_raw"] = 0
                 result[f"load_cell_{i}_kg"] = 0.0
         

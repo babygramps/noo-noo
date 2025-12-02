@@ -122,7 +122,7 @@ hardware:
   
   modbus:
     enabled: true
-    port: COM4  # Serial port for Modbus RTU (Windows: COM4)
+    port: /dev/ttyUSB0  # Serial port for Modbus RTU (Windows: COM4)
     baudrate: 9600  # Communication speed (TLB4 configured for 9600)
     slave_address: 1  # Modbus device address (TLB4 Addr setting)
     timeout: 1.0  # Communication timeout in seconds
@@ -135,23 +135,39 @@ hardware:
     debug: false  # Enable debug logging for troubleshooting
     
     # TLB4 4-Channel Load Cell Transmitter Configuration
-    # Discovered via register scanner on COM4
+    # 
+    # MODBUS REGISTER MAPPING (TLB4 uses 40001-based addressing):
+    #   In code, we use 0-based addresses: address = register_number - 40001
+    #   
+    #   40008-40009 (addr 7-8):   GROSS WEIGHT H/L (32-bit combined)
+    #   40010-40011 (addr 9-10):  NET WEIGHT H/L (32-bit)
+    #   40012-40013 (addr 11-12): PEAK WEIGHT H/L (32-bit)
+    #   40050 (addr 49):          INSTRUMENT STATUS
+    #   40051-40064 (addr 50-63): R1-R14 general purpose registers
+    #
+    # Individual channel values are typically in R1-R4 (registers 50-53)
+    # Run: python scripts/discover_tlb4_channels.py --port COM4
+    # to discover actual register addresses for your TLB4 configuration.
+    #
     tlb4:
-      # Register addresses (0-based Modbus addresses)
-      # Discovered values from scan:
-      #   R0=11100, R1=620, R2=24, R3=1275, R8=241, R15=10000
+      # Register addresses (0-based, subtract 40001 from TLB4 register number)
+      # Example: Register 40051 = address 50
       registers:
-        gross_weight: 0      # Total gross weight (16-bit) - value 11100 = 111.00 kg
-        net_weight: 2        # Net weight (16-bit)
-        tare_weight: 3       # Tare weight (16-bit) - value 1275 = 12.75 kg?
-        status: 6            # Status register (16-bit)
-        channel_1: 8         # Channel 1 - CONFIRMED ACTIVE (value 241 = 2.41 kg)
-        channel_2: 9         # Channel 2 (not connected)
-        channel_3: 10        # Channel 3 (not connected)
-        channel_4: 11        # Channel 4 (not connected)
+        gross_weight: 7      # 40008 - Total gross weight H (32-bit with next reg)
+        net_weight: 9        # 40010 - Net weight H (32-bit with next reg)
+        tare_weight: 11      # 40012 - Tare/Peak weight H
+        status: 6            # 40007 - Status register (16-bit)
+        # Individual channel registers - MUST BE DISCOVERED FOR YOUR TLB4
+        # Common locations: R1-R4 (addresses 50-53) or extended registers
+        # Use discover_tlb4_channels.py to find correct addresses
+        channel_1: 50        # R1 (40051) - Individual load cell 1
+        channel_2: 51        # R2 (40052) - Individual load cell 2
+        channel_3: 52        # R3 (40053) - Individual load cell 3 (if connected)
+        channel_4: 53        # R4 (40054) - Individual load cell 4 (if connected)
       
       # Data format for weight values
-      # Using int16 since values fit in single registers
+      # TLB4 individual channels typically use INT16 (single register each)
+      # Combined weights (gross/net) use INT32 (two registers)
       data_format: int16     # int16, int32, uint32, or float32
       decimal_places: 2      # Decimal places in raw values (e.g., 241 = 2.41 kg)
       
@@ -164,23 +180,24 @@ hardware:
         load_cell_capacity_kg: 1.0    # 1:1 ratio after division
         
         # Per-channel configuration
+        # Enable channels that have load cells connected
         channel_1:
-          enabled: true               # CONNECTED
+          enabled: true               # Load cell 1 - CONNECTED
           full_scale_divisions: 100.0
           capacity_kg: 1.0
           zero_offset: 0.0
         channel_2:
-          enabled: false              # Not connected
+          enabled: true               # Load cell 2 - CONNECTED
           full_scale_divisions: 100.0
           capacity_kg: 1.0
           zero_offset: 0.0
         channel_3:
-          enabled: false              # Not connected
+          enabled: false              # Load cell 3 - Not connected
           full_scale_divisions: 100.0
           capacity_kg: 1.0
           zero_offset: 0.0
         channel_4:
-          enabled: false              # Not connected
+          enabled: false              # Load cell 4 - Not connected
           full_scale_divisions: 100.0
           capacity_kg: 1.0
           zero_offset: 0.0
