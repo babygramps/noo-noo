@@ -591,6 +591,10 @@ class MainWindow(QMainWindow):
         
         # Update plot widget
         self.plot_widget.add_data_point(data)
+        
+        # Update IO status widget with analog input values (pressure sensor, etc.)
+        if hasattr(self, 'test_status_panel') and self.test_status_panel:
+            self.test_status_panel.update_analog_inputs(data)
     
     def on_daq_error(self, error_msg: str) -> None:
         """

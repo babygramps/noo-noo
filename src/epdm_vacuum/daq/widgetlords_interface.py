@@ -260,6 +260,12 @@ class AnalogInputModule(SPIModule):
         try:
             logger.info(f"Initializing analog input module '{self.name}' on {self.config.chip_enable}")
             
+            # Log channel configuration for debugging
+            for ch in self.channels:
+                if ch.enabled:
+                    logger.info(f"  Channel {ch.channel} '{ch.name}': {ch.input_type}, "
+                              f"span {ch.low_input}-{ch.high_input} -> {ch.low_output}-{ch.high_output} {ch.units}")
+            
             try:
                 from widgetlords.pi_spi_din import Mod8AI, ChipEnable as WLChipEnable
                 
@@ -272,13 +278,24 @@ class AnalogInputModule(SPIModule):
                 }
                 
                 wl_ce = wl_ce_map.get(self.chip_enable, WLChipEnable.CE0)
+                logger.info(f"Creating Mod8AI with ChipEnable={wl_ce}")
                 self._hardware = Mod8AI(wl_ce)
                 self._initialized = True
-                logger.info(f"Analog input module '{self.name}' initialized successfully")
+                logger.info(f"Analog input module '{self.name}' initialized successfully with REAL hardware")
                 
-            except ImportError:
-                logger.warning(f"widgetlords library not available - analog module '{self.name}' in mock mode")
+                # Test read to verify hardware is working
+                try:
+                    test_value = self._hardware.read_single(0)
+                    logger.info(f"  Test read channel 0: {test_value:.3f}V")
+                except Exception as test_e:
+                    logger.warning(f"  Test read failed: {test_e}")
+                
+            except ImportError as ie:
+                logger.warning(f"widgetlords library not available - analog module '{self.name}' in mock mode: {ie}")
                 self._initialized = True
+            except Exception as hw_e:
+                logger.error(f"Hardware init error for '{self.name}': {hw_e}", exc_info=True)
+                self._initialized = True  # Allow mock mode on hardware error
             
             return True
             
@@ -314,12 +331,15 @@ class AnalogInputModule(SPIModule):
                 input_value = 20.0
             else:
                 input_value = 4.0 + (raw_value - 2.0) * (20.0 - 4.0) / (10.0 - 2.0)
+            logger.debug(f"4-20mA scaling: {raw_value:.3f}V -> {input_value:.3f}mA")
         elif input_type == "0-5V":
             # 0-5V maps directly to voltage
             input_value = raw_value
+            logger.debug(f"0-5V scaling: {raw_value:.3f}V -> {input_value:.3f}V")
         else:  # "0-10V" or default
             # 0-10V maps directly to voltage
             input_value = raw_value
+            logger.debug(f"0-10V scaling: {raw_value:.3f}V -> {input_value:.3f}V")
         
         # Apply span scaling: linear interpolation
         low_in = ch_config.low_input
@@ -329,10 +349,12 @@ class AnalogInputModule(SPIModule):
         
         # Avoid division by zero
         if abs(high_in - low_in) < 0.001:
+            logger.warning(f"Span scaling: low_in ~= high_in ({low_in}), returning low_out={low_out}")
             return low_out
         
         # Linear interpolation
         scaled = low_out + (input_value - low_in) * (high_out - low_out) / (high_in - low_in)
+        logger.debug(f"Span scaling: input={input_value:.3f} in [{low_in}, {high_in}] -> output={scaled:.4f} {ch_config.units}")
         return scaled
     
     def read_channel(self, channel: int) -> Optional[float]:
@@ -352,14 +374,16 @@ class AnalogInputModule(SPIModule):
         try:
             if self._hardware:
                 voltage = self._hardware.read_single(channel)
+                logger.debug(f"Analog module '{self.name}' ch{channel} raw read: {voltage:.4f}V")
             else:
                 voltage = 0.0  # Mock mode
+                logger.debug(f"Analog module '{self.name}' ch{channel} MOCK read: {voltage:.4f}V")
             
             self._last_readings[channel] = voltage
             return voltage
             
         except Exception as e:
-            logger.error(f"Failed to read analog channel {channel}: {e}")
+            logger.error(f"Failed to read analog channel {channel}: {e}", exc_info=True)
             return None
     
     def read_by_name(self, channel_name: str, scaled: bool = True) -> Optional[float]:
@@ -401,9 +425,16 @@ class AnalogInputModule(SPIModule):
                 raw_voltage = self.read_channel(ch.channel)
                 if raw_voltage is not None:
                     if scaled:
-                        readings[ch.name] = self._apply_span_scaling(raw_voltage, ch)
+                        scaled_value = self._apply_span_scaling(raw_voltage, ch)
+                        readings[ch.name] = scaled_value
+                        logger.debug(f"Channel '{ch.name}': raw={raw_voltage:.4f}V -> scaled={scaled_value:.4f} {ch.units}")
                     else:
                         readings[ch.name] = raw_voltage
+        
+        if not readings:
+            logger.warning(f"Analog module '{self.name}': No enabled channels found or all reads failed!")
+            logger.warning(f"  Channels: {[(ch.channel, ch.name, ch.enabled) for ch in self.channels]}")
+        
         return readings
     
     def get_channel_units(self, channel_name: str) -> str:
@@ -636,37 +667,51 @@ class WidgetLordsInterface(HardwareInterface):
             bool: True if at least one module initialized successfully
         """
         try:
+            logger.info("=" * 60)
             logger.info("Connecting to WidgetLords SPI modules...")
+            logger.info(f"Number of module configs: {len(self.spi_modules_config)}")
             
             # Initialize widgetlords library
             try:
                 from widgetlords.pi_spi_din import init
                 init()
-                logger.info("Widgetlords library initialized")
-            except ImportError:
-                logger.warning("Widgetlords library not available - using mock mode")
+                logger.info("Widgetlords library initialized successfully")
+            except ImportError as ie:
+                logger.warning(f"Widgetlords library not available - using mock mode: {ie}")
             except Exception as e:
                 logger.warning(f"Failed to init widgetlords library: {e} - using mock mode")
             
             # Create and initialize modules
             success_count = 0
             
-            for mod_cfg in self.spi_modules_config:
+            for i, mod_cfg in enumerate(self.spi_modules_config):
+                logger.info(f"Processing module config [{i}]: {mod_cfg.get('name')} ({mod_cfg.get('module_type')}) on {mod_cfg.get('chip_enable')}")
                 module = self._create_module(mod_cfg)
                 if module:
+                    logger.info(f"  Module created: {module.name}, type={module.module_type}")
                     if module.initialize():
                         self.modules[module.name] = module
                         self._register_module(module)
                         success_count += 1
+                        logger.info(f"  Module '{module.name}' registered successfully")
                     else:
                         logger.error(f"Failed to initialize module '{mod_cfg.get('name')}'")
+                else:
+                    logger.error(f"Failed to create module from config: {mod_cfg}")
             
             self.initialized = success_count > 0 or len(self.spi_modules_config) == 0
             
+            # Log summary
             logger.info(f"WidgetLords interface connected: {success_count}/{len(self.spi_modules_config)} modules initialized")
+            logger.info(f"  Relay modules: {list(self.relay_modules.keys())}")
+            logger.info(f"  Analog input modules: {list(self.analog_input_modules.keys())}")
+            logger.info(f"  Digital input modules: {list(self.digital_input_modules.keys())}")
+            logger.info(f"  Analog output modules: {list(self.analog_output_modules.keys())}")
+            logger.info("=" * 60)
             return self.initialized
             
         except Exception as e:
+            logger.error(f"Exception during WidgetLords connect: {e}", exc_info=True)
             self.handle_error(e)
             return False
     
@@ -676,15 +721,27 @@ class WidgetLordsInterface(HardwareInterface):
             # Parse channels
             channels = []
             for ch_cfg in config.get("channels", []):
-                channels.append(ChannelConfig(
+                ch_config = ChannelConfig(
                     channel=ch_cfg.get("channel", 0),
                     name=ch_cfg.get("name", ""),
                     enabled=ch_cfg.get("enabled", True),
                     description=ch_cfg.get("description", ""),
+                    # Span scaling configuration (critical for analog inputs!)
+                    input_type=ch_cfg.get("input_type", "4-20mA"),
+                    low_input=ch_cfg.get("low_input", 4.0),
+                    low_output=ch_cfg.get("low_output", 0.0),
+                    high_input=ch_cfg.get("high_input", 20.0),
+                    high_output=ch_cfg.get("high_output", 100.0),
+                    units=ch_cfg.get("units", ""),
+                    # Legacy fields
                     min_value=ch_cfg.get("min_value", 0.0),
                     max_value=ch_cfg.get("max_value", 10.0),
                     inverted=ch_cfg.get("inverted", False),
-                ))
+                )
+                channels.append(ch_config)
+                logger.debug(f"Parsed channel config: ch={ch_config.channel}, name={ch_config.name}, "
+                           f"input_type={ch_config.input_type}, low={ch_config.low_input}->{ch_config.low_output}, "
+                           f"high={ch_config.high_input}->{ch_config.high_output}, units={ch_config.units}")
             
             module_config = SPIModuleConfig(
                 name=config.get("name", "unnamed"),
@@ -783,15 +840,37 @@ class WidgetLordsInterface(HardwareInterface):
                 states = module.get_all_states()
                 data["relay_states"][name] = states
             
-            # Legacy format for backward compatibility
+            # Legacy format for backward compatibility (vacuum pressure display)
             if self.analog_input_modules:
                 first_ai = next(iter(self.analog_input_modules.values()))
-                readings = first_ai.read_all_enabled()
-                if "pressure_sensor" in readings:
-                    voltage = readings["pressure_sensor"]
-                    data["pressure_voltage"] = voltage
-                    data["pressure_psi"] = (voltage / 10.0) * 30.0
-                    data["vacuum_bar"] = (14.7 - data["pressure_psi"]) * 0.0689476
+                
+                # Get scaled reading (already in engineering units like PSI)
+                scaled_readings = first_ai.read_all_enabled(scaled=True)
+                # Also get raw voltage for debugging
+                raw_readings = first_ai.read_all_enabled(scaled=False)
+                
+                logger.debug(f"Analog readings - raw: {raw_readings}, scaled: {scaled_readings}")
+                
+                if "pressure_sensor" in scaled_readings:
+                    # The scaled reading is already in engineering units (e.g., PSI)
+                    pressure_psi = scaled_readings["pressure_sensor"]
+                    raw_voltage = raw_readings.get("pressure_sensor", 0.0)
+                    
+                    # Store in data dict for display widgets
+                    data["pressure_voltage"] = raw_voltage
+                    data["pressure_psi"] = pressure_psi
+                    
+                    # Calculate vacuum: atmospheric pressure (14.7 PSI) minus absolute pressure
+                    # Vacuum in PSI (negative gauge pressure)
+                    vacuum_psi = 14.7 - pressure_psi
+                    data["vacuum_psi"] = vacuum_psi
+                    
+                    # Convert vacuum to bar (1 PSI = 0.0689476 bar)
+                    vacuum_bar = vacuum_psi * 0.0689476
+                    data["vacuum_bar"] = vacuum_bar
+                    
+                    logger.debug(f"Pressure: raw_V={raw_voltage:.3f}V, PSI={pressure_psi:.2f}, "
+                               f"vacuum_PSI={vacuum_psi:.2f}, vacuum_bar={vacuum_bar:.4f}")
             
             return data
             

@@ -57,12 +57,22 @@ class DataAcquisitionThread(QThread):
         
         Continuously reads sensors at the specified rate until stopped.
         """
+        logger.info("=" * 50)
         logger.info("DAQ thread started")
+        logger.info(f"  Sample rate: {self.sample_rate} Hz")
+        logger.info(f"  Sample interval: {self.sample_interval:.3f} s")
+        logger.info(f"  WidgetLords interface: {'Connected' if self.widgetlords else 'NOT CONNECTED'}")
+        logger.info(f"  Modbus interface: {'Connected' if self.modbus else 'NOT CONNECTED'}")
+        
+        if self.widgetlords:
+            logger.info(f"  WidgetLords modules: {self.widgetlords.list_modules() if hasattr(self.widgetlords, 'list_modules') else 'N/A'}")
+        
         self.running = True
         
-        # TODO: Initialize hardware interfaces if not already done
+        # Check hardware interfaces
         if self.widgetlords is None or self.modbus is None:
             logger.warning("Hardware interfaces not initialized - using mock data")
+        logger.info("=" * 50)
         
         while self.running:
             try:
@@ -98,11 +108,17 @@ class DataAcquisitionThread(QThread):
         if self.widgetlords:
             try:
                 wl_data = self.widgetlords.read()
+                # Log pressure-related keys for debugging
+                pressure_keys = ["pressure_voltage", "pressure_psi", "vacuum_psi", "vacuum_bar", "analog_inputs"]
+                pressure_data = {k: wl_data.get(k) for k in pressure_keys if k in wl_data}
+                if pressure_data:
+                    logger.debug(f"WidgetLords pressure data: {pressure_data}")
             except Exception as e:
-                logger.error(f"WidgetLords read error: {e}")
+                logger.error(f"WidgetLords read error: {e}", exc_info=True)
                 wl_data = {}
         else:
             # Mock data for development
+            logger.debug("WidgetLords not connected - using mock data")
             wl_data = {
                 "pressure_voltage": 5.0,
                 "pressure_psi": 15.0,
@@ -114,10 +130,11 @@ class DataAcquisitionThread(QThread):
             try:
                 modbus_data = self.modbus.read()
             except Exception as e:
-                logger.error(f"Modbus read error: {e}")
+                logger.error(f"Modbus read error: {e}", exc_info=True)
                 modbus_data = {}
         else:
             # Mock data for development
+            logger.debug("Modbus not connected - using mock data")
             modbus_data = {
                 "gross_weight_kg": 100.0,
                 "load_cell_1_kg": 25.0,
