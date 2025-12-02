@@ -335,11 +335,13 @@ class AnalogInputModule(SPIModule):
         
         if input_type == "4-20mA":
             # PI-SPI-DIN-8AI: Convert voltage to mA using Ohm's law
-            # Calibrated sense resistor: 454Ω (measured with multimeter)
-            SENSE_RESISTOR_OHMS = 454.0
-            input_value = (raw_value / SENSE_RESISTOR_OHMS) * 1000.0  # mA
+            # Sense resistor value is calibrated by user via GUI
+            from PyQt5.QtCore import QSettings
+            settings = QSettings("EPDM", "VacuumTestFixture")
+            sense_resistor = float(settings.value("sense_resistor_ohms", 454.0))
+            input_value = (raw_value / sense_resistor) * 1000.0  # mA
             if verbose:
-                logger.info(f"  [Span #{self._scale_count}] 4-20mA: {raw_value:.4f}V / {SENSE_RESISTOR_OHMS}Ω = {input_value:.2f}mA")
+                logger.info(f"  [Span #{self._scale_count}] 4-20mA: {raw_value:.4f}V / {sense_resistor:.1f}Ω = {input_value:.2f}mA")
         elif input_type == "0-5V":
             input_value = raw_value
             if verbose:
@@ -902,9 +904,11 @@ class WidgetLordsInterface(HardwareInterface):
                     raw_voltage = raw_readings.get("pressure_sensor", 0.0)
                     
                     # Convert voltage to mA using Ohm's law
-                    # PI-SPI-DIN-8AI uses a sense resistor (calibrated: 454Ω)
-                    SENSE_RESISTOR_OHMS = 454.0  # Calibrated from multimeter measurement
-                    raw_mA = (raw_voltage / SENSE_RESISTOR_OHMS) * 1000.0
+                    # Sense resistor value is calibrated by user via GUI
+                    from PyQt5.QtCore import QSettings
+                    settings = QSettings("EPDM", "VacuumTestFixture")
+                    sense_resistor = float(settings.value("sense_resistor_ohms", 454.0))
+                    raw_mA = (raw_voltage / sense_resistor) * 1000.0
                     
                     # Convert PSI to millibar (1 PSI = 68.9476 mbar)
                     pressure_mbar = pressure_psig * 68.9476

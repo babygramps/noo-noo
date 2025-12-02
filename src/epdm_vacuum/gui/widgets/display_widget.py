@@ -21,6 +21,12 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QFrame,
     QComboBox,
+    QPushButton,
+    QDialog,
+    QDoubleSpinBox,
+    QDialogButtonBox,
+    QFormLayout,
+    QMessageBox,
 )
 from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtGui import QPalette, QColor, QFont
@@ -38,6 +44,9 @@ PRESSURE_UNITS = {
     "inHg": {"factor": 2.03602, "decimals": 2, "label": "inHg"},
     "atm": {"factor": 0.068046, "decimals": 4, "label": "atm"},
 }
+
+# Default sense resistor value (can be calibrated by user)
+DEFAULT_SENSE_RESISTOR_OHMS = 454.0
 
 
 class DisplayWidget(QWidget):
@@ -60,6 +69,14 @@ class DisplayWidget(QWidget):
         # Current pressure in PSIG (base unit)
         self._current_pressure_psig = 0.0
         
+        # Current raw voltage (for calibration)
+        self._current_voltage = 0.0
+        
+        # Load calibrated sense resistor value
+        self._sense_resistor_ohms = float(self.settings.value(
+            "sense_resistor_ohms", DEFAULT_SENSE_RESISTOR_OHMS
+        ))
+        
         self.init_ui()
         
         # Restore saved unit preference
@@ -68,7 +85,7 @@ class DisplayWidget(QWidget):
             index = list(PRESSURE_UNITS.keys()).index(saved_unit)
             self.unit_selector.setCurrentIndex(index)
         
-        logger.info("DisplayWidget initialized")
+        logger.info(f"DisplayWidget initialized (sense resistor: {self._sense_resistor_ohms}Ω)")
     
     def init_ui(self) -> None:
         """Initialize the user interface with large, readable displays."""
@@ -205,7 +222,7 @@ class DisplayWidget(QWidget):
         pressure_layout.addWidget(self.pressure_lcd)
         layout.addLayout(pressure_layout)
         
-        # Raw current display (4-20mA transmitter)
+        # Raw current display (4-20mA transmitter) with calibration button
         raw_layout = QHBoxLayout()
         raw_label = QLabel("mA:")
         raw_label.setStyleSheet("font-size: 9pt; color: #888;")
@@ -213,12 +230,160 @@ class DisplayWidget(QWidget):
         self.raw_current_label = QLabel("-- mA")
         self.raw_current_label.setStyleSheet("font-size: 9pt; color: #888; font-family: monospace;")
         self.raw_current_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        
+        # Calibration button
+        self.calibrate_btn = QPushButton("Cal")
+        self.calibrate_btn.setFixedSize(35, 22)
+        self.calibrate_btn.setToolTip("Calibrate mA reading using multimeter")
+        self.calibrate_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 8pt;
+                padding: 2px;
+                background-color: #ecf0f1;
+                border: 1px solid #bdc3c7;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: #3498db;
+                color: white;
+            }
+        """)
+        self.calibrate_btn.clicked.connect(self._show_calibration_dialog)
+        
         raw_layout.addWidget(raw_label)
         raw_layout.addWidget(self.raw_current_label)
+        raw_layout.addWidget(self.calibrate_btn)
         layout.addLayout(raw_layout)
         
         group.setLayout(layout)
         return group
+    
+    def _show_calibration_dialog(self) -> None:
+        """Show the mA calibration dialog."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Calibrate mA Reading")
+        dialog.setMinimumWidth(350)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Instructions
+        instructions = QLabel(
+            "Enter the current reading from your multimeter (in series with the transmitter).\n"
+            "The app will calibrate the sense resistor value to match."
+        )
+        instructions.setWordWrap(True)
+        instructions.setStyleSheet("color: #555; margin-bottom: 10px;")
+        layout.addWidget(instructions)
+        
+        # Current readings display
+        readings_group = QGroupBox("Current Readings")
+        readings_layout = QFormLayout()
+        
+        voltage_label = QLabel(f"{self._current_voltage:.4f} V")
+        voltage_label.setStyleSheet("font-weight: bold; font-family: monospace;")
+        readings_layout.addRow("ADC Voltage:", voltage_label)
+        
+        current_mA = (self._current_voltage / self._sense_resistor_ohms) * 1000.0 if self._sense_resistor_ohms > 0 else 0
+        app_ma_label = QLabel(f"{current_mA:.2f} mA")
+        app_ma_label.setStyleSheet("font-weight: bold; font-family: monospace;")
+        readings_layout.addRow("App shows:", app_ma_label)
+        
+        resistor_label = QLabel(f"{self._sense_resistor_ohms:.1f} Ω")
+        resistor_label.setStyleSheet("font-family: monospace;")
+        readings_layout.addRow("Current resistor:", resistor_label)
+        
+        readings_group.setLayout(readings_layout)
+        layout.addWidget(readings_group)
+        
+        # Multimeter input
+        input_group = QGroupBox("Multimeter Reading")
+        input_layout = QFormLayout()
+        
+        self._cal_spinbox = QDoubleSpinBox()
+        self._cal_spinbox.setRange(0.0, 25.0)
+        self._cal_spinbox.setDecimals(2)
+        self._cal_spinbox.setSuffix(" mA")
+        self._cal_spinbox.setValue(current_mA)  # Start with current value
+        self._cal_spinbox.setStyleSheet("font-size: 12pt; padding: 5px;")
+        input_layout.addRow("Multimeter mA:", self._cal_spinbox)
+        
+        # Show calculated resistor
+        self._calc_resistor_label = QLabel("--")
+        self._calc_resistor_label.setStyleSheet("font-family: monospace; color: #27ae60;")
+        input_layout.addRow("Calculated resistor:", self._calc_resistor_label)
+        
+        self._cal_spinbox.valueChanged.connect(self._update_calculated_resistor)
+        self._update_calculated_resistor()  # Initial calculation
+        
+        input_group.setLayout(input_layout)
+        layout.addWidget(input_group)
+        
+        # Buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel | QDialogButtonBox.Reset
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        button_box.button(QDialogButtonBox.Reset).clicked.connect(self._reset_calibration)
+        button_box.button(QDialogButtonBox.Reset).setText("Reset to Default")
+        layout.addWidget(button_box)
+        
+        # Store dialog reference for reset
+        self._cal_dialog = dialog
+        
+        if dialog.exec_() == QDialog.Accepted:
+            self._apply_calibration()
+    
+    def _update_calculated_resistor(self) -> None:
+        """Update the calculated resistor value based on multimeter input."""
+        multimeter_mA = self._cal_spinbox.value()
+        if multimeter_mA > 0.1 and self._current_voltage > 0.1:
+            # R = V / I
+            calculated_R = (self._current_voltage / multimeter_mA) * 1000.0
+            self._calc_resistor_label.setText(f"{calculated_R:.1f} Ω")
+            self._calc_resistor_label.setStyleSheet("font-family: monospace; color: #27ae60;")
+        else:
+            self._calc_resistor_label.setText("Need valid readings")
+            self._calc_resistor_label.setStyleSheet("font-family: monospace; color: #e74c3c;")
+    
+    def _apply_calibration(self) -> None:
+        """Apply the calibration from the dialog."""
+        multimeter_mA = self._cal_spinbox.value()
+        if multimeter_mA > 0.1 and self._current_voltage > 0.1:
+            # Calculate new resistor value: R = V / I
+            new_resistor = (self._current_voltage / multimeter_mA) * 1000.0
+            
+            # Sanity check
+            if 100 < new_resistor < 1000:
+                self._sense_resistor_ohms = new_resistor
+                self.settings.setValue("sense_resistor_ohms", new_resistor)
+                logger.info(f"Calibration applied: sense resistor = {new_resistor:.1f}Ω")
+                
+                QMessageBox.information(
+                    self,
+                    "Calibration Applied",
+                    f"Sense resistor calibrated to {new_resistor:.1f}Ω\n\n"
+                    f"The mA reading should now match your multimeter."
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Calibration Error",
+                    f"Calculated resistor value ({new_resistor:.1f}Ω) is outside reasonable range.\n"
+                    "Expected 100-1000Ω. Please check your readings."
+                )
+    
+    def _reset_calibration(self) -> None:
+        """Reset calibration to default value."""
+        self._sense_resistor_ohms = DEFAULT_SENSE_RESISTOR_OHMS
+        self.settings.setValue("sense_resistor_ohms", DEFAULT_SENSE_RESISTOR_OHMS)
+        self._cal_spinbox.setValue((self._current_voltage / DEFAULT_SENSE_RESISTOR_OHMS) * 1000.0)
+        self._update_calculated_resistor()
+        logger.info(f"Calibration reset to default: {DEFAULT_SENSE_RESISTOR_OHMS}Ω")
+    
+    def get_sense_resistor(self) -> float:
+        """Get the current calibrated sense resistor value."""
+        return self._sense_resistor_ohms
     
     def _on_unit_changed(self, unit_name: str) -> None:
         """
@@ -410,15 +575,13 @@ class DisplayWidget(QWidget):
                 logger.warning(f"  -> pressure_psig NOT in data!")
         
         # Update raw current display (4-20mA transmitter)
-        # PI-SPI-DIN-8AI uses a sense resistor to convert current to voltage
-        # Formula: mA = V / R * 1000 (Ohm's law)
-        # Calibrated resistor value: 454Ω (measured: 9.27mA @ 4.21V = 454Ω)
+        # Uses calibrated sense resistor value (user-adjustable via Cal button)
         if "pressure_voltage" in data:
             raw_v = data["pressure_voltage"]
+            self._current_voltage = raw_v  # Store for calibration dialog
             
             # Convert voltage to mA using Ohm's law with calibrated resistor
-            SENSE_RESISTOR_OHMS = 454.0  # Calibrated from multimeter measurement
-            raw_mA = (raw_v / SENSE_RESISTOR_OHMS) * 1000.0
+            raw_mA = (raw_v / self._sense_resistor_ohms) * 1000.0
             
             self.raw_current_label.setText(f"{raw_mA:.2f} mA")
             

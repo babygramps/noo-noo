@@ -545,10 +545,12 @@ class IOStatusWidget(QWidget):
         value_label.setText(f"{value:.2f} {units}")
         
         # Update raw current label if available (convert voltage to mA for 4-20mA transmitters)
-        # PI-SPI-DIN-8AI uses a sense resistor (calibrated: 454Ω)
+        # Sense resistor value is calibrated by user via GUI
         if raw_current_label and raw_voltage is not None:
-            SENSE_RESISTOR_OHMS = 454.0  # Calibrated from multimeter measurement
-            raw_mA = (raw_voltage / SENSE_RESISTOR_OHMS) * 1000.0
+            from PyQt5.QtCore import QSettings
+            settings = QSettings("EPDM", "VacuumTestFixture")
+            sense_resistor = float(settings.value("sense_resistor_ohms", 454.0))
+            raw_mA = (raw_voltage / sense_resistor) * 1000.0
             
             raw_current_label.setText(f"Raw: {raw_mA:.2f} mA")
             # Color code: green if in valid range (4-20mA), yellow if near limits, red if out of range
