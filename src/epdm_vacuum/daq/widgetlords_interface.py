@@ -286,11 +286,13 @@ class AnalogInputModule(SPIModule):
                 
                 # Test read to verify hardware is working - read all enabled channels
                 logger.info(f"  Performing test reads on enabled channels...")
+                logger.info(f"  NOTE: MCP3208 returns raw ADC counts (0-4095), converted to voltage (0-10V)")
                 for ch in self.channels:
                     if ch.enabled:
                         try:
-                            test_value = self._hardware.read_single(ch.channel)
-                            logger.info(f"    Channel {ch.channel} '{ch.name}' test read: {test_value:.4f}V (raw)")
+                            raw_counts = self._hardware.read_single(ch.channel)
+                            voltage = (raw_counts / 4095.0) * 10.0
+                            logger.info(f"    Channel {ch.channel} '{ch.name}': raw_counts={raw_counts}, voltage={voltage:.4f}V")
                         except Exception as test_e:
                             logger.warning(f"    Channel {ch.channel} '{ch.name}' test read FAILED: {test_e}")
                 
@@ -322,6 +324,12 @@ class AnalogInputModule(SPIModule):
         Returns:
             Scaled value in engineering units
         """
+        # Track scaling calls for verbose logging
+        if not hasattr(self, '_scale_count'):
+            self._scale_count = 0
+        self._scale_count += 1
+        verbose = self._scale_count <= 10
+        
         # Map raw voltage to input value based on input type
         input_type = ch_config.input_type
         
@@ -335,15 +343,16 @@ class AnalogInputModule(SPIModule):
                 input_value = 20.0
             else:
                 input_value = 4.0 + (raw_value - 2.0) * (20.0 - 4.0) / (10.0 - 2.0)
-            logger.debug(f"4-20mA scaling: {raw_value:.3f}V -> {input_value:.3f}mA")
+            if verbose:
+                logger.info(f"  [Span #{self._scale_count}] 4-20mA: {raw_value:.4f}V -> {input_value:.2f}mA")
         elif input_type == "0-5V":
-            # 0-5V maps directly to voltage
             input_value = raw_value
-            logger.debug(f"0-5V scaling: {raw_value:.3f}V -> {input_value:.3f}V")
+            if verbose:
+                logger.info(f"  [Span #{self._scale_count}] 0-5V: {raw_value:.4f}V -> {input_value:.4f}V")
         else:  # "0-10V" or default
-            # 0-10V maps directly to voltage
             input_value = raw_value
-            logger.debug(f"0-10V scaling: {raw_value:.3f}V -> {input_value:.3f}V")
+            if verbose:
+                logger.info(f"  [Span #{self._scale_count}] 0-10V: {raw_value:.4f}V -> {input_value:.4f}V")
         
         # Apply span scaling: linear interpolation
         low_in = ch_config.low_input
@@ -358,16 +367,16 @@ class AnalogInputModule(SPIModule):
         
         # Linear interpolation
         scaled = low_out + (input_value - low_in) * (high_out - low_out) / (high_in - low_in)
-        logger.debug(f"Span scaling: input={input_value:.3f} in [{low_in}, {high_in}] -> output={scaled:.4f} {ch_config.units}")
+        if verbose:
+            logger.info(f"  [Span #{self._scale_count}] Scaling: {input_value:.2f} in [{low_in}, {high_in}] -> {scaled:.4f} {ch_config.units}")
         return scaled
     
     def read_channel(self, channel: int) -> Optional[float]:
         """
-        Read a single analog channel (raw voltage).
+        Read a single analog channel and convert to voltage.
         
-        This method is equivalent to calling:
-            inputs.read_single(channel)
-        on a Mod8AI object directly.
+        The MCP3208 ADC returns raw counts (0-4095 for 12-bit).
+        This method converts to voltage (0-10V range).
         
         Args:
             channel: Channel number (0-7)
@@ -381,16 +390,22 @@ class AnalogInputModule(SPIModule):
         
         try:
             if self._hardware:
-                # This is the same as: inputs.read_single(channel)
-                voltage = self._hardware.read_single(channel)
+                # read_single() returns RAW ADC COUNTS (0-4095 for MCP3208 12-bit ADC)
+                raw_counts = self._hardware.read_single(channel)
+                
+                # Convert raw counts to voltage
+                # MCP3208 is 12-bit (0-4095), reference voltage is typically 10V for 0-10V input
+                # For PI-SPI-DIN-8AI: 0 counts = 0V, 4095 counts = 10V
+                voltage = (raw_counts / 4095.0) * 10.0
+                
                 # Log at INFO level for first few reads to help debug
                 if not hasattr(self, '_read_count'):
                     self._read_count = 0
                 self._read_count += 1
-                if self._read_count <= 10:
-                    logger.info(f"Analog read ch{channel}: {voltage:.4f}V (read #{self._read_count})")
+                if self._read_count <= 20:
+                    logger.info(f"Analog ch{channel}: raw_counts={raw_counts}, voltage={voltage:.4f}V (read #{self._read_count})")
                 else:
-                    logger.debug(f"Analog module '{self.name}' ch{channel} raw read: {voltage:.4f}V")
+                    logger.debug(f"Analog module '{self.name}' ch{channel}: counts={raw_counts}, V={voltage:.4f}")
             else:
                 voltage = 0.0  # Mock mode
                 logger.debug(f"Analog module '{self.name}' ch{channel} MOCK read: {voltage:.4f}V")

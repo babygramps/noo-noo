@@ -132,22 +132,36 @@ class DataAcquisitionThread(QThread):
         if self.widgetlords:
             try:
                 wl_data = self.widgetlords.read()
-                # Log first 5 reads at INFO level for debugging
-                if self._sensor_read_count <= 5:
-                    logger.info(f"[DAQ Read #{self._sensor_read_count}] WidgetLords data keys: {list(wl_data.keys())}")
-                    pressure_keys = ["pressure_voltage", "pressure_psi", "vacuum_psi", "vacuum_bar"]
-                    pressure_data = {k: wl_data.get(k) for k in pressure_keys if k in wl_data}
-                    if pressure_data:
-                        logger.info(f"  Pressure data: {pressure_data}")
+                # Log first 10 reads at INFO level for debugging
+                if self._sensor_read_count <= 10:
+                    logger.info(f"=" * 60)
+                    logger.info(f"[DAQ Read #{self._sensor_read_count}] WidgetLords data:")
+                    logger.info(f"  Keys: {list(wl_data.keys())}")
+                    
+                    # Log pressure chain for debugging
+                    raw_v = wl_data.get('pressure_voltage', 'NOT SET')
+                    raw_mA = wl_data.get('pressure_mA', 'NOT SET')
+                    psi = wl_data.get('pressure_psi', 'NOT SET')
+                    vac_psi = wl_data.get('vacuum_psi', 'NOT SET')
+                    vac_bar = wl_data.get('vacuum_bar', 'NOT SET')
+                    
+                    logger.info(f"  PRESSURE CHAIN:")
+                    logger.info(f"    pressure_voltage = {raw_v}")
+                    logger.info(f"    pressure_mA      = {raw_mA}")
+                    logger.info(f"    pressure_psi     = {psi}")
+                    logger.info(f"    vacuum_psi       = {vac_psi}")
+                    logger.info(f"    vacuum_bar       = {vac_bar}")
+                    
                     # Also log raw analog inputs
                     if "analog_inputs_raw" in wl_data:
-                        logger.info(f"  Raw analog inputs: {wl_data['analog_inputs_raw']}")
+                        logger.info(f"  analog_inputs_raw: {wl_data['analog_inputs_raw']}")
+                    if "analog_inputs" in wl_data:
+                        logger.info(f"  analog_inputs (scaled): {wl_data['analog_inputs']}")
+                    logger.info(f"=" * 60)
                 else:
-                    # Log at debug level after first 5
-                    pressure_keys = ["pressure_voltage", "pressure_psi", "vacuum_psi", "vacuum_bar", "analog_inputs"]
-                    pressure_data = {k: wl_data.get(k) for k in pressure_keys if k in wl_data}
-                    if pressure_data:
-                        logger.debug(f"WidgetLords pressure data: {pressure_data}")
+                    # Log at debug level after first 10
+                    logger.debug(f"WidgetLords: V={wl_data.get('pressure_voltage')}, "
+                                f"PSI={wl_data.get('pressure_psi')}, vac_bar={wl_data.get('vacuum_bar')}")
             except Exception as e:
                 logger.error(f"WidgetLords read error: {e}", exc_info=True)
                 wl_data = {}
@@ -159,8 +173,10 @@ class DataAcquisitionThread(QThread):
                 logger.debug("WidgetLords not connected - using mock data")
             wl_data = {
                 "pressure_voltage": 5.0,
-                "pressure_psi": 15.0,
-                "vacuum_bar": 0.0,
+                "pressure_mA": 10.0,
+                "pressure_psi": 7.0,
+                "vacuum_psi": 7.7,
+                "vacuum_bar": 0.531,
             }
         
         # Read Modbus (load cells)
