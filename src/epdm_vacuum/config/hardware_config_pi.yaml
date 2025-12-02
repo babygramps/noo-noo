@@ -1,5 +1,12 @@
-# EPDM Vacuum Fixture - Hardware Configuration
+# EPDM Vacuum Fixture - Raspberry Pi Hardware Configuration
 # Version: 1.1.0
+#
+# This configuration is for deployment on Raspberry Pi 5 with actual hardware:
+# - TLB4 Load Cell Transmitter via USB-RS485 adapter (/dev/ttyUSB0)
+# - WidgetLords SPI modules for analog I/O
+#
+# Copy this to hardware_config.yaml or set environment variable:
+#   EPDM_CONFIG=/path/to/hardware_config_pi.yaml
 
 # Hardware Interfaces
 hardware:
@@ -10,7 +17,7 @@ hardware:
   
   modbus:
     enabled: true
-    port: COM4  # Serial port for Modbus RTU (Windows: COM4)
+    port: /dev/ttyUSB0  # Serial port for Modbus RTU (Raspberry Pi USB-RS485)
     baudrate: 9600  # Communication speed (TLB4 configured for 9600)
     slave_address: 1  # Modbus device address (TLB4 Addr setting)
     timeout: 1.0  # Communication timeout in seconds
@@ -23,7 +30,7 @@ hardware:
     debug: false  # Enable debug logging for troubleshooting
     
     # TLB4 4-Channel Load Cell Transmitter Configuration
-    # Discovered via register scanner on COM4
+    # Discovered via register scanner
     tlb4:
       # Register addresses (0-based Modbus addresses)
       # Discovered values from scan:

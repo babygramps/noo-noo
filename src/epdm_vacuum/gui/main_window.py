@@ -2,10 +2,11 @@
 Main Window - Primary GUI Interface
 
 The main application window that contains all UI components:
-- Real-time data display
-- Live plotting
-- Control panel
+- Real-time data display (dockable)
+- Live plotting (central widget - maximized)
+- Control panel (dockable)
 - Menu and status bar
+- View menu for toggling panel visibility
 """
 
 from typing import Optional
@@ -21,8 +22,10 @@ from PyQt5.QtWidgets import (
     QAction,
     QMessageBox,
     QDialog,
+    QDockWidget,
+    QSizePolicy,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSettings
 
 from .widgets.display_widget import DisplayWidget
 from .widgets.plot_widget import PlotWidget
@@ -46,6 +49,7 @@ class MainWindow(QMainWindow):
     Main application window for the vacuum test fixture.
     
     Integrates all GUI components and manages the application lifecycle.
+    Uses dockable widgets for flexible layout that users can customize.
     """
     
     def __init__(self):
@@ -64,41 +68,98 @@ class MainWindow(QMainWindow):
         self.current_test_metadata: Optional[dict] = None
         self.current_csv_path: Optional[str] = None
         
+        # Dock widgets storage
+        self.dock_widgets = {}
+        self.view_actions = {}
+        
+        # Settings for saving/restoring layout
+        self.settings = QSettings("EPDM", "VacuumTestFixture")
+        
         self.init_ui()
         self.init_sequence_manager()
         self.init_threads()
         
+        # Restore window state if available
+        self.restore_layout()
+        
         logger.info("MainWindow initialized")
     
     def init_ui(self) -> None:
-        """Initialize the user interface."""
-        self.setWindowTitle("EPDM Vacuum Seal Test Fixture")
-        self.setGeometry(100, 100, 1280, 720)
+        """Initialize the user interface with dockable panels."""
+        self.setWindowTitle("EPDM Vacuum Seal Test Fixture@raspberrypi")
         
-        # Create central widget and layout
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
+        # Larger default window size for better visibility
+        self.setGeometry(50, 50, 1600, 900)
+        self.setMinimumSize(1200, 700)
         
-        # Create display widget for real-time values
-        self.display_widget = DisplayWidget()
-        main_layout.addWidget(self.display_widget)
+        # Enable dock nesting and animated docks
+        self.setDockNestingEnabled(True)
+        self.setAnimated(True)
         
-        # Create plot widget for charts
+        # =====================================================
+        # CENTRAL WIDGET: Plot Widget (gets maximum real estate)
+        # =====================================================
         self.plot_widget = PlotWidget()
-        main_layout.addWidget(self.plot_widget, stretch=1)
+        self.plot_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setCentralWidget(self.plot_widget)
         
-        # Create test status panel (stage progress + IO status)
+        # =====================================================
+        # DOCKABLE PANELS
+        # =====================================================
+        
+        # Create display widget dock (sensor readings)
+        self.display_widget = DisplayWidget()
+        self.create_dock_widget(
+            "display_dock",
+            "Sensor Display",
+            self.display_widget,
+            Qt.TopDockWidgetArea,
+            "Ctrl+1"
+        )
+        
+        # Create test status panel dock (stage progress + IO status)
         self.test_status_panel = TestStatusPanel()
-        main_layout.addWidget(self.test_status_panel)
+        self.create_dock_widget(
+            "status_dock",
+            "Test Status",
+            self.test_status_panel,
+            Qt.BottomDockWidgetArea,
+            "Ctrl+2"
+        )
         
-        # Create sequence selector
+        # Create sequence selector dock
         self.sequence_selector = SequenceSelectorWidget()
-        main_layout.addWidget(self.sequence_selector)
+        self.create_dock_widget(
+            "sequence_dock",
+            "Test Sequence",
+            self.sequence_selector,
+            Qt.BottomDockWidgetArea,
+            "Ctrl+3"
+        )
         
-        # Create control panel
+        # Create control panel dock
         self.control_panel = ControlPanel()
-        main_layout.addWidget(self.control_panel)
+        self.create_dock_widget(
+            "control_dock",
+            "Controls",
+            self.control_panel,
+            Qt.BottomDockWidgetArea,
+            "Ctrl+4"
+        )
+        
+        # Tabify the bottom docks for cleaner layout
+        # Users can drag them apart if desired
+        self.tabifyDockWidget(
+            self.dock_widgets["status_dock"],
+            self.dock_widgets["sequence_dock"]
+        )
+        self.tabifyDockWidget(
+            self.dock_widgets["sequence_dock"],
+            self.dock_widgets["control_dock"]
+        )
+        
+        # Raise the status dock to be visible by default
+        self.dock_widgets["status_dock"].raise_()
         
         # Create menu bar
         self.create_menu_bar()
@@ -118,7 +179,83 @@ class MainWindow(QMainWindow):
         self.sequence_selector.edit_requested.connect(self.on_edit_sequence)
         self.sequence_selector.new_requested.connect(self.on_new_sequence)
         
-        logger.info("UI initialized")
+        logger.info("UI initialized with dockable panels")
+    
+    def create_dock_widget(
+        self,
+        name: str,
+        title: str,
+        widget: QWidget,
+        area: Qt.DockWidgetArea,
+        shortcut: str = None
+    ) -> QDockWidget:
+        """
+        Create a dockable widget and add it to the main window.
+        
+        Args:
+            name: Internal name for the dock widget
+            title: Display title for the dock
+            widget: The widget to dock
+            area: Initial dock area
+            shortcut: Keyboard shortcut for toggling visibility
+        
+        Returns:
+            The created QDockWidget
+        """
+        dock = QDockWidget(title, self)
+        dock.setObjectName(name)  # Important for state saving
+        dock.setWidget(widget)
+        
+        # Allow docking everywhere and floating
+        dock.setAllowedAreas(
+            Qt.TopDockWidgetArea |
+            Qt.BottomDockWidgetArea |
+            Qt.LeftDockWidgetArea |
+            Qt.RightDockWidgetArea
+        )
+        dock.setFeatures(
+            QDockWidget.DockWidgetClosable |
+            QDockWidget.DockWidgetMovable |
+            QDockWidget.DockWidgetFloatable
+        )
+        
+        # Style the dock widget
+        dock.setStyleSheet("""
+            QDockWidget {
+                font-weight: bold;
+                font-size: 11pt;
+            }
+            QDockWidget::title {
+                background-color: #2c3e50;
+                color: white;
+                padding: 6px;
+                border-radius: 3px;
+            }
+            QDockWidget::close-button, QDockWidget::float-button {
+                background: transparent;
+                border: none;
+                padding: 2px;
+            }
+            QDockWidget::close-button:hover, QDockWidget::float-button:hover {
+                background: #34495e;
+                border-radius: 3px;
+            }
+        """)
+        
+        # Add to main window
+        self.addDockWidget(area, dock)
+        
+        # Store reference
+        self.dock_widgets[name] = dock
+        
+        # Create toggle action with shortcut
+        toggle_action = dock.toggleViewAction()
+        toggle_action.setShortcut(shortcut)
+        self.view_actions[name] = toggle_action
+        
+        logger.debug(f"Created dock widget: {name} with shortcut {shortcut}")
+        
+        return dock
     
     def create_menu_bar(self) -> None:
         """Create the application menu bar."""
@@ -143,6 +280,35 @@ class MainWindow(QMainWindow):
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+        
+        # View menu (NEW - for toggling panels)
+        view_menu = menubar.addMenu("&View")
+        
+        # Add toggle actions for each dock
+        for name, action in self.view_actions.items():
+            view_menu.addAction(action)
+        
+        view_menu.addSeparator()
+        
+        # Show all panels action
+        show_all_action = QAction("Show &All Panels", self)
+        show_all_action.setShortcut("Ctrl+Shift+A")
+        show_all_action.triggered.connect(self.show_all_panels)
+        view_menu.addAction(show_all_action)
+        
+        # Hide all panels (focus on plot)
+        hide_all_action = QAction("&Focus on Plot", self)
+        hide_all_action.setShortcut("Ctrl+Shift+F")
+        hide_all_action.triggered.connect(self.hide_all_panels)
+        view_menu.addAction(hide_all_action)
+        
+        view_menu.addSeparator()
+        
+        # Reset layout action
+        reset_layout_action = QAction("&Reset Layout", self)
+        reset_layout_action.setShortcut("Ctrl+Shift+R")
+        reset_layout_action.triggered.connect(self.reset_layout)
+        view_menu.addAction(reset_layout_action)
         
         # Sequence menu
         sequence_menu = menubar.addMenu("&Sequence")
@@ -202,6 +368,115 @@ class MainWindow(QMainWindow):
         about_action = QAction("&About", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
+        
+        # Keyboard shortcuts help
+        shortcuts_action = QAction("&Keyboard Shortcuts", self)
+        shortcuts_action.setShortcut("F1")
+        shortcuts_action.triggered.connect(self.show_shortcuts)
+        help_menu.addAction(shortcuts_action)
+    
+    def show_all_panels(self) -> None:
+        """Show all dockable panels."""
+        for dock in self.dock_widgets.values():
+            dock.show()
+        logger.info("All panels shown")
+    
+    def hide_all_panels(self) -> None:
+        """Hide all dockable panels to focus on the plot."""
+        for dock in self.dock_widgets.values():
+            dock.hide()
+        logger.info("All panels hidden - focus on plot")
+    
+    def reset_layout(self) -> None:
+        """Reset the dock layout to default positions."""
+        # Show all docks first
+        self.show_all_panels()
+        
+        # Remove all docks temporarily
+        for dock in self.dock_widgets.values():
+            self.removeDockWidget(dock)
+        
+        # Re-add in default positions
+        self.addDockWidget(Qt.TopDockWidgetArea, self.dock_widgets["display_dock"])
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_widgets["status_dock"])
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_widgets["sequence_dock"])
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_widgets["control_dock"])
+        
+        # Tabify bottom docks
+        self.tabifyDockWidget(
+            self.dock_widgets["status_dock"],
+            self.dock_widgets["sequence_dock"]
+        )
+        self.tabifyDockWidget(
+            self.dock_widgets["sequence_dock"],
+            self.dock_widgets["control_dock"]
+        )
+        
+        # Raise status dock
+        self.dock_widgets["status_dock"].raise_()
+        
+        self.statusBar().showMessage("Layout reset to default", 3000)
+        logger.info("Layout reset to default")
+    
+    def save_layout(self) -> None:
+        """Save the current window geometry and dock state."""
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("windowState", self.saveState())
+        logger.debug("Layout saved")
+    
+    def restore_layout(self) -> None:
+        """Restore the saved window geometry and dock state."""
+        geometry = self.settings.value("geometry")
+        state = self.settings.value("windowState")
+        
+        if geometry:
+            self.restoreGeometry(geometry)
+            logger.debug("Geometry restored")
+        
+        if state:
+            self.restoreState(state)
+            logger.debug("Window state restored")
+    
+    def show_shortcuts(self) -> None:
+        """Show keyboard shortcuts help dialog."""
+        shortcuts_text = """
+        <h2>Keyboard Shortcuts</h2>
+        
+        <h3>Panel Visibility</h3>
+        <table>
+            <tr><td><b>Ctrl+1</b></td><td>Toggle Sensor Display</td></tr>
+            <tr><td><b>Ctrl+2</b></td><td>Toggle Test Status</td></tr>
+            <tr><td><b>Ctrl+3</b></td><td>Toggle Test Sequence</td></tr>
+            <tr><td><b>Ctrl+4</b></td><td>Toggle Controls</td></tr>
+            <tr><td><b>Ctrl+Shift+A</b></td><td>Show All Panels</td></tr>
+            <tr><td><b>Ctrl+Shift+F</b></td><td>Focus on Plot (hide panels)</td></tr>
+            <tr><td><b>Ctrl+Shift+R</b></td><td>Reset Layout</td></tr>
+        </table>
+        
+        <h3>Test Control</h3>
+        <table>
+            <tr><td><b>F5</b></td><td>Start Test</td></tr>
+            <tr><td><b>F6</b></td><td>Stop Test</td></tr>
+        </table>
+        
+        <h3>File Operations</h3>
+        <table>
+            <tr><td><b>Ctrl+S</b></td><td>Save Data</td></tr>
+            <tr><td><b>Ctrl+M</b></td><td>Edit Metadata</td></tr>
+            <tr><td><b>Ctrl+Q</b></td><td>Exit</td></tr>
+        </table>
+        
+        <h3>Sequence Operations</h3>
+        <table>
+            <tr><td><b>Ctrl+N</b></td><td>New Sequence</td></tr>
+            <tr><td><b>Ctrl+O</b></td><td>Load Sequence</td></tr>
+            <tr><td><b>Ctrl+E</b></td><td>Edit Sequence</td></tr>
+            <tr><td><b>Ctrl+Shift+S</b></td><td>Save Sequence</td></tr>
+        </table>
+        
+        <p><i>Tip: Panels can be dragged, floated, and docked anywhere!</i></p>
+        """
+        QMessageBox.information(self, "Keyboard Shortcuts", shortcuts_text)
     
     def init_sequence_manager(self) -> None:
         """Initialize the sequence manager."""
@@ -283,20 +558,9 @@ class MainWindow(QMainWindow):
         modbus_config = settings.get("hardware", "modbus", default={})
         if modbus_config.get("enabled", False):
             try:
-                # Extract all modbus configuration parameters
-                modbus_iface = ModbusInterface(
-                    port=modbus_config.get("port", "/dev/ttyUSB0"),
-                    slave_address=modbus_config.get("slave_address", 1),
-                    baudrate=modbus_config.get("baudrate", 9600),
-                    timeout=modbus_config.get("timeout", 1.0),
-                    parity=modbus_config.get("parity", "None"),
-                    databits=modbus_config.get("databits", 8),
-                    stopbits=modbus_config.get("stopbits", 1.0),
-                    byteorder=modbus_config.get("byteorder", "big"),
-                    wordorder=modbus_config.get("wordorder", "big"),
-                    close_port_after_each_call=modbus_config.get("close_port_after_each_call", False),
-                    debug=modbus_config.get("debug", False),
-                )
+                # Use helper function to create interface with TLB4 config
+                from ..config.settings import create_modbus_interface_from_settings
+                modbus_iface = create_modbus_interface_from_settings(settings)
                 modbus_iface.connect()
                 logger.info(f"Modbus interface initialized on {modbus_config.get('port')}")
             except Exception as e:
@@ -480,8 +744,22 @@ class MainWindow(QMainWindow):
         logger.info("Taring load cells...")
         self.statusBar().showMessage("Taring load cells...")
         
-        # TODO: Implement tare via hardware interface
-        logger.warning("TODO: Tare function not implemented")
+        # Tare via Modbus interface
+        if self.daq_thread and self.daq_thread.modbus:
+            try:
+                success = self.daq_thread.modbus.tare_load_cells()
+                if success:
+                    self.statusBar().showMessage("Tare complete", 3000)
+                    logger.info("Tare operation completed successfully")
+                else:
+                    self.statusBar().showMessage("Tare failed - check device", 5000)
+                    logger.warning("Tare operation failed")
+            except Exception as e:
+                self.statusBar().showMessage(f"Tare error: {e}", 5000)
+                logger.error(f"Tare error: {e}")
+        else:
+            self.statusBar().showMessage("No Modbus interface available", 3000)
+            logger.warning("Cannot tare - Modbus interface not available")
     
     def on_edit_metadata(self) -> None:
         """Handle edit metadata request."""
@@ -891,6 +1169,12 @@ class MainWindow(QMainWindow):
             <li>TLB4 Load Cell Transmitter</li>
             <li>SPT25-20-V30D Pressure Sensor</li>
         </ul>
+        <p><b>Tips:</b></p>
+        <ul>
+            <li>Use View menu to toggle panels</li>
+            <li>Panels can be dragged and docked anywhere</li>
+            <li>Press F1 for keyboard shortcuts</li>
+        </ul>
         """
         QMessageBox.about(self, "About", about_text)
     
@@ -903,6 +1187,9 @@ class MainWindow(QMainWindow):
         """
         logger.info("Closing application...")
         
+        # Save layout before closing
+        self.save_layout()
+        
         # Stop threads gracefully
         if self.daq_thread and self.daq_thread.isRunning():
             self.daq_thread.stop()
@@ -914,4 +1201,3 @@ class MainWindow(QMainWindow):
         
         event.accept()
         logger.info("Application closed")
-

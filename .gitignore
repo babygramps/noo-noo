@@ -48,6 +48,9 @@ env/
 data/
 logs/
 
+# Documentation (manuals, PDFs)
+docs/
+
 # Configuration (uncomment if you want to ignore local configs)
 # .env
 # *_local.yaml

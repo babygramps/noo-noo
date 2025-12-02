@@ -140,8 +140,20 @@ class PlotWidget(QWidget):
         # Calculate relative time
         relative_time = data["timestamp"] - self.start_time
         
-        # Extract values
-        force = data.get("gross_weight_kg", data.get("total_force_kg", 0.0))
+        # Extract force value - use sum of software-tared individual load cells
+        # (same calculation as DisplayWidget) for consistency
+        force = 0.0
+        has_load_cells = False
+        for i in range(4):
+            key = f"load_cell_{i+1}_kg"
+            if key in data:
+                force += data[key]
+                has_load_cells = True
+        
+        # Fall back to gross/total if no individual load cells available
+        if not has_load_cells:
+            force = data.get("total_force_kg", data.get("gross_weight_kg", 0.0))
+        
         vacuum = data.get("vacuum_bar", 0.0)
         
         # Add to buffers
