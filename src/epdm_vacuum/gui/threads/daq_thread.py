@@ -57,12 +57,41 @@ class DataAcquisitionThread(QThread):
         
         Continuously reads sensors at the specified rate until stopped.
         """
-        logger.info("DAQ thread started")
+        logger.info("=" * 60)
+        logger.info("DAQ THREAD STARTED")
+        logger.info("=" * 60)
+        logger.info(f"  Sample rate: {self.sample_rate} Hz")
+        logger.info(f"  Sample interval: {self.sample_interval:.3f} s")
+        logger.info(f"  WidgetLords interface: {'CONNECTED' if self.widgetlords else 'NOT CONNECTED'}")
+        logger.info(f"  Modbus interface: {'CONNECTED' if self.modbus else 'NOT CONNECTED'}")
+        
+        if self.widgetlords:
+            modules = self.widgetlords.list_modules() if hasattr(self.widgetlords, 'list_modules') else {}
+            logger.info(f"  WidgetLords modules: {modules}")
+            
+            # Log analog input modules specifically
+            if hasattr(self.widgetlords, 'analog_input_modules'):
+                for name, module in self.widgetlords.analog_input_modules.items():
+                    logger.info(f"    Analog Module '{name}':")
+                    logger.info(f"      Chip Enable: {module.chip_enable}")
+                    logger.info(f"      Hardware initialized: {module._hardware is not None}")
+                    for ch in module.channels:
+                        if ch.enabled:
+                            logger.info(f"      Ch{ch.channel} '{ch.name}': {ch.input_type}, "
+                                      f"span {ch.low_input}->{ch.high_input} to {ch.low_output}->{ch.high_output} {ch.units}")
+        
         self.running = True
         
-        # TODO: Initialize hardware interfaces if not already done
-        if self.widgetlords is None or self.modbus is None:
-            logger.warning("Hardware interfaces not initialized - using mock data")
+        # Check hardware interfaces
+        if self.widgetlords is None and self.modbus is None:
+            logger.warning("=" * 60)
+            logger.warning("NO HARDWARE INTERFACES - USING MOCK DATA")
+            logger.warning("=" * 60)
+        elif self.widgetlords is None:
+            logger.warning("WidgetLords interface not initialized - analog inputs will use mock data")
+        elif self.modbus is None:
+            logger.warning("Modbus interface not initialized - load cells will use mock data")
+        logger.info("=" * 60)
         
         while self.running:
             try:
@@ -94,19 +123,60 @@ class DataAcquisitionThread(QThread):
         """
         timestamp = time.time()
         
+        # Track read count for verbose logging of first few reads
+        if not hasattr(self, '_sensor_read_count'):
+            self._sensor_read_count = 0
+        self._sensor_read_count += 1
+        
         # Read WidgetLords (pressure sensor)
         if self.widgetlords:
             try:
                 wl_data = self.widgetlords.read()
+                # Log first 10 reads at INFO level for debugging
+                if self._sensor_read_count <= 10:
+                    logger.info(f"=" * 60)
+                    logger.info(f"[DAQ Read #{self._sensor_read_count}] WidgetLords data:")
+                    logger.info(f"  Keys: {list(wl_data.keys())}")
+                    
+                    # Log pressure chain for debugging
+                    raw_v = wl_data.get('pressure_voltage', 'NOT SET')
+                    raw_mA = wl_data.get('pressure_mA', 'NOT SET')
+                    psi = wl_data.get('pressure_psi', 'NOT SET')
+                    vac_psi = wl_data.get('vacuum_psi', 'NOT SET')
+                    vac_bar = wl_data.get('vacuum_bar', 'NOT SET')
+                    
+                    logger.info(f"  PRESSURE CHAIN:")
+                    logger.info(f"    pressure_voltage = {raw_v}")
+                    logger.info(f"    pressure_mA      = {raw_mA}")
+                    logger.info(f"    pressure_psi     = {psi}")
+                    logger.info(f"    vacuum_psi       = {vac_psi}")
+                    logger.info(f"    vacuum_bar       = {vac_bar}")
+                    
+                    # Also log raw analog inputs
+                    if "analog_inputs_raw" in wl_data:
+                        logger.info(f"  analog_inputs_raw: {wl_data['analog_inputs_raw']}")
+                    if "analog_inputs" in wl_data:
+                        logger.info(f"  analog_inputs (scaled): {wl_data['analog_inputs']}")
+                    logger.info(f"=" * 60)
+                else:
+                    # Log at debug level after first 10
+                    logger.debug(f"WidgetLords: V={wl_data.get('pressure_voltage')}, "
+                                f"PSI={wl_data.get('pressure_psi')}, vac_bar={wl_data.get('vacuum_bar')}")
             except Exception as e:
-                logger.error(f"WidgetLords read error: {e}")
+                logger.error(f"WidgetLords read error: {e}", exc_info=True)
                 wl_data = {}
         else:
             # Mock data for development
+            if self._sensor_read_count <= 5:
+                logger.info(f"[DAQ Read #{self._sensor_read_count}] WidgetLords NOT CONNECTED - using mock data")
+            else:
+                logger.debug("WidgetLords not connected - using mock data")
             wl_data = {
                 "pressure_voltage": 5.0,
-                "pressure_psi": 15.0,
-                "vacuum_bar": 0.0,
+                "pressure_mA": 10.0,
+                "pressure_psi": 7.0,
+                "vacuum_psi": 7.7,
+                "vacuum_bar": 0.531,
             }
         
         # Read Modbus (load cells)
@@ -114,10 +184,11 @@ class DataAcquisitionThread(QThread):
             try:
                 modbus_data = self.modbus.read()
             except Exception as e:
-                logger.error(f"Modbus read error: {e}")
+                logger.error(f"Modbus read error: {e}", exc_info=True)
                 modbus_data = {}
         else:
             # Mock data for development
+            logger.debug("Modbus not connected - using mock data")
             modbus_data = {
                 "gross_weight_kg": 100.0,
                 "load_cell_1_kg": 25.0,

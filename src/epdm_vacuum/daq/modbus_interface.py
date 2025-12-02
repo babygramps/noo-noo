@@ -254,6 +254,11 @@ class ModbusInterface(HardwareInterface):
                 logger.info("Connection established - device may require register scanning")
             
             self.initialized = True
+            
+            # Enable multi-channel HiRes mode (Command 25)
+            # This tells the TLB4 to stream individual channel data to registers 40051-40058
+            self._enable_multichannel_mode()
+            
             return True
             
         except ImportError as ie:
@@ -327,6 +332,12 @@ class ModbusInterface(HardwareInterface):
             "status": 0,
         }
         
+        # Debug logging for channel discovery (first few reads only)
+        if not hasattr(self, '_read_count'):
+            self._read_count = 0
+        self._read_count += 1
+        debug_this_read = self._read_count <= 3 or self.debug
+        
         # Read gross weight (format depends on config)
         try:
             gross_raw = self._read_value(
@@ -369,6 +380,11 @@ class ModbusInterface(HardwareInterface):
             cfg.reg_channel_4
         ]
         
+        if debug_this_read:
+            logger.info(f"[TLB4 Read #{self._read_count}] Channel registers: {channel_regs}")
+            logger.info(f"  Channel configs: " + 
+                ", ".join(f"CH{i+1}:{ch.enabled}" for i, ch in enumerate(cfg.channels)))
+        
         for i, (reg, ch_cfg) in enumerate(zip(channel_regs, cfg.channels), start=1):
             try:
                 if ch_cfg.enabled:
@@ -385,11 +401,16 @@ class ModbusInterface(HardwareInterface):
                     # Apply software tare offset (TLB4 only tares total, not channels)
                     kg_value -= self._channel_tare_offsets[i - 1]
                     result[f"load_cell_{i}_kg"] = kg_value
+                    
+                    if debug_this_read:
+                        logger.info(f"  CH{i} @ reg {reg}: raw={raw_value}, kg={kg_value:.2f}")
                 else:
                     result[f"load_cell_{i}_raw"] = 0
                     result[f"load_cell_{i}_kg"] = 0.0
+                    if debug_this_read:
+                        logger.info(f"  CH{i} @ reg {reg}: DISABLED")
             except Exception as e:
-                logger.debug(f"Failed to read channel {i}: {e}")
+                logger.warning(f"Failed to read channel {i} @ register {reg}: {e}")
                 result[f"load_cell_{i}_raw"] = 0
                 result[f"load_cell_{i}_kg"] = 0.0
         
@@ -692,9 +713,10 @@ class ModbusInterface(HardwareInterface):
     # TLB4 Command Register and Commands (from Communication Protocols Manual)
     # Register 40006 = Address 5 (40006 - 40001 = 5)
     TLB4_COMMAND_REGISTER = 5
-    CMD_TARE = 7      # Semi-Automatic Tare (sets current weight as tare, shows Net)
-    CMD_ZERO = 8      # Zero (small variations only)
-    CMD_GROSS = 9     # Switch back to Gross Weight display
+    CMD_TARE = 7              # Semi-Automatic Tare (sets current weight as tare, shows Net)
+    CMD_ZERO = 8              # Zero (small variations only)
+    CMD_GROSS = 9             # Switch back to Gross Weight display
+    CMD_ENABLE_HIRES = 25     # Enable 4x HiRes Channel Reading (streams individual channels to R1-R8)
     
     def _write_command(self, command: int) -> bool:
         """
@@ -705,7 +727,7 @@ class ModbusInterface(HardwareInterface):
         Uses a lock to prevent collision with DAQ read operations.
         
         Args:
-            command: Command value to write (7=tare, 8=zero, 9=gross)
+            command: Command value to write (7=tare, 8=zero, 9=gross, 25=enable HiRes channels)
             
         Returns:
             bool: True if command sent successfully
@@ -722,6 +744,42 @@ class ModbusInterface(HardwareInterface):
                 [command]  # List of values to write
             )
         return True
+    
+    def _enable_multichannel_mode(self) -> bool:
+        """
+        Enable multi-channel HiRes mode on TLB4 (Command 25).
+        
+        This command tells the TLB4 to stream individual load cell channel data
+        to registers 40051-40058 (addresses 50-57). Without this command, only
+        combined weight data is available.
+        
+        Channel mapping after Command 25:
+            - Channel 1: Registers 40051-40052 (address 50-51) - 32-bit signed
+            - Channel 2: Registers 40053-40054 (address 52-53) - 32-bit signed
+            - Channel 3: Registers 40055-40056 (address 54-55) - 32-bit signed
+            - Channel 4: Registers 40057-40058 (address 56-57) - 32-bit signed
+        
+        Note: Values are raw divisions (ADC counts), not kg. Calibration required.
+        
+        Returns:
+            bool: True if command sent successfully
+        """
+        try:
+            logger.info("Enabling TLB4 multi-channel HiRes mode (Command 25)...")
+            
+            # Send Command 25 to Command Register
+            self._write_command(self.CMD_ENABLE_HIRES)
+            
+            # Give the TLB4 a moment to switch modes
+            time.sleep(0.3)
+            
+            logger.info("✓ TLB4 multi-channel mode enabled - individual channels at registers 50-57")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to enable multi-channel mode: {e}")
+            logger.warning("Individual channel readings may not be available")
+            return False
     
     def tare_load_cells(self) -> bool:
         """

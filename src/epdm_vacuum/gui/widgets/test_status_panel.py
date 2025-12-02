@@ -220,4 +220,14 @@ class TestStatusPanel(QWidget):
         if self.io_status_widget:
             return self.io_status_widget.get_device_state(device_name)
         return None
+    
+    def update_analog_inputs(self, data: dict) -> None:
+        """
+        Update analog input displays from DAQ data.
+        
+        Args:
+            data: Data dictionary from DAQ thread containing sensor readings
+        """
+        if self.io_status_widget:
+            self.io_status_widget.update_from_daq_data(data)
 

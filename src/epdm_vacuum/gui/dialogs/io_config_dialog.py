@@ -60,6 +60,8 @@ class IOConfigDialog(QDialog):
         self.io_devices: List[Dict[str, Any]] = []
         self.current_edit_index: Optional[int] = None
         self.modbus_config: Dict[str, Any] = {}
+        self.load_cell_config: Dict[str, Any] = {}  # TLB4 load cell channel config
+        self.load_cell_widgets: List[Dict[str, Any]] = []  # UI widgets for load cell config
         
         self.init_ui()
         self.load_config()
@@ -102,6 +104,10 @@ class IOConfigDialog(QDialog):
         # IO Devices tab
         io_tab = self.create_io_devices_tab()
         self.tab_widget.addTab(io_tab, "IO Devices")
+        
+        # Load Cells tab (TLB4 channels)
+        load_cells_tab = self.create_load_cells_tab()
+        self.tab_widget.addTab(load_cells_tab, "Load Cells")
         
         # Modbus tab
         modbus_tab = self.create_modbus_tab()
@@ -162,6 +168,222 @@ class IOConfigDialog(QDialog):
         layout.addLayout(content_layout)
         
         return tab
+    
+    def create_load_cells_tab(self) -> QWidget:
+        """Create the Load Cells configuration tab for TLB4 channels."""
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+        
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        
+        scroll_widget = QWidget()
+        layout = QVBoxLayout(scroll_widget)
+        
+        # Info banner
+        info_banner = QGroupBox("TLB4 Load Cell Configuration")
+        info_banner.setStyleSheet("""
+            QGroupBox {
+                font-size: 11pt;
+                font-weight: bold;
+                border: 2px solid #9C27B0;
+                border-radius: 4px;
+                margin-top: 8px;
+                padding-top: 8px;
+                background-color: #F3E5F5;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        
+        info_layout = QVBoxLayout()
+        info_text = QLabel(
+            "Configure individual load cell channels on the TLB4 transmitter.\n"
+            "• Each channel reads from a specific Modbus register (32-bit value)\n"
+            "• Command 25 is sent automatically to enable multi-channel mode\n"
+            "• Values are raw ADC divisions - calibrate to convert to kg\n"
+            "• Default addresses: CH1=50, CH2=52, CH3=54, CH4=56 (after Command 25)"
+        )
+        info_text.setStyleSheet("font-size: 9pt; color: #7B1FA2; font-weight: normal;")
+        info_layout.addWidget(info_text)
+        info_banner.setLayout(info_layout)
+        layout.addWidget(info_banner)
+        
+        # Create channel configuration widgets
+        self.load_cell_widgets = []
+        
+        # Channel colors for visual distinction
+        channel_colors = ["#E53935", "#1E88E5", "#43A047", "#FB8C00"]
+        channel_names = ["Load Cell 1 (LC1)", "Load Cell 2 (LC2)", "Load Cell 3 (LC3)", "Load Cell 4 (LC4)"]
+        default_addresses = [50, 52, 54, 56]
+        
+        for i in range(4):
+            channel_group = self.create_load_cell_channel_widget(
+                i + 1, 
+                channel_names[i], 
+                channel_colors[i],
+                default_addresses[i]
+            )
+            layout.addWidget(channel_group)
+            
+        # Calibration help section
+        cal_group = QGroupBox("Calibration Guide")
+        cal_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 10pt;
+                font-weight: bold;
+                border: 2px solid #607D8B;
+                border-radius: 4px;
+                margin-top: 8px;
+                background-color: #ECEFF1;
+            }
+        """)
+        cal_layout = QVBoxLayout()
+        cal_text = QLabel(
+            "<b>How to Calibrate:</b><br>"
+            "1. <b>Zero Offset:</b> With no load, note the raw value and enter it as 'Zero Offset'<br>"
+            "2. <b>Full Scale:</b> Apply a known weight (e.g., 10kg), calculate:<br>"
+            "   &nbsp;&nbsp;&nbsp;Divisions per kg = (loaded_value - zero_value) / weight_kg<br>"
+            "3. <b>Formula:</b> kg = (raw_value - zero_offset) / full_scale_divisions"
+        )
+        cal_text.setStyleSheet("font-size: 9pt; font-weight: normal;")
+        cal_text.setWordWrap(True)
+        cal_layout.addWidget(cal_text)
+        cal_group.setLayout(cal_layout)
+        layout.addWidget(cal_group)
+        
+        layout.addStretch()
+        
+        scroll.setWidget(scroll_widget)
+        main_layout.addWidget(scroll)
+        
+        return tab
+    
+    def create_load_cell_channel_widget(
+        self, 
+        channel_num: int, 
+        name: str, 
+        color: str,
+        default_address: int
+    ) -> QGroupBox:
+        """Create configuration widget for a single load cell channel."""
+        group = QGroupBox(name)
+        group.setStyleSheet(f"""
+            QGroupBox {{
+                font-size: 10pt;
+                font-weight: bold;
+                border: 2px solid {color};
+                border-radius: 4px;
+                margin-top: 10px;
+                padding-top: 5px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: {color};
+            }}
+        """)
+        
+        layout = QHBoxLayout()
+        layout.setSpacing(20)
+        
+        # Left side: Enable and Name
+        left_layout = QVBoxLayout()
+        
+        # Enable checkbox
+        enable_check = QCheckBox("Enabled")
+        enable_check.setChecked(channel_num <= 2)  # Enable first 2 by default
+        enable_check.setStyleSheet(f"font-weight: bold; color: {color};")
+        left_layout.addWidget(enable_check)
+        
+        # Custom name
+        name_layout = QFormLayout()
+        name_edit = QLineEdit()
+        name_edit.setPlaceholderText(f"e.g., Left Cell, Corner A")
+        name_edit.setMaximumWidth(150)
+        name_layout.addRow("Name:", name_edit)
+        left_layout.addLayout(name_layout)
+        
+        layout.addLayout(left_layout)
+        
+        # Middle: Register address
+        addr_layout = QFormLayout()
+        addr_spin = QSpinBox()
+        addr_spin.setRange(0, 100)
+        addr_spin.setValue(default_address)
+        addr_spin.setToolTip("Modbus register address (0-based). Standard: 50, 52, 54, 56")
+        addr_layout.addRow("Register Address:", addr_spin)
+        
+        # Show 40001-based address
+        addr_label = QLabel(f"(Register {default_address + 40001})")
+        addr_label.setStyleSheet("color: #666; font-size: 8pt;")
+        addr_spin.valueChanged.connect(
+            lambda v, lbl=addr_label: lbl.setText(f"(Register {v + 40001})")
+        )
+        addr_layout.addRow("", addr_label)
+        
+        layout.addLayout(addr_layout)
+        
+        # Right: Calibration
+        cal_layout = QFormLayout()
+        
+        zero_spin = QDoubleSpinBox()
+        zero_spin.setRange(-1000000, 1000000)
+        zero_spin.setDecimals(0)
+        zero_spin.setValue(0)
+        zero_spin.setToolTip("Raw division value when load cell has no weight")
+        cal_layout.addRow("Zero Offset:", zero_spin)
+        
+        scale_spin = QDoubleSpinBox()
+        scale_spin.setRange(1, 1000000)
+        scale_spin.setDecimals(1)
+        scale_spin.setValue(2000.0)
+        scale_spin.setToolTip("Divisions per kg (calibrate with known weight)")
+        cal_layout.addRow("Divisions/kg:", scale_spin)
+        
+        layout.addLayout(cal_layout)
+        
+        # Far right: Live value display
+        value_layout = QVBoxLayout()
+        value_label = QLabel("--")
+        value_label.setStyleSheet(f"""
+            font-size: 14pt;
+            font-weight: bold;
+            color: {color};
+            padding: 5px;
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            min-width: 80px;
+        """)
+        value_label.setAlignment(Qt.AlignCenter)
+        value_label.setToolTip("Live reading (kg)")
+        value_layout.addWidget(QLabel("Live:"))
+        value_layout.addWidget(value_label)
+        
+        layout.addLayout(value_layout)
+        
+        group.setLayout(layout)
+        
+        # Store widget references
+        self.load_cell_widgets.append({
+            'channel': channel_num,
+            'group': group,
+            'enable': enable_check,
+            'name': name_edit,
+            'address': addr_spin,
+            'zero_offset': zero_spin,
+            'scale': scale_spin,
+            'value_label': value_label,
+        })
+        
+        return group
     
     def create_modbus_tab(self) -> QWidget:
         """Create the Modbus configuration tab."""
@@ -682,6 +904,28 @@ class IOConfigDialog(QDialog):
             
             logger.info(f"Loaded Modbus configuration from config")
             
+            # Load TLB4 load cell configuration
+            tlb4_config = modbus_config.get('tlb4', {})
+            registers = tlb4_config.get('registers', {})
+            channel_scaling = tlb4_config.get('channel_scaling', {})
+            
+            # Load each channel's configuration
+            for widget in self.load_cell_widgets:
+                ch_num = widget['channel']
+                ch_key = f'channel_{ch_num}'
+                
+                # Get register address
+                addr = registers.get(ch_key, 50 + (ch_num - 1) * 2)
+                widget['address'].setValue(addr)
+                
+                # Get channel-specific scaling
+                ch_scaling = channel_scaling.get(ch_key, {})
+                widget['enable'].setChecked(ch_scaling.get('enabled', ch_num <= 2))
+                widget['zero_offset'].setValue(ch_scaling.get('zero_offset', 0))
+                widget['scale'].setValue(ch_scaling.get('full_scale_divisions', 2000.0))
+            
+            logger.info(f"Loaded TLB4 load cell configuration")
+            
         except Exception as e:
             logger.error(f"Error loading config: {e}", exc_info=True)
             QMessageBox.warning(self, "Load Error", f"Failed to load configuration:\n{e}")
@@ -911,6 +1155,9 @@ class IOConfigDialog(QDialog):
             except:
                 stopbits = 1.0
             
+            # Preserve existing TLB4 config structure
+            existing_tlb4 = config['hardware'].get('modbus', {}).get('tlb4', {})
+            
             config['hardware']['modbus'] = {
                 'enabled': self.modbus_enabled_check.isChecked(),
                 'port': self.modbus_port_edit.text().strip(),
@@ -926,6 +1173,50 @@ class IOConfigDialog(QDialog):
                 'debug': self.modbus_debug_check.isChecked(),
             }
             
+            # Build TLB4 load cell configuration from widgets
+            tlb4_registers = existing_tlb4.get('registers', {}).copy()
+            tlb4_scaling = existing_tlb4.get('channel_scaling', {}).copy()
+            
+            for widget in self.load_cell_widgets:
+                ch_num = widget['channel']
+                ch_key = f'channel_{ch_num}'
+                
+                # Update register address
+                tlb4_registers[ch_key] = widget['address'].value()
+                
+                # Update channel scaling
+                tlb4_scaling[ch_key] = {
+                    'enabled': widget['enable'].isChecked(),
+                    'full_scale_divisions': widget['scale'].value(),
+                    'capacity_kg': 1.0,
+                    'zero_offset': widget['zero_offset'].value(),
+                }
+            
+            # Preserve other TLB4 settings
+            config['hardware']['modbus']['tlb4'] = {
+                'registers': {
+                    'gross_weight': existing_tlb4.get('registers', {}).get('gross_weight', 7),
+                    'net_weight': existing_tlb4.get('registers', {}).get('net_weight', 9),
+                    'tare_weight': existing_tlb4.get('registers', {}).get('tare_weight', 11),
+                    'status': existing_tlb4.get('registers', {}).get('status', 6),
+                    'command': existing_tlb4.get('registers', {}).get('command', 5),
+                    'channel_1': tlb4_registers.get('channel_1', 50),
+                    'channel_2': tlb4_registers.get('channel_2', 52),
+                    'channel_3': tlb4_registers.get('channel_3', 54),
+                    'channel_4': tlb4_registers.get('channel_4', 56),
+                },
+                'data_format': existing_tlb4.get('data_format', 'int32'),
+                'decimal_places': existing_tlb4.get('decimal_places', 0),
+                'channel_scaling': {
+                    'full_scale_divisions': tlb4_scaling.get('full_scale_divisions', 2000.0),
+                    'load_cell_capacity_kg': tlb4_scaling.get('load_cell_capacity_kg', 1.0),
+                    'channel_1': tlb4_scaling.get('channel_1', {}),
+                    'channel_2': tlb4_scaling.get('channel_2', {}),
+                    'channel_3': tlb4_scaling.get('channel_3', {}),
+                    'channel_4': tlb4_scaling.get('channel_4', {}),
+                },
+            }
+            
             logger.info(f"Prepared Modbus config: enabled={config['hardware']['modbus']['enabled']}, "
                        f"port={config['hardware']['modbus']['port']}, "
                        f"baudrate={config['hardware']['modbus']['baudrate']}")
@@ -936,11 +1227,15 @@ class IOConfigDialog(QDialog):
             
             logger.info(f"Saved {len(self.io_devices)} IO devices and Modbus config to {self.config_file_path}")
             
+            # Count enabled load cells
+            enabled_lc_count = sum(1 for w in self.load_cell_widgets if w['enable'].isChecked())
+            
             QMessageBox.information(
                 self,
                 "Configuration Saved",
                 f"Successfully saved configuration:\n\n"
                 f"• {len(self.io_devices)} IO device(s)\n"
+                f"• {enabled_lc_count} Load cell(s) enabled\n"
                 f"• Modbus: {'Enabled' if config['hardware']['modbus']['enabled'] else 'Disabled'}\n"
                 f"• Port: {config['hardware']['modbus']['port']}\n"
                 f"• Baudrate: {config['hardware']['modbus']['baudrate']}"

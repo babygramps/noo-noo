@@ -44,7 +44,11 @@ src/epdm_vacuum/
 │   │   ├── stage_progress_widget.py
 │   │   └── io_status_widget.py
 │   ├── threads/             # DAQ and control background threads
-│   └── dialogs/             # Sequence editor, IO config, metadata
+│   └── dialogs/             # Configuration dialogs
+│       ├── sequence_editor.py    # Test sequence editor
+│       ├── io_config_dialog.py   # IO device configuration
+│       ├── spi_config_dialog.py  # Widgetlords SPI module setup
+│       └── test_metadata_dialog.py
 ├── control/                 # Test sequencing, safety, pump control
 │   ├── sequence.py          # TestSequence, TestStage dataclasses
 │   ├── sequence_manager.py  # Load/save/validate sequences
@@ -57,10 +61,12 @@ src/epdm_vacuum/
 ## Key Files
 
 - `modbus_interface.py` - TLB4 load cell driver with software tare, thread-safe reads
-- `hardware_config.yaml` - Register addresses, port settings, scaling factors
+- `widgetlords_interface.py` - PI-SPI-DIN module driver with multi-module support
+- `hardware_config.yaml` - Register addresses, port settings, SPI module config
 - `settings.py` - `create_modbus_interface_from_settings()` factory function
 - `main_window.py` - Dockable panel system, hardware init, layout persistence
 - `display_widget.py` - Large LCD displays with color-coded load cells
+- `spi_config_dialog.py` - GUI for configuring Widgetlords SPI modules
 
 ## GUI Architecture
 
@@ -81,6 +87,7 @@ Panels can be dragged, floated, tabified, or closed. Layout is saved/restored vi
 | `Ctrl+Shift+A` | Show All Panels |
 | `Ctrl+Shift+F` | Focus on Plot (hide all panels) |
 | `Ctrl+Shift+R` | Reset Layout |
+| `Ctrl+H` | Hardware Configuration |
 | `F5` | Start Test |
 | `F6` | Stop Test |
 | `F1` | Keyboard Shortcuts Help |
@@ -146,7 +153,51 @@ class ControlThread(QThread):
 self.control_thread.stage_changed.connect(self.on_stage_changed)
 ```
 
+### WidgetLords SPI Module Pattern
+```python
+from epdm_vacuum.daq.widgetlords_interface import (
+    WidgetLordsInterface,
+    create_widgetlords_interface_from_config
+)
+
+# Create from config
+interface = create_widgetlords_interface_from_config(config)
+interface.connect()
+
+# Control relays by module and channel name
+interface.set_relay("relay_module", "vacuum_pump", True)
+
+# Read analog inputs
+voltage = interface.read_analog("analog_inputs", "pressure_sensor")
+
+# Read all enabled channels
+data = interface.read()  # Returns dict with all readings
+```
+
 ## Hardware Configuration
+
+### WidgetLords PI-SPI-DIN Modules (SPI)
+The system supports multiple PI-SPI-DIN modules via SPI bus:
+
+**Available Module Types:**
+- `PI-SPI-DIN-4KO`: 4× Relay Outputs (2A AC/DC SPDT) - stackable up to 4 per CE
+- `PI-SPI-DIN-8AI`: 8× Analog Inputs (0-10V or 4-20mA)
+- `PI-SPI-DIN-8DI`: 8× Digital Inputs (12-24V)
+- `PI-SPI-DIN-4AO`: 4× Analog Outputs (0-10V)
+
+**Chip Enables (CE0-CE4):**
+| CE   | GPIO  | Description      |
+|------|-------|------------------|
+| CE0  | GPIO8 | SPI0 CE0 default |
+| CE1  | GPIO7 | SPI0 CE1 default |
+| CE2  | GPIO24| Extended CE      |
+| CE3  | GPIO23| Extended CE      |
+| CE4  | GPIO18| Extended CE      |
+
+**Stacking 4KO Modules:**
+The PI-SPI-DIN-4KO uses MCP23S08 with 4 addresses (0-3) per chip enable, allowing up to 16 relays per CE. Set address using J3-A0/A1 jumpers.
+
+**Configuration:** Settings → Hardware Configuration (`Ctrl+H`)
 
 ### TLB4 Load Cell Transmitter (Modbus RTU)
 - Port: COM4 (Windows) or /dev/ttyUSB0 (Linux)

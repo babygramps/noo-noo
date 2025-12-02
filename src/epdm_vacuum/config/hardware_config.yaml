@@ -5,12 +5,124 @@
 hardware:
   widgetlords:
     enabled: true
-    pressure_channel: 0  # Analog input channel for pressure sensor
-    pump_relay: 0  # Relay channel for vacuum pump control
+    pressure_channel: 0  # Analog input channel for pressure sensor (legacy)
+    pump_relay: 0  # Relay channel for vacuum pump control (legacy)
+    
+    # SPI Module Configuration
+    # Each module is assigned to a Chip Enable (CE0-CE4) line
+    # PI-SPI-DIN-4KO supports stacking up to 4 modules per CE using addresses 0-3
+    spi_modules:
+      - name: relay_module
+        module_type: PI-SPI-DIN-4KO
+        chip_enable: CE0
+        address: 0
+        channels:
+          - channel: 0
+            name: vacuum_pump
+            enabled: true
+            description: Main vacuum pump relay
+          - channel: 1
+            name: vent_valve
+            enabled: true
+            description: Chamber vent valve
+          - channel: 2
+            name: vacuum_valve
+            enabled: true
+            description: Vacuum line isolation valve
+          - channel: 3
+            name: spare_relay
+            enabled: false
+            description: Spare relay output
+      
+      - name: analog_inputs
+        module_type: PI-SPI-DIN-8AI
+        chip_enable: CE1
+        address: 0
+        channels:
+          - channel: 0
+            name: pressure_sensor
+            enabled: true
+            input_type: 4-20mA    # Input signal type: 4-20mA, 0-10V, or 0-5V
+            low_input: 4.0        # Low span input value (mA)
+            low_output: -14.7     # Low span = full vacuum (-14.7 PSIG)
+            high_input: 20.0      # High span input value (mA)
+            high_output: 30.0     # High span = +30 PSIG
+            units: PSIG           # Gauge pressure
+            description: Chamber pressure sensor (vacuum to 30 PSIG)
+          - channel: 1
+            name: analog_spare_1
+            enabled: false
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
+            description: Spare analog input
+          - channel: 2
+            name: analog_spare_2
+            enabled: false
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
+            description: Spare analog input
+          - channel: 3
+            name: analog_spare_3
+            enabled: false
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
+            description: Spare analog input
+          - channel: 4
+            name: analog_spare_4
+            enabled: false
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
+            description: Spare analog input
+          - channel: 5
+            name: analog_spare_5
+            enabled: false
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
+            description: Spare analog input
+          - channel: 6
+            name: analog_spare_6
+            enabled: false
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
+            description: Spare analog input
+          - channel: 7
+            name: analog_spare_7
+            enabled: false
+            input_type: 4-20mA
+            low_input: 4.0
+            low_output: 0.0
+            high_input: 20.0
+            high_output: 100.0
+            units: ""
+            description: Spare analog input
   
   modbus:
     enabled: true
-    port: COM4  # Serial port for Modbus RTU (Windows: COM4)
+    port: /dev/ttyUSB0  # Serial port for Modbus RTU (Windows: COM4)
     baudrate: 9600  # Communication speed (TLB4 configured for 9600)
     slave_address: 1  # Modbus device address (TLB4 Addr setting)
     timeout: 1.0  # Communication timeout in seconds
@@ -23,53 +135,83 @@ hardware:
     debug: false  # Enable debug logging for troubleshooting
     
     # TLB4 4-Channel Load Cell Transmitter Configuration
-    # Discovered via register scanner on COM4
+    # 
+    # IMPORTANT: Command 25 must be sent to enable individual channel mode!
+    # The software does this automatically on connection.
+    #
+    # MODBUS REGISTER MAPPING (TLB4 uses 40001-based addressing):
+    #   In code, we use 0-based addresses: address = register_number - 40001
+    #   
+    #   40006 (addr 5):           COMMAND REGISTER (write commands here)
+    #   40008-40009 (addr 7-8):   GROSS WEIGHT H/L (32-bit combined)
+    #   40010-40011 (addr 9-10):  NET WEIGHT H/L (32-bit)
+    #   40012-40013 (addr 11-12): PEAK WEIGHT H/L (32-bit)
+    #   40050 (addr 49):          INSTRUMENT STATUS
+    #
+    # AFTER COMMAND 25 (4x HiRes Channel Mode):
+    #   40051-40052 (addr 50-51): Channel 1 - 32-bit signed raw divisions
+    #   40053-40054 (addr 52-53): Channel 2 - 32-bit signed raw divisions
+    #   40055-40056 (addr 54-55): Channel 3 - 32-bit signed raw divisions
+    #   40057-40058 (addr 56-57): Channel 4 - 32-bit signed raw divisions
+    #
     tlb4:
-      # Register addresses (0-based Modbus addresses)
-      # Discovered values from scan:
-      #   R0=11100, R1=620, R2=24, R3=1275, R8=241, R15=10000
+      # Register addresses (0-based, subtract 40001 from TLB4 register number)
       registers:
-        gross_weight: 0      # Total gross weight (16-bit) - value 11100 = 111.00 kg
-        net_weight: 2        # Net weight (16-bit)
-        tare_weight: 3       # Tare weight (16-bit) - value 1275 = 12.75 kg?
-        status: 6            # Status register (16-bit)
-        channel_1: 8         # Channel 1 - CONFIRMED ACTIVE (value 241 = 2.41 kg)
-        channel_2: 9         # Channel 2 (not connected)
-        channel_3: 10        # Channel 3 (not connected)
-        channel_4: 11        # Channel 4 (not connected)
+        gross_weight: 7      # 40008 - Total gross weight H (32-bit with next reg)
+        net_weight: 9        # 40010 - Net weight H (32-bit with next reg)
+        tare_weight: 11      # 40012 - Tare/Peak weight H
+        status: 6            # 40007 - Status register (16-bit)
+        command: 5           # 40006 - Command register (write 25 to enable channels)
+        # Individual channel registers (32-bit each, enabled by Command 25)
+        channel_1: 50        # 40051-40052 - Channel 1 raw divisions (32-bit)
+        channel_2: 52        # 40053-40054 - Channel 2 raw divisions (32-bit)
+        channel_3: 54        # 40055-40056 - Channel 3 raw divisions (32-bit)
+        channel_4: 56        # 40057-40058 - Channel 4 raw divisions (32-bit)
       
-      # Data format for weight values
-      # Using int16 since values fit in single registers
-      data_format: int16     # int16, int32, uint32, or float32
-      decimal_places: 2      # Decimal places in raw values (e.g., 241 = 2.41 kg)
+      # Data format for channel values
+      # After Command 25, channels are 32-bit signed integers (raw divisions)
+      data_format: int32     # int32 for HiRes channel data
+      decimal_places: 0      # Raw divisions have no decimal places
       
       # Channel scaling configuration
-      # TLB4 transmits values as scaled integers with 2 decimal places
-      # Formula: kg = raw_value / 100 (using full_scale=100, capacity=1.0)
+      # 
+      # HiRes mode (Command 25) outputs RAW DIVISIONS (ADC counts), not kg!
+      # You must calibrate to convert divisions to kg:
+      #
+      # CALIBRATION PROCEDURE:
+      #   1. Zero the scale, note raw value (e.g., zero_offset = 500)
+      #   2. Apply known weight (e.g., 10kg), note new value (e.g., 20500)
+      #   3. Calculate: full_scale_divisions = (20500 - 500) / 10 = 2000 div/kg
+      #   4. Set capacity_kg = 1.0 (we're using divisions per kg)
+      #
+      # Formula: kg = (raw_value - zero_offset) / full_scale_divisions * capacity_kg
+      #
       channel_scaling:
-        # Default: raw/100 = kg (same as 2 decimal places)
-        full_scale_divisions: 100.0   # Divisor for decimal scaling
-        load_cell_capacity_kg: 1.0    # 1:1 ratio after division
+        # Default calibration values (ADJUST AFTER CALIBRATION!)
+        # These are placeholder values - run calibration to get accurate numbers
+        full_scale_divisions: 2000.0  # Divisions per kg (calibrate this!)
+        load_cell_capacity_kg: 1.0    # Multiplier (usually 1.0)
         
         # Per-channel configuration
+        # Enable channels that have load cells connected
         channel_1:
-          enabled: true               # CONNECTED
-          full_scale_divisions: 100.0
+          enabled: true               # Load cell 1 - CONNECTED
+          full_scale_divisions: 2000.0  # Calibrate: divisions when 1kg applied
           capacity_kg: 1.0
-          zero_offset: 0.0
+          zero_offset: 0.0            # Raw divisions at zero load
         channel_2:
-          enabled: false              # Not connected
-          full_scale_divisions: 100.0
+          enabled: true               # Load cell 2 - CONNECTED
+          full_scale_divisions: 2000.0  # Calibrate: divisions when 1kg applied
           capacity_kg: 1.0
-          zero_offset: 0.0
+          zero_offset: 0.0            # Raw divisions at zero load
         channel_3:
-          enabled: false              # Not connected
-          full_scale_divisions: 100.0
+          enabled: false              # Load cell 3 - Not connected
+          full_scale_divisions: 2000.0
           capacity_kg: 1.0
           zero_offset: 0.0
         channel_4:
-          enabled: false              # Not connected
-          full_scale_divisions: 100.0
+          enabled: false              # Load cell 4 - Not connected
+          full_scale_divisions: 2000.0
           capacity_kg: 1.0
           zero_offset: 0.0
 

@@ -35,7 +35,6 @@ from .widgets.test_status_panel import TestStatusPanel
 from .threads.daq_thread import DataAcquisitionThread
 from .threads.control_thread import ControlThread
 from .dialogs.sequence_editor import SequenceEditorDialog
-from .dialogs.io_config_dialog import IOConfigDialog
 from .dialogs.test_metadata_dialog import TestMetadataDialog
 from ..control.sequence_manager import SequenceManager
 from ..logging.data_logger import DataLogger
@@ -59,6 +58,10 @@ class MainWindow(QMainWindow):
         self.daq_thread: Optional[DataAcquisitionThread] = None
         self.control_thread: Optional[ControlThread] = None
         self.sequence_manager: Optional[SequenceManager] = None
+        
+        # Hardware interface references for direct control
+        self.widgetlords_interface = None
+        self.modbus_interface = None
         
         # Data logging components
         self.data_buffer = DataBuffer(max_size=10000)
@@ -357,10 +360,10 @@ class MainWindow(QMainWindow):
         # Settings menu
         settings_menu = menubar.addMenu("&Settings")
         
-        io_config_action = QAction("&IO Device Configuration", self)
-        io_config_action.setShortcut("Ctrl+I")
-        io_config_action.triggered.connect(self.open_io_config)
-        settings_menu.addAction(io_config_action)
+        hardware_config_action = QAction("&Hardware Configuration", self)
+        hardware_config_action.setShortcut("Ctrl+H")
+        hardware_config_action.triggered.connect(self.open_hardware_config)
+        settings_menu.addAction(hardware_config_action)
         
         # Help menu
         help_menu = menubar.addMenu("&Help")
@@ -506,12 +509,12 @@ class MainWindow(QMainWindow):
     def init_threads(self) -> None:
         """Initialize background threads."""
         # Initialize hardware interfaces from configuration
-        widgetlords_iface, modbus_iface = self.init_hardware_interfaces()
+        self.widgetlords_interface, self.modbus_interface = self.init_hardware_interfaces()
         
         # Create data acquisition thread with hardware interfaces
         self.daq_thread = DataAcquisitionThread(
-            widgetlords_interface=widgetlords_iface,
-            modbus_interface=modbus_iface
+            widgetlords_interface=self.widgetlords_interface,
+            modbus_interface=self.modbus_interface
         )
         self.daq_thread.new_data.connect(self.on_new_data)
         self.daq_thread.error_occurred.connect(self.on_daq_error)
@@ -548,9 +551,11 @@ class MainWindow(QMainWindow):
         widgetlords_config = settings.get("hardware", "widgetlords", default={})
         if widgetlords_config.get("enabled", False):
             try:
-                widgetlords_iface = WidgetLordsInterface()
+                # Pass SPI modules configuration to the interface
+                spi_modules = widgetlords_config.get("spi_modules", [])
+                widgetlords_iface = WidgetLordsInterface(spi_modules_config=spi_modules)
                 widgetlords_iface.connect()
-                logger.info("WidgetLords interface initialized")
+                logger.info(f"WidgetLords interface initialized with {len(spi_modules)} SPI module(s)")
             except Exception as e:
                 logger.error(f"Failed to initialize WidgetLords interface: {e}")
         
@@ -586,6 +591,10 @@ class MainWindow(QMainWindow):
         
         # Update plot widget
         self.plot_widget.add_data_point(data)
+        
+        # Update IO status widget with analog input values (pressure sensor, etc.)
+        if hasattr(self, 'test_status_panel') and self.test_status_panel:
+            self.test_status_panel.update_analog_inputs(data)
     
     def on_daq_error(self, error_msg: str) -> None:
         """
@@ -665,20 +674,11 @@ class MainWindow(QMainWindow):
         # Initialize test status panel with sequence
         self.test_status_panel.set_sequence(current_seq)
         
-        # Initialize hardware interfaces (if available)
-        try:
-            widgetlords_iface, modbus_iface = self.init_hardware_interfaces()
-        except Exception as e:
-            logger.warning(f"Failed to initialize hardware interfaces: {e}")
-            logger.warning("Proceeding with mock data")
-            widgetlords_iface = None
-            modbus_iface = None
-        
-        # Create test controller with data logging
+        # Create test controller with data logging (use existing hardware interfaces)
         from ..control.test_controller import TestController
         test_controller = TestController(
-            widgetlords_interface=widgetlords_iface,
-            modbus_interface=modbus_iface,
+            widgetlords_interface=self.widgetlords_interface,
+            modbus_interface=self.modbus_interface,
             data_logger=self.data_logger,
             csv_path=csv_path,
             test_metadata=test_metadata,
@@ -734,10 +734,30 @@ class MainWindow(QMainWindow):
             state: True to turn pump on, False to turn off
         """
         logger.info(f"Setting pump to {'ON' if state else 'OFF'}")
-        self.statusBar().showMessage(f"Pump {'ON' if state else 'OFF'}")
         
-        # TODO: Implement pump control via hardware interface
-        logger.warning("TODO: Pump control not implemented")
+        # Control pump via WidgetLords interface
+        if self.widgetlords_interface and self.widgetlords_interface.is_connected():
+            try:
+                # Try to set relay by name first (new API)
+                success = self.widgetlords_interface.set_relay("relay_module", "vacuum_pump", state)
+                
+                if not success:
+                    # Fallback to legacy API (channel 0 on first relay module)
+                    success = self.widgetlords_interface.set_relay(0, state)
+                
+                if success:
+                    self.statusBar().showMessage(f"Pump {'ON' if state else 'OFF'}", 3000)
+                    logger.info(f"Pump relay set to {'ON' if state else 'OFF'}")
+                else:
+                    self.statusBar().showMessage("Pump control failed", 3000)
+                    logger.error("Failed to set pump relay")
+                    
+            except Exception as e:
+                logger.error(f"Error controlling pump: {e}")
+                self.statusBar().showMessage(f"Pump error: {e}", 5000)
+        else:
+            logger.warning("WidgetLords interface not available - pump control disabled")
+            self.statusBar().showMessage("Hardware not connected - pump control unavailable", 3000)
     
     def on_tare(self) -> None:
         """Handle tare request."""
@@ -1120,21 +1140,22 @@ class MainWindow(QMainWindow):
                     f"Failed to save sequence '{sequence.name}'"
                 )
     
-    def open_io_config(self) -> None:
-        """Open IO device configuration dialog."""
-        logger.info("Opening IO configuration dialog...")
+    def open_hardware_config(self) -> None:
+        """Open hardware configuration dialog."""
+        logger.info("Opening hardware configuration dialog...")
         
-        dialog = IOConfigDialog(self)
-        dialog.config_saved.connect(self.on_io_config_saved)
+        from .dialogs.spi_config_dialog import SPIConfigDialog
+        dialog = SPIConfigDialog(self)
+        dialog.config_saved.connect(self.on_hardware_config_saved)
         dialog.exec_()
     
-    def on_io_config_saved(self) -> None:
-        """Handle IO configuration saved."""
-        logger.info("IO configuration saved, reloading IO status widget...")
+    def on_hardware_config_saved(self) -> None:
+        """Handle hardware configuration saved."""
+        logger.info("Hardware configuration saved - reinitializing interfaces")
+        self.statusBar().showMessage("Hardware configuration saved - restart to apply changes", 5000)
         
         # Reload IO status widget to show new devices
         if hasattr(self, 'test_status_panel') and self.test_status_panel:
-            # Reset and reload IO devices
             self.test_status_panel.reset_all_io_states()
             
             # Recreate IO status widget with new config
