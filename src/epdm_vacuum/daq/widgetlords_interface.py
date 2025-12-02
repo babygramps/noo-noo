@@ -314,8 +314,8 @@ class AnalogInputModule(SPIModule):
         Apply span scaling to convert raw input to engineering units.
         
         The PI-SPI-DIN-8AI module returns voltage (0-10V).
-        For 4-20mA mode, the module uses a 500 ohm resistor, so:
-          4mA = 2V, 20mA = 10V (linear mapping)
+        For 4-20mA mode, voltage is converted to current using Ohm's law
+        with the calibrated sense resistor value.
         
         Args:
             raw_value: Raw voltage reading from module (0-10V)
@@ -334,17 +334,12 @@ class AnalogInputModule(SPIModule):
         input_type = ch_config.input_type
         
         if input_type == "4-20mA":
-            # PI-SPI-DIN-8AI: 4-20mA mode uses 500 ohm resistor
-            # 4mA * 500ohm = 2V, 20mA * 500ohm = 10V
-            # So raw voltage 2-10V maps to 4-20mA
-            if raw_value <= 2.0:
-                input_value = 4.0
-            elif raw_value >= 10.0:
-                input_value = 20.0
-            else:
-                input_value = 4.0 + (raw_value - 2.0) * (20.0 - 4.0) / (10.0 - 2.0)
+            # PI-SPI-DIN-8AI: Convert voltage to mA using Ohm's law
+            # Calibrated sense resistor: 454Ω (measured with multimeter)
+            SENSE_RESISTOR_OHMS = 454.0
+            input_value = (raw_value / SENSE_RESISTOR_OHMS) * 1000.0  # mA
             if verbose:
-                logger.info(f"  [Span #{self._scale_count}] 4-20mA: {raw_value:.4f}V -> {input_value:.2f}mA")
+                logger.info(f"  [Span #{self._scale_count}] 4-20mA: {raw_value:.4f}V / {SENSE_RESISTOR_OHMS}Ω = {input_value:.2f}mA")
         elif input_type == "0-5V":
             input_value = raw_value
             if verbose:
