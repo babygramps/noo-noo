@@ -111,12 +111,16 @@ class DisplayWidget(QWidget):
     
     def create_vacuum_display(self) -> QGroupBox:
         """
-        Create vacuum pressure display group.
+        Create pressure display group.
+        
+        Shows gauge pressure (PSIG):
+        - Positive = above atmospheric
+        - Negative = vacuum (below atmospheric)
         
         Returns:
-            QGroupBox: Vacuum display group
+            QGroupBox: Pressure display group
         """
-        group = QGroupBox("Vacuum Pressure")
+        group = QGroupBox("Pressure (Gauge)")
         group.setStyleSheet("""
             QGroupBox {
                 font-size: 12pt;
@@ -137,32 +141,31 @@ class DisplayWidget(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(8)
         
-        # Vacuum in bar
-        bar_layout = QHBoxLayout()
-        bar_label = QLabel("bar:")
-        bar_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #555;")
-        bar_label.setFixedWidth(35)
-        self.vacuum_bar_lcd = self.create_styled_lcd(digits=7, height=45)
-        bar_layout.addWidget(bar_label)
-        bar_layout.addWidget(self.vacuum_bar_lcd)
-        layout.addLayout(bar_layout)
+        # Pressure in millibar (negative = vacuum)
+        mbar_layout = QHBoxLayout()
+        mbar_label = QLabel("mbar:")
+        mbar_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #555;")
+        mbar_label.setFixedWidth(45)
+        self.pressure_mbar_lcd = self.create_styled_lcd(digits=7, height=45)
+        mbar_layout.addWidget(mbar_label)
+        mbar_layout.addWidget(self.pressure_mbar_lcd)
+        layout.addLayout(mbar_layout)
         
-        # Vacuum in PSI (or gauge pressure when positive)
+        # Pressure in PSI (negative = vacuum)
         psi_layout = QHBoxLayout()
-        self.psi_label = QLabel("PSI:")
-        self.psi_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #555;")
-        self.psi_label.setFixedWidth(35)
-        self.vacuum_psi_lcd = self.create_styled_lcd(digits=7, height=45)
-        psi_layout.addWidget(self.psi_label)
-        psi_layout.addWidget(self.vacuum_psi_lcd)
+        psi_label = QLabel("PSI:")
+        psi_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #555;")
+        psi_label.setFixedWidth(45)
+        self.pressure_psi_lcd = self.create_styled_lcd(digits=7, height=45)
+        psi_layout.addWidget(psi_label)
+        psi_layout.addWidget(self.pressure_psi_lcd)
         layout.addLayout(psi_layout)
         
         # Raw current display (4-20mA transmitter)
-        # PI-SPI-DIN-8AI uses 500Ω resistor: 4mA=2V, 20mA=10V
         raw_layout = QHBoxLayout()
         raw_label = QLabel("mA:")
         raw_label.setStyleSheet("font-size: 9pt; color: #888;")
-        raw_label.setFixedWidth(35)
+        raw_label.setFixedWidth(45)
         self.raw_current_label = QLabel("-- mA")
         self.raw_current_label.setStyleSheet("font-size: 9pt; color: #888; font-family: monospace;")
         self.raw_current_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -310,37 +313,29 @@ class DisplayWidget(QWidget):
             logger.info(f"  vacuum_bar={data.get('vacuum_bar')}, vacuum_psi={data.get('vacuum_psi')}")
             logger.info(f"  pressure_voltage={data.get('pressure_voltage')}, pressure_psi={data.get('pressure_psi')}")
         
-        # Update vacuum displays - use float directly for QLCDNumber
-        if "vacuum_bar" in data:
-            vacuum_bar = data['vacuum_bar']
-            # vacuum_bar > 0 means actual vacuum, < 0 means positive pressure
-            self.vacuum_bar_lcd.display(round(abs(vacuum_bar), 3))
-            if self._update_count <= 5:
-                logger.info(f"  -> vacuum_bar LCD = {vacuum_bar:.3f} ({'vacuum' if vacuum_bar >= 0 else 'pressure'})")
-        else:
-            if self._update_count <= 5:
-                logger.warning(f"  -> vacuum_bar NOT in data!")
-        
-        if "vacuum_psi" in data:
-            vacuum_psi = data['vacuum_psi']
-            # vacuum_psi > 0 means actual vacuum (below atmospheric)
-            # vacuum_psi < 0 means positive pressure (above atmospheric)
-            if vacuum_psi >= 0:
-                # Vacuum - show as positive vacuum
-                self.psi_label.setText("vac:")
-                self.psi_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #3498db;")
-                self.vacuum_psi_lcd.display(round(vacuum_psi, 2))
-            else:
-                # Positive gauge pressure - show as pressure
-                self.psi_label.setText("psi+:")
-                self.psi_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #e74c3c;")
-                self.vacuum_psi_lcd.display(round(-vacuum_psi, 2))  # Show as positive
+        # Update pressure displays - show gauge pressure directly
+        # Positive = above atmospheric, Negative = vacuum
+        if "pressure_psig" in data:
+            pressure_psig = data['pressure_psig']
+            self.pressure_psi_lcd.display(round(pressure_psig, 2))
+            
+            # Convert PSI to millibar (1 PSI = 68.9476 mbar)
+            pressure_mbar = pressure_psig * 68.9476
+            self.pressure_mbar_lcd.display(round(pressure_mbar, 1))
             
             if self._update_count <= 5:
-                logger.info(f"  -> vacuum_psi LCD = {vacuum_psi:.2f} ({'vacuum' if vacuum_psi >= 0 else 'pressure'})")
+                logger.info(f"  -> pressure: {pressure_psig:.2f} PSIG = {pressure_mbar:.1f} mbar")
+        elif "pressure_psi" in data:
+            # Legacy fallback
+            pressure_psig = data['pressure_psi']
+            self.pressure_psi_lcd.display(round(pressure_psig, 2))
+            pressure_mbar = pressure_psig * 68.9476
+            self.pressure_mbar_lcd.display(round(pressure_mbar, 1))
+            if self._update_count <= 5:
+                logger.info(f"  -> pressure (legacy): {pressure_psig:.2f} PSI = {pressure_mbar:.1f} mbar")
         else:
             if self._update_count <= 5:
-                logger.warning(f"  -> vacuum_psi NOT in data!")
+                logger.warning(f"  -> pressure_psig NOT in data!")
         
         # Update raw current display (4-20mA transmitter)
         # PI-SPI-DIN-8AI uses 500Ω resistor: 4mA=2V, 20mA=10V

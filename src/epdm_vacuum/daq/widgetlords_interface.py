@@ -915,30 +915,29 @@ class WidgetLordsInterface(HardwareInterface):
                     else:
                         raw_mA = 4.0 + (raw_voltage - 2.0) * 16.0 / 8.0
                     
+                    # Convert PSI to millibar (1 PSI = 68.9476 mbar)
+                    pressure_mbar = pressure_psig * 68.9476
+                    
                     # Store in data dict for display widgets
                     data["pressure_voltage"] = raw_voltage
                     data["pressure_mA"] = raw_mA
                     data["pressure_psig"] = pressure_psig
+                    data["pressure_mbar"] = pressure_mbar
                     data["pressure_psi"] = pressure_psig  # Legacy key
                     
-                    # Calculate vacuum from gauge pressure
-                    # PSIG is already relative to atmosphere:
-                    #   0 PSIG = atmospheric (no vacuum)
-                    #   -14.7 PSIG = full vacuum
-                    # Vacuum is positive when below atmospheric (negative gauge pressure)
-                    vacuum_psi = -pressure_psig  # Negate: -(-10 PSIG) = 10 PSI vacuum
-                    data["vacuum_psi"] = vacuum_psi
-                    
-                    # Convert vacuum to bar (1 PSI = 0.0689476 bar)
+                    # Legacy vacuum keys (for backward compatibility with plots, etc.)
+                    # vacuum = -pressure for gauge pressure
+                    vacuum_psi = -pressure_psig
                     vacuum_bar = vacuum_psi * 0.0689476
+                    data["vacuum_psi"] = vacuum_psi
                     data["vacuum_bar"] = vacuum_bar
                     
                     if self._data_read_count <= 5:
-                        logger.info(f"  Pressure: raw_V={raw_voltage:.4f}V -> {raw_mA:.2f}mA -> {pressure_psig:.2f} PSIG")
-                        logger.info(f"  Vacuum: {vacuum_psi:.2f} PSI = {vacuum_bar:.4f} bar")
-                        logger.info(f"  (At sea level, expect ~0 PSIG, ~0 vacuum)")
+                        logger.info(f"  Pressure: raw_V={raw_voltage:.4f}V -> {raw_mA:.2f}mA")
+                        logger.info(f"  Gauge: {pressure_psig:.2f} PSIG = {pressure_mbar:.1f} mbar")
+                        logger.info(f"  (Negative = vacuum, Positive = above atmospheric)")
                     else:
-                        logger.debug(f"Pressure: {raw_mA:.2f}mA -> {pressure_psig:.2f} PSIG, vacuum={vacuum_psi:.2f} PSI")
+                        logger.debug(f"Pressure: {raw_mA:.2f}mA -> {pressure_psig:.2f} PSIG ({pressure_mbar:.1f} mbar)")
             
             return data
             
