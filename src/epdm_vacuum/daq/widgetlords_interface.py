@@ -453,35 +453,6 @@ class AnalogInputModule(SPIModule):
         
         return readings
     
-    def read_all_enabled_with_raw(self) -> tuple:
-        """
-        Read all enabled channels and return BOTH raw and scaled values from the SAME read.
-        
-        This is important because reading twice would give different values!
-        
-        Returns:
-            Tuple of (scaled_readings, raw_readings) dicts
-        """
-        scaled_readings = {}
-        raw_readings = {}
-        
-        for ch in self.channels:
-            if ch.enabled and 0 <= ch.channel <= 7:
-                raw_voltage = self.read_channel(ch.channel)
-                if raw_voltage is not None:
-                    # Store raw value
-                    raw_readings[ch.name] = raw_voltage
-                    # Apply scaling
-                    scaled_value = self._apply_span_scaling(raw_voltage, ch)
-                    scaled_readings[ch.name] = scaled_value
-                    logger.debug(f"Channel '{ch.name}': raw={raw_voltage:.4f}V -> scaled={scaled_value:.4f} {ch.units}")
-        
-        if not raw_readings:
-            logger.warning(f"Analog module '{self.name}': No enabled channels found or all reads failed!")
-            logger.warning(f"  Channels: {[(ch.channel, ch.name, ch.enabled) for ch in self.channels]}")
-        
-        return scaled_readings, raw_readings
-    
     def get_channel_units(self, channel_name: str) -> str:
         """Get the engineering units for a channel."""
         for ch in self.channels:
@@ -879,10 +850,10 @@ class WidgetLordsInterface(HardwareInterface):
                 "relay_states": {},
             }
             
-            # Read all analog inputs (SINGLE read for both raw and scaled!)
-            # This is critical - reading twice gives different values from different hardware reads!
+            # Read all analog inputs (both scaled and raw for debugging)
             for name, module in self.analog_input_modules.items():
-                scaled_readings, raw_readings = module.read_all_enabled_with_raw()
+                scaled_readings = module.read_all_enabled(scaled=True)
+                raw_readings = module.read_all_enabled(scaled=False)
                 data["analog_inputs"][name] = scaled_readings
                 data["analog_inputs_raw"][name] = raw_readings
             
@@ -919,8 +890,18 @@ class WidgetLordsInterface(HardwareInterface):
                     pressure_psi = scaled_readings["pressure_sensor"]
                     raw_voltage = raw_readings.get("pressure_sensor", 0.0)
                     
+                    # Convert voltage to mA for 4-20mA transmitter
+                    # PI-SPI-DIN-8AI uses 500Ω resistor: 4mA=2V, 20mA=10V
+                    if raw_voltage < 2.0:
+                        raw_mA = 4.0
+                    elif raw_voltage > 10.0:
+                        raw_mA = 20.0
+                    else:
+                        raw_mA = 4.0 + (raw_voltage - 2.0) * 16.0 / 8.0
+                    
                     # Store in data dict for display widgets
                     data["pressure_voltage"] = raw_voltage
+                    data["pressure_mA"] = raw_mA
                     data["pressure_psi"] = pressure_psi
                     
                     # Calculate vacuum: atmospheric pressure (14.7 PSI) minus absolute pressure
@@ -933,10 +914,10 @@ class WidgetLordsInterface(HardwareInterface):
                     data["vacuum_bar"] = vacuum_bar
                     
                     if self._data_read_count <= 5:
-                        logger.info(f"  Pressure: raw_V={raw_voltage:.4f}V -> PSI={pressure_psi:.2f}")
+                        logger.info(f"  Pressure: raw_V={raw_voltage:.4f}V -> {raw_mA:.2f}mA -> PSI={pressure_psi:.2f}")
                         logger.info(f"  Vacuum: PSI={vacuum_psi:.2f}, bar={vacuum_bar:.4f}")
                     else:
-                        logger.debug(f"Pressure: raw_V={raw_voltage:.3f}V, PSI={pressure_psi:.2f}, "
+                        logger.debug(f"Pressure: raw_V={raw_voltage:.3f}V ({raw_mA:.2f}mA), PSI={pressure_psi:.2f}, "
                                    f"vacuum_PSI={vacuum_psi:.2f}, vacuum_bar={vacuum_bar:.4f}")
             
             return data

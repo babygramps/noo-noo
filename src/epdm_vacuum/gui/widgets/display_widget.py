@@ -157,16 +157,17 @@ class DisplayWidget(QWidget):
         psi_layout.addWidget(self.vacuum_psi_lcd)
         layout.addLayout(psi_layout)
         
-        # Raw voltage display (for debugging)
+        # Raw current display (4-20mA transmitter)
+        # PI-SPI-DIN-8AI uses 500Ω resistor: 4mA=2V, 20mA=10V
         raw_layout = QHBoxLayout()
-        raw_label = QLabel("Raw V:")
+        raw_label = QLabel("mA:")
         raw_label.setStyleSheet("font-size: 9pt; color: #888;")
         raw_label.setFixedWidth(35)
-        self.raw_voltage_label = QLabel("-- V")
-        self.raw_voltage_label.setStyleSheet("font-size: 9pt; color: #888; font-family: monospace;")
-        self.raw_voltage_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.raw_current_label = QLabel("-- mA")
+        self.raw_current_label.setStyleSheet("font-size: 9pt; color: #888; font-family: monospace;")
+        self.raw_current_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         raw_layout.addWidget(raw_label)
-        raw_layout.addWidget(self.raw_voltage_label)
+        raw_layout.addWidget(self.raw_current_label)
         layout.addLayout(raw_layout)
         
         group.setLayout(layout)
@@ -303,51 +304,59 @@ class DisplayWidget(QWidget):
             self._update_count = 0
         self._update_count += 1
         
-        # Log first few updates at INFO level for debugging
+        # Log first few updates for debugging
         if self._update_count <= 5:
-            pressure_keys = ["pressure_voltage", "pressure_psi", "vacuum_psi", "vacuum_bar"]
-            pressure_data = {k: data.get(k) for k in pressure_keys}
-            logger.info(f"[DisplayWidget update #{self._update_count}] Pressure data: {pressure_data}")
+            logger.info(f"[DisplayWidget #{self._update_count}] Data keys: {list(data.keys())}")
+            logger.info(f"  vacuum_bar={data.get('vacuum_bar')}, vacuum_psi={data.get('vacuum_psi')}")
+            logger.info(f"  pressure_voltage={data.get('pressure_voltage')}, pressure_psi={data.get('pressure_psi')}")
         
-        # Update vacuum displays
+        # Update vacuum displays - use float directly for QLCDNumber
         if "vacuum_bar" in data:
-            vacuum_bar = data['vacuum_bar']
-            # Round to 3 decimal places and display as float
-            vacuum_bar_rounded = round(vacuum_bar, 3)
-            self.vacuum_bar_lcd.display(vacuum_bar_rounded)
+            vacuum_bar = round(data['vacuum_bar'], 3)
+            self.vacuum_bar_lcd.display(vacuum_bar)
             if self._update_count <= 5:
-                logger.info(f"  vacuum_bar LCD set to: {vacuum_bar_rounded}")
+                logger.info(f"  -> vacuum_bar LCD = {vacuum_bar}")
         else:
             if self._update_count <= 5:
-                logger.warning(f"  vacuum_bar NOT in data!")
+                logger.warning(f"  -> vacuum_bar NOT in data!")
         
         if "vacuum_psi" in data:
-            vacuum_psi = data['vacuum_psi']
-            # Round to 2 decimal places and display as float
-            vacuum_psi_rounded = round(vacuum_psi, 2)
-            self.vacuum_psi_lcd.display(vacuum_psi_rounded)
+            vacuum_psi = round(data['vacuum_psi'], 2)
+            self.vacuum_psi_lcd.display(vacuum_psi)
             if self._update_count <= 5:
-                logger.info(f"  vacuum_psi LCD set to: {vacuum_psi_rounded}")
+                logger.info(f"  -> vacuum_psi LCD = {vacuum_psi}")
         elif "pressure_psi" in data:
             # Calculate vacuum from pressure if not provided
-            vacuum_psi = 14.7 - data["pressure_psi"]
-            vacuum_psi_rounded = round(vacuum_psi, 2)
-            self.vacuum_psi_lcd.display(vacuum_psi_rounded)
+            vacuum_psi = round(14.7 - data["pressure_psi"], 2)
+            self.vacuum_psi_lcd.display(vacuum_psi)
             if self._update_count <= 5:
-                logger.info(f"  vacuum_psi (calculated) LCD set to: {vacuum_psi_rounded}")
+                logger.info(f"  -> vacuum_psi LCD (calculated) = {vacuum_psi}")
         else:
             if self._update_count <= 5:
-                logger.warning(f"  vacuum_psi NOT in data!")
+                logger.warning(f"  -> vacuum_psi NOT in data!")
         
-        # Update raw voltage display for debugging
+        # Update raw current display (4-20mA transmitter)
+        # PI-SPI-DIN-8AI uses 500Ω resistor: 4mA=2V, 20mA=10V
+        # Formula: mA = 4 + (voltage - 2) * 16 / 8
         if "pressure_voltage" in data:
             raw_v = data["pressure_voltage"]
-            self.raw_voltage_label.setText(f"{raw_v:.4f} V")
-            # Color code: normal (green) if reading is reasonable, red if seems stuck at 0
-            if raw_v < 0.01:
-                self.raw_voltage_label.setStyleSheet("font-size: 9pt; color: #e74c3c; font-family: monospace;")
+            # Convert voltage to mA (2V=4mA, 10V=20mA for 4-20mA mode)
+            if raw_v < 2.0:
+                raw_mA = 4.0  # Below minimum
+            elif raw_v > 10.0:
+                raw_mA = 20.0  # Above maximum
             else:
-                self.raw_voltage_label.setStyleSheet("font-size: 9pt; color: #27ae60; font-family: monospace;")
+                raw_mA = 4.0 + (raw_v - 2.0) * 16.0 / 8.0
+            
+            self.raw_current_label.setText(f"{raw_mA:.2f} mA")
+            
+            # Color code: green if in valid range (4-20mA), yellow if at limits, red if out of range
+            if raw_mA < 4.0 or raw_mA > 20.0:
+                self.raw_current_label.setStyleSheet("font-size: 9pt; color: #e74c3c; font-family: monospace;")
+            elif raw_mA < 4.5 or raw_mA > 19.5:
+                self.raw_current_label.setStyleSheet("font-size: 9pt; color: #f39c12; font-family: monospace;")
+            else:
+                self.raw_current_label.setStyleSheet("font-size: 9pt; color: #27ae60; font-family: monospace;")
         
         # Update total force - sum of individual load cells (already software-tared)
         # This is more reliable than the TLB4's internal gross/net registers

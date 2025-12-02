@@ -336,11 +336,12 @@ class IOStatusWidget(QWidget):
         """)
         layout.addWidget(progress_bar)
         
-        # Raw voltage label (for debugging - shows the actual sensor reading)
-        raw_voltage_label = QLabel("Raw: -- V")
-        raw_voltage_label.setStyleSheet("font-size: 9pt; color: #888; font-family: monospace;")
-        raw_voltage_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        layout.addWidget(raw_voltage_label)
+        # Raw current label (for 4-20mA transmitters)
+        # PI-SPI-DIN-8AI uses 500Ω resistor: 4mA=2V, 20mA=10V
+        raw_current_label = QLabel("Raw: -- mA")
+        raw_current_label.setStyleSheet("font-size: 9pt; color: #888; font-family: monospace;")
+        raw_current_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        layout.addWidget(raw_current_label)
         
         # Description row (if available)
         desc = device_info.get("description", "")
@@ -349,8 +350,8 @@ class IOStatusWidget(QWidget):
             desc_label.setStyleSheet("font-size: 9pt; color: #7f8c8d; font-style: italic;")
             layout.addWidget(desc_label)
         
-        # Store references for updates (indicator, value_label, progress_bar, device_info, raw_voltage_label)
-        self.device_widgets[device_name] = (indicator, value_label, progress_bar, device_info, raw_voltage_label)
+        # Store references for updates (indicator, value_label, progress_bar, device_info, raw_current_label)
+        self.device_widgets[device_name] = (indicator, value_label, progress_bar, device_info, raw_current_label)
         
         return frame
     
@@ -520,17 +521,17 @@ class IOStatusWidget(QWidget):
         
         widget_tuple = self.device_widgets[device_name]
         
-        # Analog inputs have 5 elements: (indicator, value_label, progress_bar, device_info, raw_voltage_label)
+        # Analog inputs have 5 elements: (indicator, value_label, progress_bar, device_info, raw_current_label)
         if len(widget_tuple) not in (4, 5):
             logger.warning(f"Device '{device_name}' is not an analog input (tuple len={len(widget_tuple)})")
             return
         
         # Handle both old (4 element) and new (5 element) tuples
         if len(widget_tuple) == 5:
-            indicator, value_label, progress_bar, device_info, raw_voltage_label = widget_tuple
+            indicator, value_label, progress_bar, device_info, raw_current_label = widget_tuple
         else:
             indicator, value_label, progress_bar, device_info = widget_tuple
-            raw_voltage_label = None
+            raw_current_label = None
         
         # Store value
         self.analog_input_values[device_name] = value
@@ -543,14 +544,24 @@ class IOStatusWidget(QWidget):
         # Update value label
         value_label.setText(f"{value:.2f} {units}")
         
-        # Update raw voltage label if available
-        if raw_voltage_label and raw_voltage is not None:
-            raw_voltage_label.setText(f"Raw: {raw_voltage:.4f} V")
-            # Color code: normal (green) if reading is reasonable, red if stuck at 0
-            if raw_voltage < 0.01:
-                raw_voltage_label.setStyleSheet("font-size: 9pt; color: #e74c3c; font-family: monospace;")
+        # Update raw current label if available (convert voltage to mA for 4-20mA transmitters)
+        # PI-SPI-DIN-8AI uses 500Ω resistor: 4mA=2V, 20mA=10V
+        if raw_current_label and raw_voltage is not None:
+            if raw_voltage < 2.0:
+                raw_mA = 4.0
+            elif raw_voltage > 10.0:
+                raw_mA = 20.0
             else:
-                raw_voltage_label.setStyleSheet("font-size: 9pt; color: #27ae60; font-family: monospace;")
+                raw_mA = 4.0 + (raw_voltage - 2.0) * 16.0 / 8.0
+            
+            raw_current_label.setText(f"Raw: {raw_mA:.2f} mA")
+            # Color code: green if in valid range (4-20mA), yellow if at limits, red if out of range
+            if raw_mA < 4.0 or raw_mA > 20.0:
+                raw_current_label.setStyleSheet("font-size: 9pt; color: #e74c3c; font-family: monospace;")
+            elif raw_mA < 4.5 or raw_mA > 19.5:
+                raw_current_label.setStyleSheet("font-size: 9pt; color: #f39c12; font-family: monospace;")
+            else:
+                raw_current_label.setStyleSheet("font-size: 9pt; color: #27ae60; font-family: monospace;")
         
         # Calculate percentage for progress bar
         if abs(high_out - low_out) > 0.001:
@@ -623,12 +634,12 @@ class IOStatusWidget(QWidget):
         
         # Handle analog inputs (4 or 5 elements) vs digital/analog outputs (2 elements)
         if len(widget_tuple) in (4, 5):
-            # Analog input: (indicator, value_label, progress_bar, device_info[, raw_voltage_label])
+            # Analog input: (indicator, value_label, progress_bar, device_info[, raw_current_label])
             indicator = widget_tuple[0]
             value_label = widget_tuple[1]
             progress_bar = widget_tuple[2]
             device_info = widget_tuple[3]
-            raw_voltage_label = widget_tuple[4] if len(widget_tuple) == 5 else None
+            raw_current_label = widget_tuple[4] if len(widget_tuple) == 5 else None
             
             indicator.setStyleSheet("color: #9E9E9E;")  # Gray
             units = device_info.get("units", "")
@@ -636,10 +647,10 @@ class IOStatusWidget(QWidget):
             value_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #9E9E9E;")
             progress_bar.setValue(0)
             
-            # Reset raw voltage label if present
-            if raw_voltage_label:
-                raw_voltage_label.setText("Raw: -- V")
-                raw_voltage_label.setStyleSheet("font-size: 9pt; color: #888; font-family: monospace;")
+            # Reset raw current label if present
+            if raw_current_label:
+                raw_current_label.setText("Raw: -- mA")
+                raw_current_label.setStyleSheet("font-size: 9pt; color: #888; font-family: monospace;")
             
             # Reset analog input value tracking
             if device_name in self.analog_input_values:
