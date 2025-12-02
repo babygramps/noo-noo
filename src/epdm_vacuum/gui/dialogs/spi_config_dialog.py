@@ -1,11 +1,10 @@
 """
 Hardware Configuration Dialog
 
-Unified, modern dialog for all hardware configuration:
+Unified dialog for all hardware configuration:
 - SPI Modules: Widgetlords PI-SPI-DIN relay/analog/digital I/O
 - Modbus/RS485: TLB4 load cell transmitter settings
 - Visual module cards with inline channel editing
-- Beautiful, dark-themed modern UI
 """
 
 from typing import Optional, List, Dict, Any
@@ -46,68 +45,69 @@ from PyQt5.QtGui import QFont, QColor, QPalette, QPainter, QBrush, QPen
 logger = logging.getLogger(__name__)
 
 
-# Modern color palette
+# Light theme color palette
 COLORS = {
-    "bg_dark": "#1a1a2e",
-    "bg_card": "#16213e",
-    "bg_hover": "#1f3460",
-    "accent_blue": "#0f4c75",
-    "accent_cyan": "#3282b8",
-    "text_primary": "#eaeaea",
-    "text_secondary": "#a0a0a0",
-    "text_muted": "#6a6a8a",
-    "success": "#00d26a",
-    "warning": "#ffc107",
-    "danger": "#ff6b6b",
-    "relay": "#ff6b6b",
-    "analog_in": "#4ecdc4",
-    "digital_in": "#45b7d1",
-    "analog_out": "#f7b731",
+    "bg_dark": "#f5f5f5",
+    "bg_card": "#ffffff",
+    "bg_hover": "#e8e8e8",
+    "accent_blue": "#2563eb",
+    "accent_cyan": "#0891b2",
+    "text_primary": "#1f2937",
+    "text_secondary": "#4b5563",
+    "text_muted": "#9ca3af",
+    "success": "#16a34a",
+    "warning": "#d97706",
+    "danger": "#dc2626",
+    "relay": "#dc2626",
+    "analog_in": "#0891b2",
+    "digital_in": "#2563eb",
+    "analog_out": "#d97706",
+    "border": "#d1d5db",
 }
 
-# Module type definitions with modern styling
+# Module type definitions
 MODULE_TYPES = {
     "PI-SPI-DIN-4KO": {
         "short": "4KO",
-        "description": "4× Relay Outputs",
+        "description": "4x Relay Outputs",
         "detail": "2A AC/DC SPDT relays",
         "io_type": "relay_output",
         "channels": 4,
         "max_per_ce": 4,
-        "icon": "⚡",
+        "icon": "",
         "color": COLORS["relay"],
         "channel_prefix": "K",
     },
     "PI-SPI-DIN-8AI": {
         "short": "8AI",
-        "description": "8× Analog Inputs",
+        "description": "8x Analog Inputs",
         "detail": "0-10V / 4-20mA",
         "io_type": "analog_input",
         "channels": 8,
         "max_per_ce": 1,
-        "icon": "📊",
+        "icon": "",
         "color": COLORS["analog_in"],
         "channel_prefix": "AI",
     },
     "PI-SPI-DIN-8DI": {
         "short": "8DI",
-        "description": "8× Digital Inputs",
+        "description": "8x Digital Inputs",
         "detail": "12-24V isolated",
         "io_type": "digital_input",
         "channels": 8,
         "max_per_ce": 1,
-        "icon": "◉",
+        "icon": "",
         "color": COLORS["digital_in"],
         "channel_prefix": "DI",
     },
     "PI-SPI-DIN-4AO": {
         "short": "4AO",
-        "description": "4× Analog Outputs",
+        "description": "4x Analog Outputs",
         "detail": "0-10V output",
         "io_type": "analog_output",
         "channels": 4,
         "max_per_ce": 1,
-        "icon": "📈",
+        "icon": "",
         "color": COLORS["analog_out"],
         "channel_prefix": "AO",
     },
@@ -625,7 +625,7 @@ class SPIConfigDialog(QDialog):
         self.setMinimumSize(950, 750)
         self.resize(1050, 800)
         
-        # Dark theme
+        # Light theme
         self.setStyleSheet(f"""
             QDialog {{
                 background-color: {COLORS['bg_dark']};
@@ -640,12 +640,12 @@ class SPIConfigDialog(QDialog):
                 border-radius: 5px;
             }}
             QScrollBar::handle:vertical {{
-                background-color: {COLORS['bg_hover']};
+                background-color: {COLORS['border']};
                 border-radius: 5px;
                 min-height: 30px;
             }}
             QScrollBar::handle:vertical:hover {{
-                background-color: {COLORS['accent_cyan']};
+                background-color: {COLORS['accent_blue']};
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0;
@@ -657,16 +657,19 @@ class SPIConfigDialog(QDialog):
             QTabBar::tab {{
                 background-color: {COLORS['bg_card']};
                 color: {COLORS['text_secondary']};
-                padding: 12px 24px;
-                margin-right: 4px;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
+                border: 1px solid {COLORS['border']};
+                border-bottom: none;
+                padding: 10px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
                 font-size: 12px;
-                font-weight: bold;
             }}
             QTabBar::tab:selected {{
-                background-color: {COLORS['accent_blue']};
-                color: {COLORS['text_primary']};
+                background-color: {COLORS['bg_card']};
+                color: {COLORS['accent_blue']};
+                font-weight: bold;
+                border-bottom: 2px solid {COLORS['accent_blue']};
             }}
             QTabBar::tab:hover:!selected {{
                 background-color: {COLORS['bg_hover']};
@@ -681,7 +684,7 @@ class SPIConfigDialog(QDialog):
         header_layout = QVBoxLayout()
         header_layout.setSpacing(4)
         
-        title = QLabel("⚙️  Hardware Configuration")
+        title = QLabel("Hardware Configuration")
         title.setStyleSheet(f"""
             color: {COLORS['text_primary']};
             font-size: 22px;
@@ -701,15 +704,15 @@ class SPIConfigDialog(QDialog):
         
         # SPI Modules tab
         spi_tab = self.create_spi_tab()
-        self.tab_widget.addTab(spi_tab, "🔌  SPI Modules")
+        self.tab_widget.addTab(spi_tab, "SPI Modules")
         
         # Test I/O tab
         test_tab = self.create_test_io_tab()
-        self.tab_widget.addTab(test_tab, "🧪  Test I/O")
+        self.tab_widget.addTab(test_tab, "Test I/O")
         
         # Modbus tab
         modbus_tab = self.create_modbus_tab()
-        self.tab_widget.addTab(modbus_tab, "📡  Modbus / RS485")
+        self.tab_widget.addTab(modbus_tab, "Modbus / RS485")
         
         main_layout.addWidget(self.tab_widget, stretch=1)
         
@@ -755,21 +758,21 @@ class SPIConfigDialog(QDialog):
         warning_frame = QFrame()
         warning_frame.setStyleSheet(f"""
             QFrame {{
-                background-color: {COLORS['warning']}30;
-                border: 1px solid {COLORS['warning']}80;
-                border-radius: 8px;
+                background-color: #fef3c7;
+                border: 1px solid {COLORS['warning']};
+                border-radius: 6px;
                 padding: 12px;
             }}
         """)
         warning_layout = QHBoxLayout(warning_frame)
-        warning_icon = QLabel("⚠️")
-        warning_icon.setStyleSheet("font-size: 20px;")
+        warning_icon = QLabel("WARNING")
+        warning_icon.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {COLORS['warning']};")
         warning_layout.addWidget(warning_icon)
         warning_text = QLabel(
-            "<b>Manual Hardware Test</b> — Use this panel to test individual relays and valves. "
+            "<b>Manual Hardware Test</b> - Use this panel to test individual relays and valves. "
             "Make sure it's safe to activate equipment before toggling."
         )
-        warning_text.setStyleSheet(f"color: {COLORS['warning']}; font-size: 11px;")
+        warning_text.setStyleSheet(f"color: #92400e; font-size: 11px;")
         warning_text.setWordWrap(True)
         warning_layout.addWidget(warning_text, stretch=1)
         main_layout.addWidget(warning_frame)
@@ -785,7 +788,7 @@ class SPIConfigDialog(QDialog):
         """)
         status_layout = QHBoxLayout(status_frame)
         
-        self.connection_status_label = QLabel("● Not Connected")
+        self.connection_status_label = QLabel("Not Connected")
         self.connection_status_label.setStyleSheet(f"color: {COLORS['danger']}; font-weight: bold;")
         status_layout.addWidget(self.connection_status_label)
         
@@ -871,7 +874,7 @@ class SPIConfigDialog(QDialog):
         
         # Header
         header = QHBoxLayout()
-        title = QLabel("🔌 Relay Outputs")
+        title = QLabel("Relay Outputs")
         title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;")
         header.addWidget(title)
         
@@ -925,7 +928,7 @@ class SPIConfigDialog(QDialog):
         layout.setSpacing(12)
         
         # Header
-        title = QLabel("📊 Analog Inputs")
+        title = QLabel("Analog Inputs")
         title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;")
         layout.addWidget(title)
         
@@ -959,7 +962,7 @@ class SPIConfigDialog(QDialog):
         layout.setSpacing(12)
         
         # Header
-        title = QLabel("🔘 Digital Inputs")
+        title = QLabel("Digital Inputs")
         title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;")
         layout.addWidget(title)
         
@@ -997,20 +1000,20 @@ class SPIConfigDialog(QDialog):
             self.test_interface = WidgetLordsInterface(spi_modules_config=current_modules)
             
             if self.test_interface.connect():
-                self.connection_status_label.setText("● Connected")
+                self.connection_status_label.setText("Connected")
                 self.connection_status_label.setStyleSheet(f"color: {COLORS['success']}; font-weight: bold;")
                 logger.info("Connected to hardware for testing")
                 
                 # Populate test controls
                 self.populate_test_controls()
             else:
-                self.connection_status_label.setText("● Connection Failed")
+                self.connection_status_label.setText("Connection Failed")
                 self.connection_status_label.setStyleSheet(f"color: {COLORS['danger']}; font-weight: bold;")
                 QMessageBox.warning(self, "Connection Failed", "Could not connect to hardware.")
                 
         except ImportError:
             # Mock mode for development
-            self.connection_status_label.setText("● Mock Mode (no hardware)")
+            self.connection_status_label.setText("Mock Mode (no hardware)")
             self.connection_status_label.setStyleSheet(f"color: {COLORS['warning']}; font-weight: bold;")
             self.test_interface = None
             self.populate_test_controls()
@@ -1214,10 +1217,14 @@ class SPIConfigDialog(QDialog):
         layout.addWidget(name_label)
         
         # Status indicator
-        status_label = QLabel("●")
+        status_label = QLabel("OFF")
         status_label.setStyleSheet(f"""
             color: {COLORS['text_muted']};
-            font-size: 32px;
+            font-size: 14px;
+            font-weight: bold;
+            padding: 8px;
+            background-color: {COLORS['bg_dark']};
+            border-radius: 4px;
         """)
         status_label.setAlignment(Qt.AlignCenter)
         status_label.setProperty("state", False)
@@ -1693,13 +1700,13 @@ class SPIConfigDialog(QDialog):
         empty_layout = QVBoxLayout(self.empty_state)
         empty_layout.setAlignment(Qt.AlignCenter)
         
-        empty_icon = QLabel("📦")
-        empty_icon.setStyleSheet("font-size: 48px;")
+        empty_icon = QLabel("No Modules")
+        empty_icon.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {COLORS['text_muted']};")
         empty_icon.setAlignment(Qt.AlignCenter)
         empty_layout.addWidget(empty_icon)
         
-        empty_text = QLabel("No modules configured")
-        empty_text.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 14px;")
+        empty_text = QLabel("No SPI modules configured yet")
+        empty_text.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 12px;")
         empty_text.setAlignment(Qt.AlignCenter)
         empty_layout.addWidget(empty_text)
         
@@ -1778,7 +1785,7 @@ class SPIConfigDialog(QDialog):
         layout.addStretch()
         
         # Help hint
-        hint = QLabel("💡 Each module is assigned to a Chip Enable (CE) line. "
+        hint = QLabel("Tip: Each module is assigned to a Chip Enable (CE) line. "
                       "4KO relay modules can share a CE using different addresses.")
         hint.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
         hint.setWordWrap(True)
