@@ -603,11 +603,22 @@ class SPIConfigDialog(QDialog):
         self.spi_modules: List[Dict[str, Any]] = []
         self.module_cards: List[ModuleCard] = []
         self.modbus_config: Dict[str, Any] = {}
+        self.test_interface = None  # For manual I/O testing
         
         self.init_ui()
         self.load_config()
         
         logger.info("Hardware Configuration dialog initialized")
+    
+    def closeEvent(self, event):
+        """Clean up when dialog closes."""
+        if self.test_interface:
+            try:
+                self.test_interface.disconnect()
+                logger.info("Disconnected test interface")
+            except Exception as e:
+                logger.warning(f"Error disconnecting test interface: {e}")
+        super().closeEvent(event)
     
     def init_ui(self):
         self.setWindowTitle("Hardware Configuration")
@@ -692,6 +703,10 @@ class SPIConfigDialog(QDialog):
         spi_tab = self.create_spi_tab()
         self.tab_widget.addTab(spi_tab, "🔌  SPI Modules")
         
+        # Test I/O tab
+        test_tab = self.create_test_io_tab()
+        self.tab_widget.addTab(test_tab, "🧪  Test I/O")
+        
         # Modbus tab
         modbus_tab = self.create_modbus_tab()
         self.tab_widget.addTab(modbus_tab, "📡  Modbus / RS485")
@@ -728,6 +743,577 @@ class SPIConfigDialog(QDialog):
         layout.addLayout(content_layout, stretch=1)
         
         return tab
+    
+    def create_test_io_tab(self) -> QWidget:
+        """Create the Test I/O tab for manual hardware testing."""
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+        main_layout.setContentsMargins(0, 12, 0, 0)
+        main_layout.setSpacing(16)
+        
+        # Warning banner
+        warning_frame = QFrame()
+        warning_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['warning']}30;
+                border: 1px solid {COLORS['warning']}80;
+                border-radius: 8px;
+                padding: 12px;
+            }}
+        """)
+        warning_layout = QHBoxLayout(warning_frame)
+        warning_icon = QLabel("⚠️")
+        warning_icon.setStyleSheet("font-size: 20px;")
+        warning_layout.addWidget(warning_icon)
+        warning_text = QLabel(
+            "<b>Manual Hardware Test</b> — Use this panel to test individual relays and valves. "
+            "Make sure it's safe to activate equipment before toggling."
+        )
+        warning_text.setStyleSheet(f"color: {COLORS['warning']}; font-size: 11px;")
+        warning_text.setWordWrap(True)
+        warning_layout.addWidget(warning_text, stretch=1)
+        main_layout.addWidget(warning_frame)
+        
+        # Connection status
+        status_frame = QFrame()
+        status_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_card']};
+                border-radius: 8px;
+                padding: 12px;
+            }}
+        """)
+        status_layout = QHBoxLayout(status_frame)
+        
+        self.connection_status_label = QLabel("● Not Connected")
+        self.connection_status_label.setStyleSheet(f"color: {COLORS['danger']}; font-weight: bold;")
+        status_layout.addWidget(self.connection_status_label)
+        
+        status_layout.addStretch()
+        
+        connect_btn = QPushButton("Connect to Hardware")
+        connect_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['success']};
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #00b85c;
+            }}
+        """)
+        connect_btn.clicked.connect(self.connect_for_testing)
+        status_layout.addWidget(connect_btn)
+        
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['accent_cyan']};
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['accent_blue']};
+            }}
+        """)
+        refresh_btn.clicked.connect(self.refresh_test_io)
+        status_layout.addWidget(refresh_btn)
+        
+        main_layout.addWidget(status_frame)
+        
+        # Scroll area for I/O controls
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background-color: transparent;")
+        self.test_io_layout = QVBoxLayout(scroll_content)
+        self.test_io_layout.setSpacing(16)
+        
+        # Relay outputs section
+        self.relay_test_frame = self.create_relay_test_section()
+        self.test_io_layout.addWidget(self.relay_test_frame)
+        
+        # Analog inputs section
+        self.analog_test_frame = self.create_analog_test_section()
+        self.test_io_layout.addWidget(self.analog_test_frame)
+        
+        # Digital inputs section
+        self.digital_test_frame = self.create_digital_test_section()
+        self.test_io_layout.addWidget(self.digital_test_frame)
+        
+        self.test_io_layout.addStretch()
+        
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll, stretch=1)
+        
+        return tab
+    
+    def create_relay_test_section(self) -> QFrame:
+        """Create the relay testing section."""
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_card']};
+                border-radius: 10px;
+                padding: 16px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(frame)
+        layout.setSpacing(12)
+        
+        # Header
+        header = QHBoxLayout()
+        title = QLabel("🔌 Relay Outputs")
+        title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;")
+        header.addWidget(title)
+        
+        all_off_btn = QPushButton("All OFF")
+        all_off_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['danger']};
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: #e55555;
+            }}
+        """)
+        all_off_btn.clicked.connect(self.all_relays_off)
+        header.addWidget(all_off_btn)
+        
+        header.addStretch()
+        layout.addLayout(header)
+        
+        # Relay buttons container
+        self.relay_buttons_layout = QGridLayout()
+        self.relay_buttons_layout.setSpacing(8)
+        self.relay_toggle_buttons: Dict[str, QPushButton] = {}
+        
+        layout.addLayout(self.relay_buttons_layout)
+        
+        # Placeholder text
+        self.relay_placeholder = QLabel("Configure relay modules in the SPI Modules tab, then connect to test")
+        self.relay_placeholder.setStyleSheet(f"color: {COLORS['text_muted']}; font-style: italic; padding: 20px;")
+        self.relay_placeholder.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.relay_placeholder)
+        
+        return frame
+    
+    def create_analog_test_section(self) -> QFrame:
+        """Create the analog input testing section."""
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_card']};
+                border-radius: 10px;
+                padding: 16px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(frame)
+        layout.setSpacing(12)
+        
+        # Header
+        title = QLabel("📊 Analog Inputs")
+        title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;")
+        layout.addWidget(title)
+        
+        # Analog readings container
+        self.analog_readings_layout = QGridLayout()
+        self.analog_readings_layout.setSpacing(8)
+        self.analog_reading_labels: Dict[str, QLabel] = {}
+        
+        layout.addLayout(self.analog_readings_layout)
+        
+        # Placeholder text
+        self.analog_placeholder = QLabel("Configure analog input modules in the SPI Modules tab, then connect to test")
+        self.analog_placeholder.setStyleSheet(f"color: {COLORS['text_muted']}; font-style: italic; padding: 20px;")
+        self.analog_placeholder.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.analog_placeholder)
+        
+        return frame
+    
+    def create_digital_test_section(self) -> QFrame:
+        """Create the digital input testing section."""
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_card']};
+                border-radius: 10px;
+                padding: 16px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(frame)
+        layout.setSpacing(12)
+        
+        # Header
+        title = QLabel("🔘 Digital Inputs")
+        title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;")
+        layout.addWidget(title)
+        
+        # Digital indicators container
+        self.digital_indicators_layout = QGridLayout()
+        self.digital_indicators_layout.setSpacing(8)
+        self.digital_indicator_labels: Dict[str, QLabel] = {}
+        
+        layout.addLayout(self.digital_indicators_layout)
+        
+        # Placeholder text
+        self.digital_placeholder = QLabel("Configure digital input modules in the SPI Modules tab, then connect to test")
+        self.digital_placeholder.setStyleSheet(f"color: {COLORS['text_muted']}; font-style: italic; padding: 20px;")
+        self.digital_placeholder.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.digital_placeholder)
+        
+        return frame
+    
+    def connect_for_testing(self):
+        """Connect to hardware for testing."""
+        try:
+            from ...daq.widgetlords_interface import WidgetLordsInterface
+            
+            # Get current config from cards
+            current_modules = [card.get_config() for card in self.module_cards]
+            
+            if not current_modules:
+                QMessageBox.warning(
+                    self, "No Modules",
+                    "Please configure at least one SPI module in the SPI Modules tab first."
+                )
+                return
+            
+            # Create and connect interface
+            self.test_interface = WidgetLordsInterface(spi_modules_config=current_modules)
+            
+            if self.test_interface.connect():
+                self.connection_status_label.setText("● Connected")
+                self.connection_status_label.setStyleSheet(f"color: {COLORS['success']}; font-weight: bold;")
+                logger.info("Connected to hardware for testing")
+                
+                # Populate test controls
+                self.populate_test_controls()
+            else:
+                self.connection_status_label.setText("● Connection Failed")
+                self.connection_status_label.setStyleSheet(f"color: {COLORS['danger']}; font-weight: bold;")
+                QMessageBox.warning(self, "Connection Failed", "Could not connect to hardware.")
+                
+        except ImportError:
+            # Mock mode for development
+            self.connection_status_label.setText("● Mock Mode (no hardware)")
+            self.connection_status_label.setStyleSheet(f"color: {COLORS['warning']}; font-weight: bold;")
+            self.test_interface = None
+            self.populate_test_controls()
+            logger.warning("Widgetlords library not available - using mock mode")
+            
+        except Exception as e:
+            logger.error(f"Failed to connect for testing: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to connect:\n{e}")
+    
+    def populate_test_controls(self):
+        """Populate the test controls based on configured modules."""
+        # Get current module configs
+        current_modules = [card.get_config() for card in self.module_cards]
+        
+        # Clear existing controls
+        self.clear_layout(self.relay_buttons_layout)
+        self.clear_layout(self.analog_readings_layout)
+        self.clear_layout(self.digital_indicators_layout)
+        self.relay_toggle_buttons.clear()
+        self.analog_reading_labels.clear()
+        self.digital_indicator_labels.clear()
+        
+        relay_count = 0
+        analog_count = 0
+        digital_count = 0
+        
+        for module in current_modules:
+            mod_type = module.get("module_type", "")
+            mod_name = module.get("name", "unknown")
+            channels = module.get("channels", [])
+            
+            if mod_type == "PI-SPI-DIN-4KO":
+                # Add relay toggle buttons
+                for ch in channels:
+                    if ch.get("enabled", True):
+                        ch_name = ch.get("name", f"K{ch.get('channel', 0)}")
+                        ch_desc = ch.get("description", "")
+                        
+                        btn = self.create_relay_toggle_button(mod_name, ch_name, ch_desc, ch.get("channel", 0))
+                        row = relay_count // 2
+                        col = relay_count % 2
+                        self.relay_buttons_layout.addWidget(btn, row, col)
+                        self.relay_toggle_buttons[f"{mod_name}:{ch_name}"] = btn
+                        relay_count += 1
+                        
+            elif mod_type == "PI-SPI-DIN-8AI":
+                # Add analog reading displays
+                for ch in channels:
+                    if ch.get("enabled", True):
+                        ch_name = ch.get("name", f"AI{ch.get('channel', 0)}")
+                        ch_desc = ch.get("description", "")
+                        
+                        reading_widget = self.create_analog_reading_widget(mod_name, ch_name, ch_desc)
+                        row = analog_count // 2
+                        col = analog_count % 2
+                        self.analog_readings_layout.addWidget(reading_widget, row, col)
+                        analog_count += 1
+                        
+            elif mod_type == "PI-SPI-DIN-8DI":
+                # Add digital input indicators
+                for ch in channels:
+                    if ch.get("enabled", True):
+                        ch_name = ch.get("name", f"DI{ch.get('channel', 0)}")
+                        ch_desc = ch.get("description", "")
+                        
+                        indicator_widget = self.create_digital_indicator_widget(mod_name, ch_name, ch_desc)
+                        row = digital_count // 4
+                        col = digital_count % 4
+                        self.digital_indicators_layout.addWidget(indicator_widget, row, col)
+                        digital_count += 1
+        
+        # Show/hide placeholders
+        self.relay_placeholder.setVisible(relay_count == 0)
+        self.analog_placeholder.setVisible(analog_count == 0)
+        self.digital_placeholder.setVisible(digital_count == 0)
+    
+    def create_relay_toggle_button(self, module_name: str, channel_name: str, description: str, channel_num: int) -> QFrame:
+        """Create a relay toggle button widget."""
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_dark']};
+                border-radius: 8px;
+                padding: 12px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(frame)
+        layout.setSpacing(8)
+        
+        # Header with name
+        name_label = QLabel(f"<b>{channel_name}</b>")
+        name_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px;")
+        layout.addWidget(name_label)
+        
+        # Description
+        if description:
+            desc_label = QLabel(description)
+            desc_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
+            desc_label.setWordWrap(True)
+            layout.addWidget(desc_label)
+        
+        # Module/channel info
+        info_label = QLabel(f"{module_name} • Ch {channel_num}")
+        info_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 9px;")
+        layout.addWidget(info_label)
+        
+        # Toggle button
+        toggle_btn = QPushButton("OFF")
+        toggle_btn.setCheckable(True)
+        toggle_btn.setProperty("module_name", module_name)
+        toggle_btn.setProperty("channel_name", channel_name)
+        toggle_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_hover']};
+                color: {COLORS['text_secondary']};
+                border: 2px solid {COLORS['text_muted']};
+                border-radius: 6px;
+                padding: 10px;
+                font-weight: bold;
+                font-size: 12px;
+            }}
+            QPushButton:checked {{
+                background-color: {COLORS['relay']};
+                color: white;
+                border-color: {COLORS['relay']};
+            }}
+            QPushButton:hover {{
+                border-color: {COLORS['relay']};
+            }}
+        """)
+        toggle_btn.clicked.connect(lambda checked, m=module_name, c=channel_name, b=toggle_btn: 
+                                   self.toggle_relay(m, c, checked, b))
+        layout.addWidget(toggle_btn)
+        
+        # Store reference
+        frame.toggle_btn = toggle_btn
+        
+        return frame
+    
+    def create_analog_reading_widget(self, module_name: str, channel_name: str, description: str) -> QFrame:
+        """Create an analog reading display widget."""
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_dark']};
+                border-radius: 8px;
+                padding: 12px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(frame)
+        layout.setSpacing(4)
+        
+        # Header with name
+        name_label = QLabel(f"<b>{channel_name}</b>")
+        name_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px;")
+        layout.addWidget(name_label)
+        
+        # Description
+        if description:
+            desc_label = QLabel(description)
+            desc_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
+            layout.addWidget(desc_label)
+        
+        # Reading value
+        reading_label = QLabel("-- V")
+        reading_label.setStyleSheet(f"""
+            color: {COLORS['analog_in']};
+            font-size: 20px;
+            font-weight: bold;
+            padding: 8px;
+        """)
+        reading_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(reading_label)
+        
+        # Store reference
+        self.analog_reading_labels[f"{module_name}:{channel_name}"] = reading_label
+        
+        return frame
+    
+    def create_digital_indicator_widget(self, module_name: str, channel_name: str, description: str) -> QFrame:
+        """Create a digital input indicator widget."""
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_dark']};
+                border-radius: 8px;
+                padding: 10px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(frame)
+        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8)
+        
+        # Name
+        name_label = QLabel(f"<b>{channel_name}</b>")
+        name_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 11px;")
+        name_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(name_label)
+        
+        # Status indicator
+        status_label = QLabel("●")
+        status_label.setStyleSheet(f"""
+            color: {COLORS['text_muted']};
+            font-size: 32px;
+        """)
+        status_label.setAlignment(Qt.AlignCenter)
+        status_label.setProperty("state", False)
+        layout.addWidget(status_label)
+        
+        # State text
+        state_text = QLabel("--")
+        state_text.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
+        state_text.setAlignment(Qt.AlignCenter)
+        layout.addWidget(state_text)
+        
+        # Store reference
+        key = f"{module_name}:{channel_name}"
+        self.digital_indicator_labels[key] = (status_label, state_text)
+        
+        return frame
+    
+    def toggle_relay(self, module_name: str, channel_name: str, state: bool, button: QPushButton):
+        """Toggle a relay on/off."""
+        button.setText("ON" if state else "OFF")
+        
+        if hasattr(self, 'test_interface') and self.test_interface:
+            try:
+                success = self.test_interface.set_relay(module_name, channel_name, state)
+                if success:
+                    logger.info(f"Relay {module_name}:{channel_name} set to {'ON' if state else 'OFF'}")
+                else:
+                    logger.warning(f"Failed to set relay {module_name}:{channel_name}")
+                    button.setChecked(not state)  # Revert
+                    button.setText("OFF" if state else "ON")
+            except Exception as e:
+                logger.error(f"Error toggling relay: {e}")
+                button.setChecked(not state)
+                button.setText("OFF" if state else "ON")
+        else:
+            # Mock mode
+            logger.info(f"[MOCK] Relay {module_name}:{channel_name} would be {'ON' if state else 'OFF'}")
+    
+    def all_relays_off(self):
+        """Turn all relays off."""
+        for key, frame in self.relay_toggle_buttons.items():
+            if hasattr(frame, 'toggle_btn'):
+                btn = frame.toggle_btn
+                if btn.isChecked():
+                    btn.setChecked(False)
+                    btn.setText("OFF")
+                    parts = key.split(":")
+                    if len(parts) == 2:
+                        self.toggle_relay(parts[0], parts[1], False, btn)
+    
+    def refresh_test_io(self):
+        """Refresh analog and digital input readings."""
+        if hasattr(self, 'test_interface') and self.test_interface:
+            try:
+                data = self.test_interface.read()
+                
+                # Update analog readings
+                analog_data = data.get("analog_inputs", {})
+                for mod_name, readings in analog_data.items():
+                    for ch_name, value in readings.items():
+                        key = f"{mod_name}:{ch_name}"
+                        if key in self.analog_reading_labels:
+                            self.analog_reading_labels[key].setText(f"{value:.2f} V")
+                
+                # Update digital readings
+                digital_data = data.get("digital_inputs", {})
+                for mod_name, readings in digital_data.items():
+                    for ch_name, value in readings.items():
+                        key = f"{mod_name}:{ch_name}"
+                        if key in self.digital_indicator_labels:
+                            status_label, state_text = self.digital_indicator_labels[key]
+                            if value:
+                                status_label.setStyleSheet(f"color: {COLORS['success']}; font-size: 32px;")
+                                state_text.setText("HIGH")
+                                state_text.setStyleSheet(f"color: {COLORS['success']}; font-size: 10px;")
+                            else:
+                                status_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 32px;")
+                                state_text.setText("LOW")
+                                state_text.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
+                            
+            except Exception as e:
+                logger.error(f"Error reading inputs: {e}")
+        else:
+            # Mock mode - show placeholder values
+            for key, label in self.analog_reading_labels.items():
+                label.setText("0.00 V")
+            for key, (status_label, state_text) in self.digital_indicator_labels.items():
+                status_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 32px;")
+                state_text.setText("--")
+    
+    def clear_layout(self, layout):
+        """Clear all widgets from a layout."""
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
     
     def create_modbus_tab(self) -> QWidget:
         """Create the Modbus/RS485 configuration tab."""
