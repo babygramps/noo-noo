@@ -1,10 +1,11 @@
 """
-SPI Configuration Dialog - Widgetlords Module Assignment
+Hardware Configuration Dialog
 
-Modern, streamlined dialog for configuring Widgetlords PI-SPI-DIN modules with:
+Unified, modern dialog for all hardware configuration:
+- SPI Modules: Widgetlords PI-SPI-DIN relay/analog/digital I/O
+- Modbus/RS485: TLB4 load cell transmitter settings
 - Visual module cards with inline channel editing
-- Drag-style chip select assignment
-- Beautiful, modern UI with smooth interactions
+- Beautiful, dark-themed modern UI
 """
 
 from typing import Optional, List, Dict, Any
@@ -36,6 +37,8 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QStackedWidget,
     QToolButton,
+    QTabWidget,
+    QTabBar,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize
 from PyQt5.QtGui import QFont, QColor, QPalette, QPainter, QBrush, QPen
@@ -583,12 +586,12 @@ class ModuleTypeButton(QPushButton):
 
 class SPIConfigDialog(QDialog):
     """
-    Modern SPI module configuration dialog.
+    Unified hardware configuration dialog.
     
     Features:
+    - Tabbed interface: SPI Modules + Modbus/RS485
     - Visual module cards with inline channel editing
     - Quick-add buttons for each module type
-    - Chip enable assignment overview
     - Dark theme with modern styling
     """
     
@@ -599,16 +602,17 @@ class SPIConfigDialog(QDialog):
         self.config_file_path = Path(__file__).parent.parent.parent / "config" / "hardware_config.yaml"
         self.spi_modules: List[Dict[str, Any]] = []
         self.module_cards: List[ModuleCard] = []
+        self.modbus_config: Dict[str, Any] = {}
         
         self.init_ui()
         self.load_config()
         
-        logger.info("SPIConfigDialog initialized")
+        logger.info("Hardware Configuration dialog initialized")
     
     def init_ui(self):
-        self.setWindowTitle("SPI Module Configuration")
-        self.setMinimumSize(900, 700)
-        self.resize(1000, 750)
+        self.setWindowTitle("Hardware Configuration")
+        self.setMinimumSize(950, 750)
+        self.resize(1050, 800)
         
         # Dark theme
         self.setStyleSheet(f"""
@@ -635,6 +639,27 @@ class SPIConfigDialog(QDialog):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0;
             }}
+            QTabWidget::pane {{
+                border: none;
+                background-color: transparent;
+            }}
+            QTabBar::tab {{
+                background-color: {COLORS['bg_card']};
+                color: {COLORS['text_secondary']};
+                padding: 12px 24px;
+                margin-right: 4px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {COLORS['accent_blue']};
+                color: {COLORS['text_primary']};
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: {COLORS['bg_hover']};
+            }}
         """)
         
         main_layout = QVBoxLayout(self)
@@ -645,7 +670,7 @@ class SPIConfigDialog(QDialog):
         header_layout = QVBoxLayout()
         header_layout.setSpacing(4)
         
-        title = QLabel("SPI Module Configuration")
+        title = QLabel("⚙️  Hardware Configuration")
         title.setStyleSheet(f"""
             color: {COLORS['text_primary']};
             font-size: 22px;
@@ -653,15 +678,40 @@ class SPIConfigDialog(QDialog):
         """)
         header_layout.addWidget(title)
         
-        subtitle = QLabel("Configure Widgetlords PI-SPI-DIN modules and assign I/O channels")
+        subtitle = QLabel("Configure SPI modules, Modbus communication, and I/O assignments")
         subtitle.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
         header_layout.addWidget(subtitle)
         
         main_layout.addLayout(header_layout)
         
+        # Tab widget
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setDocumentMode(True)
+        
+        # SPI Modules tab
+        spi_tab = self.create_spi_tab()
+        self.tab_widget.addTab(spi_tab, "🔌  SPI Modules")
+        
+        # Modbus tab
+        modbus_tab = self.create_modbus_tab()
+        self.tab_widget.addTab(modbus_tab, "📡  Modbus / RS485")
+        
+        main_layout.addWidget(self.tab_widget, stretch=1)
+        
+        # Footer buttons
+        footer = self.create_footer()
+        main_layout.addLayout(footer)
+    
+    def create_spi_tab(self) -> QWidget:
+        """Create the SPI modules configuration tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 12, 0, 0)
+        layout.setSpacing(12)
+        
         # Quick-add toolbar
         toolbar = self.create_toolbar()
-        main_layout.addWidget(toolbar)
+        layout.addWidget(toolbar)
         
         # Main content
         content_layout = QHBoxLayout()
@@ -675,11 +725,307 @@ class SPIConfigDialog(QDialog):
         sidebar = self.create_sidebar()
         content_layout.addWidget(sidebar, stretch=1)
         
-        main_layout.addLayout(content_layout, stretch=1)
+        layout.addLayout(content_layout, stretch=1)
         
-        # Footer buttons
-        footer = self.create_footer()
-        main_layout.addLayout(footer)
+        return tab
+    
+    def create_modbus_tab(self) -> QWidget:
+        """Create the Modbus/RS485 configuration tab."""
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+        main_layout.setContentsMargins(0, 12, 0, 0)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background-color: transparent;")
+        layout = QVBoxLayout(scroll_content)
+        layout.setSpacing(16)
+        
+        # Info banner
+        info_frame = QFrame()
+        info_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['warning']}20;
+                border: 1px solid {COLORS['warning']}60;
+                border-radius: 8px;
+                padding: 12px;
+            }}
+        """)
+        info_layout = QVBoxLayout(info_frame)
+        info_text = QLabel(
+            "<b>TLB4 Load Cell Transmitter</b><br>"
+            "Configure RS485/Modbus RTU communication for the Laumas TLB4.<br>"
+            "• Supports up to 4 load cells with 24-bit resolution<br>"
+            "• Connection: USB-RS485 adapter to TLB4 A/B terminals"
+        )
+        info_text.setStyleSheet(f"color: {COLORS['warning']}; font-size: 11px;")
+        info_text.setWordWrap(True)
+        info_layout.addWidget(info_text)
+        layout.addWidget(info_frame)
+        
+        # Enable toggle
+        enable_frame = QFrame()
+        enable_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_card']};
+                border-radius: 8px;
+                padding: 8px;
+            }}
+        """)
+        enable_layout = QHBoxLayout(enable_frame)
+        
+        self.modbus_enabled_check = QCheckBox("Enable Modbus Communication")
+        self.modbus_enabled_check.setStyleSheet(f"""
+            QCheckBox {{
+                color: {COLORS['text_primary']};
+                font-size: 13px;
+                font-weight: bold;
+            }}
+            QCheckBox::indicator {{
+                width: 20px;
+                height: 20px;
+                border-radius: 4px;
+                border: 2px solid {COLORS['text_muted']};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {COLORS['success']};
+                border-color: {COLORS['success']};
+            }}
+        """)
+        enable_layout.addWidget(self.modbus_enabled_check)
+        enable_layout.addStretch()
+        layout.addWidget(enable_frame)
+        
+        # Connection settings
+        conn_group = self.create_modbus_connection_group()
+        layout.addWidget(conn_group)
+        
+        # Protocol settings
+        protocol_group = self.create_modbus_protocol_group()
+        layout.addWidget(protocol_group)
+        
+        layout.addStretch()
+        
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)
+        
+        return tab
+    
+    def create_modbus_connection_group(self) -> QFrame:
+        """Create the Modbus connection settings group."""
+        group = QFrame()
+        group.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_card']};
+                border-radius: 10px;
+                padding: 16px;
+            }}
+            QLabel {{
+                color: {COLORS['text_primary']};
+            }}
+            QLineEdit, QComboBox {{
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['bg_hover']};
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus, QComboBox:focus {{
+                border-color: {COLORS['accent_cyan']};
+            }}
+        """)
+        
+        layout = QVBoxLayout(group)
+        layout.setSpacing(12)
+        
+        # Title
+        title = QLabel("Connection Settings")
+        title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;")
+        layout.addWidget(title)
+        
+        # Form layout
+        form = QGridLayout()
+        form.setSpacing(12)
+        form.setColumnStretch(1, 1)
+        
+        # Serial Port
+        port_label = QLabel("Serial Port:")
+        port_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
+        form.addWidget(port_label, 0, 0)
+        
+        port_row = QHBoxLayout()
+        self.modbus_port_edit = QLineEdit()
+        self.modbus_port_edit.setPlaceholderText("/dev/ttyUSB0 or COM3")
+        port_row.addWidget(self.modbus_port_edit, stretch=1)
+        
+        test_btn = QPushButton("Test")
+        test_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['accent_cyan']};
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['accent_blue']};
+            }}
+        """)
+        test_btn.clicked.connect(self.test_modbus_connection)
+        port_row.addWidget(test_btn)
+        
+        form.addLayout(port_row, 0, 1)
+        
+        # Baudrate
+        baud_label = QLabel("Baudrate:")
+        baud_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
+        form.addWidget(baud_label, 1, 0)
+        
+        self.modbus_baudrate_combo = QComboBox()
+        self.modbus_baudrate_combo.addItems(["9600", "19200", "38400", "57600", "115200"])
+        form.addWidget(self.modbus_baudrate_combo, 1, 1)
+        
+        # Parity
+        parity_label = QLabel("Parity:")
+        parity_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
+        form.addWidget(parity_label, 2, 0)
+        
+        self.modbus_parity_combo = QComboBox()
+        self.modbus_parity_combo.addItems(["None", "Even", "Odd"])
+        form.addWidget(self.modbus_parity_combo, 2, 1)
+        
+        # Data/Stop bits row
+        bits_row = QHBoxLayout()
+        
+        databits_label = QLabel("Data Bits:")
+        databits_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
+        bits_row.addWidget(databits_label)
+        
+        self.modbus_databits_combo = QComboBox()
+        self.modbus_databits_combo.addItems(["8", "7"])
+        self.modbus_databits_combo.setFixedWidth(80)
+        bits_row.addWidget(self.modbus_databits_combo)
+        
+        bits_row.addSpacing(20)
+        
+        stopbits_label = QLabel("Stop Bits:")
+        stopbits_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
+        bits_row.addWidget(stopbits_label)
+        
+        self.modbus_stopbits_combo = QComboBox()
+        self.modbus_stopbits_combo.addItems(["1", "2"])
+        self.modbus_stopbits_combo.setFixedWidth(80)
+        bits_row.addWidget(self.modbus_stopbits_combo)
+        
+        bits_row.addStretch()
+        
+        form.addWidget(QLabel(""), 3, 0)  # Spacer
+        form.addLayout(bits_row, 3, 1)
+        
+        layout.addLayout(form)
+        
+        return group
+    
+    def create_modbus_protocol_group(self) -> QFrame:
+        """Create the Modbus protocol settings group."""
+        group = QFrame()
+        group.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_card']};
+                border-radius: 10px;
+                padding: 16px;
+            }}
+            QLabel {{
+                color: {COLORS['text_primary']};
+            }}
+            QSpinBox, QDoubleSpinBox {{
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['bg_hover']};
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 12px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(group)
+        layout.setSpacing(12)
+        
+        # Title
+        title = QLabel("Protocol Settings")
+        title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;")
+        layout.addWidget(title)
+        
+        # Form layout
+        form = QGridLayout()
+        form.setSpacing(12)
+        form.setColumnStretch(1, 1)
+        
+        # Slave Address
+        slave_label = QLabel("Slave Address:")
+        slave_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
+        form.addWidget(slave_label, 0, 0)
+        
+        self.modbus_slave_spin = QSpinBox()
+        self.modbus_slave_spin.setRange(1, 247)
+        self.modbus_slave_spin.setValue(1)
+        form.addWidget(self.modbus_slave_spin, 0, 1)
+        
+        # Timeout
+        timeout_label = QLabel("Timeout:")
+        timeout_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
+        form.addWidget(timeout_label, 1, 0)
+        
+        self.modbus_timeout_spin = QDoubleSpinBox()
+        self.modbus_timeout_spin.setRange(0.1, 10.0)
+        self.modbus_timeout_spin.setValue(1.0)
+        self.modbus_timeout_spin.setSuffix(" sec")
+        self.modbus_timeout_spin.setSingleStep(0.1)
+        form.addWidget(self.modbus_timeout_spin, 1, 1)
+        
+        # Debug mode
+        self.modbus_debug_check = QCheckBox("Enable debug logging")
+        self.modbus_debug_check.setStyleSheet(f"""
+            QCheckBox {{
+                color: {COLORS['text_muted']};
+                font-size: 11px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
+                border: 2px solid {COLORS['text_muted']};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {COLORS['accent_cyan']};
+                border-color: {COLORS['accent_cyan']};
+            }}
+        """)
+        form.addWidget(self.modbus_debug_check, 2, 1)
+        
+        layout.addLayout(form)
+        
+        return group
+    
+    def test_modbus_connection(self):
+        """Test the Modbus connection."""
+        port = self.modbus_port_edit.text().strip()
+        if not port:
+            QMessageBox.warning(self, "Test Connection", "Please enter a serial port first.")
+            return
+        
+        QMessageBox.information(
+            self, "Test Connection",
+            f"Connection test for port: {port}\n\n"
+            f"Baudrate: {self.modbus_baudrate_combo.currentText()}\n"
+            f"Slave Address: {self.modbus_slave_spin.value()}\n\n"
+            "Full connection testing requires actual hardware."
+        )
     
     def create_toolbar(self) -> QFrame:
         """Create the quick-add toolbar."""
@@ -1090,6 +1436,7 @@ class SPIConfigDialog(QDialog):
             with open(self.config_file_path, 'r') as f:
                 config = yaml.safe_load(f)
             
+            # Load SPI modules
             self.spi_modules = config.get('hardware', {}).get('widgetlords', {}).get('spi_modules', [])
             
             # Deep copy to avoid modifying original
@@ -1098,11 +1445,45 @@ class SPIConfigDialog(QDialog):
                 m['channels'] = [dict(c) for c in m.get('channels', [])]
             
             self.refresh_ui()
-            logger.info(f"Loaded {len(self.spi_modules)} SPI modules")
+            
+            # Load Modbus config
+            self.modbus_config = config.get('hardware', {}).get('modbus', {})
+            self.load_modbus_ui()
+            
+            logger.info(f"Loaded {len(self.spi_modules)} SPI modules and Modbus config")
             
         except Exception as e:
             logger.error(f"Error loading config: {e}", exc_info=True)
             QMessageBox.warning(self, "Load Error", f"Failed to load configuration:\n{e}")
+    
+    def load_modbus_ui(self):
+        """Load Modbus configuration into UI elements."""
+        self.modbus_enabled_check.setChecked(self.modbus_config.get('enabled', False))
+        self.modbus_port_edit.setText(self.modbus_config.get('port', '/dev/ttyUSB0'))
+        
+        baudrate = str(self.modbus_config.get('baudrate', 9600))
+        idx = self.modbus_baudrate_combo.findText(baudrate)
+        if idx >= 0:
+            self.modbus_baudrate_combo.setCurrentIndex(idx)
+        
+        parity = self.modbus_config.get('parity', 'None')
+        idx = self.modbus_parity_combo.findText(parity)
+        if idx >= 0:
+            self.modbus_parity_combo.setCurrentIndex(idx)
+        
+        databits = str(self.modbus_config.get('databits', 8))
+        idx = self.modbus_databits_combo.findText(databits)
+        if idx >= 0:
+            self.modbus_databits_combo.setCurrentIndex(idx)
+        
+        stopbits = str(int(self.modbus_config.get('stopbits', 1)))
+        idx = self.modbus_stopbits_combo.findText(stopbits)
+        if idx >= 0:
+            self.modbus_stopbits_combo.setCurrentIndex(idx)
+        
+        self.modbus_slave_spin.setValue(self.modbus_config.get('slave_address', 1))
+        self.modbus_timeout_spin.setValue(self.modbus_config.get('timeout', 1.0))
+        self.modbus_debug_check.setChecked(self.modbus_config.get('debug', False))
     
     def save_config(self):
         """Save configuration to file."""
@@ -1110,7 +1491,7 @@ class SPIConfigDialog(QDialog):
             # Get latest configs from cards
             self.spi_modules = [card.get_config() for card in self.module_cards]
             
-            # Validate
+            # Validate SPI modules
             for m in self.spi_modules:
                 if not m.get("name"):
                     QMessageBox.warning(self, "Validation Error", "All modules must have a name.")
@@ -1123,12 +1504,15 @@ class SPIConfigDialog(QDialog):
             else:
                 config = {}
             
-            # Update config
+            # Ensure structure
             if 'hardware' not in config:
                 config['hardware'] = {}
             if 'widgetlords' not in config['hardware']:
                 config['hardware']['widgetlords'] = {}
+            if 'modbus' not in config['hardware']:
+                config['hardware']['modbus'] = {}
             
+            # Save SPI modules config
             config['hardware']['widgetlords']['enabled'] = len(self.spi_modules) > 0
             config['hardware']['widgetlords']['spi_modules'] = self.spi_modules
             
@@ -1146,19 +1530,32 @@ class SPIConfigDialog(QDialog):
                                    if "pressure" in c.get("name", "").lower() or "pressure" in c.get("description", "").lower()), 0)
                 config['hardware']['widgetlords']['pressure_channel'] = pressure_ch
             
-            # Save
+            # Save Modbus config
+            config['hardware']['modbus']['enabled'] = self.modbus_enabled_check.isChecked()
+            config['hardware']['modbus']['port'] = self.modbus_port_edit.text().strip()
+            config['hardware']['modbus']['baudrate'] = int(self.modbus_baudrate_combo.currentText())
+            config['hardware']['modbus']['parity'] = self.modbus_parity_combo.currentText()
+            config['hardware']['modbus']['databits'] = int(self.modbus_databits_combo.currentText())
+            config['hardware']['modbus']['stopbits'] = int(self.modbus_stopbits_combo.currentText())
+            config['hardware']['modbus']['slave_address'] = self.modbus_slave_spin.value()
+            config['hardware']['modbus']['timeout'] = self.modbus_timeout_spin.value()
+            config['hardware']['modbus']['debug'] = self.modbus_debug_check.isChecked()
+            
+            # Save to file
             with open(self.config_file_path, 'w') as f:
                 yaml.dump(config, f, default_flow_style=False, indent=2, sort_keys=False)
             
-            logger.info(f"Saved {len(self.spi_modules)} SPI modules")
+            logger.info(f"Saved {len(self.spi_modules)} SPI modules and Modbus config")
             
             self.config_saved.emit()
             
+            modbus_status = "enabled" if self.modbus_enabled_check.isChecked() else "disabled"
             QMessageBox.information(
                 self, "Saved",
                 f"Configuration saved successfully!\n\n"
-                f"• {len(self.spi_modules)} module(s) configured\n"
-                f"• Restart the application to apply changes"
+                f"• {len(self.spi_modules)} SPI module(s)\n"
+                f"• Modbus: {modbus_status}\n\n"
+                f"Restart the application to apply changes."
             )
             
             self.accept()

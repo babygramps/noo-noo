@@ -87,8 +87,7 @@ Panels can be dragged, floated, tabified, or closed. Layout is saved/restored vi
 | `Ctrl+Shift+A` | Show All Panels |
 | `Ctrl+Shift+F` | Focus on Plot (hide all panels) |
 | `Ctrl+Shift+R` | Reset Layout |
-| `Ctrl+Shift+I` | SPI Module Configuration |
-| `Ctrl+I` | IO Device Configuration |
+| `Ctrl+H` | Hardware Configuration |
 | `F5` | Start Test |
 | `F6` | Stop Test |
 | `F1` | Keyboard Shortcuts Help |
@@ -198,7 +197,7 @@ The system supports multiple PI-SPI-DIN modules via SPI bus:
 **Stacking 4KO Modules:**
 The PI-SPI-DIN-4KO uses MCP23S08 with 4 addresses (0-3) per chip enable, allowing up to 16 relays per CE. Set address using J3-A0/A1 jumpers.
 
-**Configuration:** Settings → SPI Module Configuration (`Ctrl+Shift+I`)
+**Configuration:** Settings → Hardware Configuration (`Ctrl+H`)
 
 ### TLB4 Load Cell Transmitter (Modbus RTU)
 - Port: COM4 (Windows) or /dev/ttyUSB0 (Linux)
