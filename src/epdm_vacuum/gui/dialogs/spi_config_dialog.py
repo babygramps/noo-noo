@@ -2191,9 +2191,189 @@ class SPIConfigDialog(QDialog):
         layout.addWidget(notes_frame)
         
         # =====================================================================
-        # Error Code Reference
+        # SOFTWARE CALIBRATION WIZARD
+        # This calibrates in your app, not on the TLB4 hardware
         # =====================================================================
-        error_group = QGroupBox("Calibration Error Codes Reference")
+        sw_cal_frame = QFrame()
+        sw_cal_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: #e8eaf6;
+                border: 2px solid #5c6bc0;
+                border-radius: 12px;
+                padding: 20px;
+            }}
+        """)
+        sw_cal_layout = QVBoxLayout(sw_cal_frame)
+        
+        # Title
+        sw_title = QLabel("🔧 Software Calibration Wizard")
+        sw_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #3949ab;")
+        sw_cal_layout.addWidget(sw_title)
+        
+        sw_desc = QLabel(
+            "Calibrate individual load cell channels in software. This converts raw Modbus values to kg.\n"
+            "Formula: Weight (kg) = (Raw Value - Zero Offset) / Calibration Factor"
+        )
+        sw_desc.setStyleSheet(f"font-size: 11px; color: {COLORS['text_secondary']}; margin-bottom: 10px;")
+        sw_desc.setWordWrap(True)
+        sw_cal_layout.addWidget(sw_desc)
+        
+        # Channel selector
+        channel_row = QHBoxLayout()
+        channel_label = QLabel("Select Channel:")
+        channel_label.setStyleSheet("font-weight: bold; color: #3949ab;")
+        channel_row.addWidget(channel_label)
+        
+        self.sw_channel_combo = QComboBox()
+        self.sw_channel_combo.addItems(["Channel 1", "Channel 2", "Channel 3", "Channel 4"])
+        self.sw_channel_combo.setStyleSheet(f"""
+            QComboBox {{
+                padding: 8px 12px;
+                border: 2px solid #5c6bc0;
+                border-radius: 6px;
+                background-color: {COLORS['bg_card']};
+                font-size: 12px;
+                min-width: 120px;
+            }}
+        """)
+        self.sw_channel_combo.currentIndexChanged.connect(self.update_sw_cal_display)
+        channel_row.addWidget(self.sw_channel_combo)
+        channel_row.addStretch()
+        
+        # Current raw value display
+        self.sw_raw_label = QLabel("Current Raw: ---")
+        self.sw_raw_label.setStyleSheet("""
+            font-size: 14px;
+            font-weight: bold;
+            color: #3949ab;
+            font-family: 'Consolas', 'Monaco', monospace;
+            background-color: white;
+            padding: 8px 15px;
+            border-radius: 6px;
+            border: 1px solid #c5cae9;
+        """)
+        channel_row.addWidget(self.sw_raw_label)
+        
+        sw_cal_layout.addLayout(channel_row)
+        
+        # Calibration status
+        status_row = QHBoxLayout()
+        self.sw_cal_status = QLabel("Status: Not calibrated")
+        self.sw_cal_status.setStyleSheet("font-size: 11px; color: #e65100;")
+        status_row.addWidget(self.sw_cal_status)
+        status_row.addStretch()
+        
+        self.sw_zero_label = QLabel("Zero: ---")
+        self.sw_zero_label.setStyleSheet(f"font-size: 11px; color: {COLORS['text_secondary']};")
+        status_row.addWidget(self.sw_zero_label)
+        
+        self.sw_factor_label = QLabel("Factor: ---")
+        self.sw_factor_label.setStyleSheet(f"font-size: 11px; color: {COLORS['text_secondary']}; margin-left: 15px;")
+        status_row.addWidget(self.sw_factor_label)
+        
+        sw_cal_layout.addLayout(status_row)
+        
+        # Divider
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setStyleSheet("background-color: #9fa8da; margin: 10px 0;")
+        divider.setFixedHeight(1)
+        sw_cal_layout.addWidget(divider)
+        
+        # Step 1: Zero
+        step1_layout = QHBoxLayout()
+        step1_label = QLabel("Step 1: Remove all weight from scale, then click →")
+        step1_label.setStyleSheet("font-size: 11px;")
+        step1_layout.addWidget(step1_label)
+        
+        self.sw_zero_btn = QPushButton("Capture Zero")
+        self.sw_zero_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #5c6bc0;
+                color: white;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 8px 20px;
+                border-radius: 6px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #3f51b5; }
+            QPushButton:disabled { background-color: #c5cae9; }
+        """)
+        self.sw_zero_btn.clicked.connect(self.perform_sw_zero_calibration)
+        step1_layout.addWidget(self.sw_zero_btn)
+        sw_cal_layout.addLayout(step1_layout)
+        
+        # Step 2: Span
+        step2_layout = QHBoxLayout()
+        step2_label = QLabel("Step 2: Place known weight on scale:")
+        step2_label.setStyleSheet("font-size: 11px;")
+        step2_layout.addWidget(step2_label)
+        
+        self.sw_weight_spin = QDoubleSpinBox()
+        self.sw_weight_spin.setRange(0.001, 10000.0)
+        self.sw_weight_spin.setDecimals(3)
+        self.sw_weight_spin.setValue(5.0)
+        self.sw_weight_spin.setSuffix(" kg")
+        self.sw_weight_spin.setStyleSheet("""
+            QDoubleSpinBox {
+                font-size: 12px;
+                padding: 6px 10px;
+                border: 2px solid #5c6bc0;
+                border-radius: 6px;
+                background-color: white;
+                min-width: 100px;
+            }
+        """)
+        step2_layout.addWidget(self.sw_weight_spin)
+        
+        self.sw_span_btn = QPushButton("Capture Span")
+        self.sw_span_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #43a047;
+                color: white;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 8px 20px;
+                border-radius: 6px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #2e7d32; }
+            QPushButton:disabled { background-color: #a5d6a7; }
+        """)
+        self.sw_span_btn.clicked.connect(self.perform_sw_span_calibration)
+        step2_layout.addWidget(self.sw_span_btn)
+        sw_cal_layout.addLayout(step2_layout)
+        
+        # Result and clear
+        result_row = QHBoxLayout()
+        self.sw_result_label = QLabel("")
+        self.sw_result_label.setStyleSheet("font-size: 11px;")
+        self.sw_result_label.setWordWrap(True)
+        result_row.addWidget(self.sw_result_label, stretch=1)
+        
+        self.sw_clear_btn = QPushButton("Clear Calibration")
+        self.sw_clear_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ef5350;
+                color: white;
+                font-size: 11px;
+                padding: 6px 12px;
+                border-radius: 4px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #c62828; }
+        """)
+        self.sw_clear_btn.clicked.connect(self.clear_sw_calibration)
+        result_row.addWidget(self.sw_clear_btn)
+        sw_cal_layout.addLayout(result_row)
+        
+        layout.addWidget(sw_cal_frame)
+        
+        # =====================================================================
+        # Error Code Reference (Hardware Calibration)
+        # =====================================================================
+        error_group = QGroupBox("Hardware Calibration Error Codes")
         error_group.setStyleSheet(f"""
             QGroupBox {{
                 font-size: 11px;
@@ -2223,6 +2403,44 @@ class SPIConfigDialog(QDialog):
         error_group.setLayout(error_layout)
         
         layout.addWidget(error_group)
+        
+        # =====================================================================
+        # Reset / Undo Calibration Section
+        # =====================================================================
+        reset_frame = QFrame()
+        reset_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: #e8f5e9;
+                border: 2px solid #66bb6a;
+                border-radius: 8px;
+                padding: 15px;
+            }}
+        """)
+        reset_layout = QVBoxLayout(reset_frame)
+        
+        reset_title = QLabel("🔄 Reset / Undo Calibration")
+        reset_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #2e7d32;")
+        reset_layout.addWidget(reset_title)
+        
+        reset_text = QLabel(
+            "The TLB4 doesn't have an 'undo' command. To reset calibration:\n\n"
+            "<b>Option 1: Re-Calibrate</b>\n"
+            "• Simply perform Zero Calibration again (with empty scale)\n"
+            "• Then perform Span Calibration with a known accurate weight\n"
+            "• Each new calibration overwrites the previous one\n\n"
+            "<b>Option 2: Theoretical Calibration (Factory Reset)</b>\n"
+            "• Use the TLB4 front panel buttons to access CALIB → FS-TEO\n"
+            "• Enter your load cell specifications (capacity, sensitivity in mV/V)\n"
+            "• This resets to calculated values based on load cell specs\n\n"
+            "<b>Option 3: Software Tare</b>\n"
+            "• For quick zeroing without changing calibration, use the Tare button\n"
+            "• Tare only affects the displayed value, not the actual calibration"
+        )
+        reset_text.setStyleSheet("font-size: 11px; color: #1b5e20; line-height: 1.4;")
+        reset_text.setWordWrap(True)
+        reset_layout.addWidget(reset_text)
+        
+        layout.addWidget(reset_frame)
         
         layout.addStretch()
         
@@ -2356,6 +2574,13 @@ class SPIConfigDialog(QDialog):
             
         except Exception as e:
             logger.warning(f"Error updating calibration display: {e}")
+        
+        # Also update software calibration display if it exists
+        if hasattr(self, 'sw_channel_combo'):
+            try:
+                self.update_sw_cal_display()
+            except Exception:
+                pass  # Ignore errors in SW cal display update
     
     def perform_zero_calibration(self) -> None:
         """Perform zero calibration on the TLB4."""
@@ -2487,6 +2712,198 @@ class SPIConfigDialog(QDialog):
             self.span_cal_btn.setEnabled(True)
             self.span_cal_btn.setText("Calibrate Span")
             QMessageBox.critical(self, "Error", f"Calibration failed with error:\n{e}")
+    
+    # =========================================================================
+    # Software Calibration Methods
+    # =========================================================================
+    
+    def update_sw_cal_display(self) -> None:
+        """Update the software calibration display for the selected channel."""
+        try:
+            channel = self.sw_channel_combo.currentIndex() + 1
+            
+            main_window = self.parent()
+            if main_window and hasattr(main_window, 'modbus_interface') and main_window.modbus_interface:
+                interface = main_window.modbus_interface
+                
+                # Get current raw value
+                success, raw_value, _ = interface.get_channel_raw_value(channel)
+                if success:
+                    self.sw_raw_label.setText(f"Current Raw: {raw_value}")
+                else:
+                    self.sw_raw_label.setText("Current Raw: ---")
+                
+                # Get calibration settings
+                cal = interface.get_software_calibration(channel)
+                if cal.get('is_calibrated'):
+                    self.sw_cal_status.setText("Status: ✓ Calibrated")
+                    self.sw_cal_status.setStyleSheet("font-size: 11px; color: #2e7d32; font-weight: bold;")
+                    self.sw_zero_label.setText(f"Zero: {cal['zero_offset']:.0f}")
+                    self.sw_factor_label.setText(f"Factor: {cal['calibration_factor']:.2f} pts/kg")
+                else:
+                    self.sw_cal_status.setText("Status: Not calibrated")
+                    self.sw_cal_status.setStyleSheet("font-size: 11px; color: #e65100;")
+                    self.sw_zero_label.setText(f"Zero: {cal['zero_offset']:.0f}")
+                    self.sw_factor_label.setText("Factor: ---")
+                    
+                self.sw_zero_btn.setEnabled(True)
+                self.sw_span_btn.setEnabled(True)
+            else:
+                self.sw_raw_label.setText("Current Raw: (not connected)")
+                self.sw_cal_status.setText("Status: Disconnected")
+                self.sw_cal_status.setStyleSheet("font-size: 11px; color: #c62828;")
+                self.sw_zero_btn.setEnabled(False)
+                self.sw_span_btn.setEnabled(False)
+                
+        except Exception as e:
+            logger.warning(f"Error updating SW cal display: {e}")
+    
+    def perform_sw_zero_calibration(self) -> None:
+        """Perform software zero calibration for the selected channel."""
+        try:
+            channel = self.sw_channel_combo.currentIndex() + 1
+            
+            main_window = self.parent()
+            if not main_window or not hasattr(main_window, 'modbus_interface') or not main_window.modbus_interface:
+                QMessageBox.warning(self, "Error", "Modbus interface not available.")
+                return
+            
+            interface = main_window.modbus_interface
+            
+            # Confirm
+            reply = QMessageBox.question(
+                self,
+                "Software Zero Calibration",
+                f"Channel {channel} - ZERO CALIBRATION\n\n"
+                f"Please confirm:\n"
+                f"• The scale for channel {channel} is EMPTY\n"
+                f"• The reading is stable\n\n"
+                f"This will save the current raw value as the zero offset.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Perform calibration
+            success, message = interface.software_calibrate_zero(channel)
+            
+            if success:
+                self.sw_result_label.setText(f"✓ Channel {channel}: {message}")
+                self.sw_result_label.setStyleSheet("font-size: 11px; color: #2e7d32; font-weight: bold;")
+                QMessageBox.information(self, "Zero Captured", f"✓ Channel {channel}\n\n{message}")
+            else:
+                self.sw_result_label.setText(f"✗ {message}")
+                self.sw_result_label.setStyleSheet("font-size: 11px; color: #c62828; font-weight: bold;")
+                QMessageBox.warning(self, "Error", message)
+            
+            self.update_sw_cal_display()
+            
+        except Exception as e:
+            logger.error(f"SW zero calibration error: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Calibration failed:\n{e}")
+    
+    def perform_sw_span_calibration(self) -> None:
+        """Perform software span calibration for the selected channel."""
+        try:
+            channel = self.sw_channel_combo.currentIndex() + 1
+            known_weight = self.sw_weight_spin.value()
+            
+            main_window = self.parent()
+            if not main_window or not hasattr(main_window, 'modbus_interface') or not main_window.modbus_interface:
+                QMessageBox.warning(self, "Error", "Modbus interface not available.")
+                return
+            
+            interface = main_window.modbus_interface
+            
+            # Check if zero was done first
+            cal = interface.get_software_calibration(channel)
+            if cal.get('zero_offset', 0) == 0:
+                reply = QMessageBox.warning(
+                    self,
+                    "Zero Not Set",
+                    f"Channel {channel} has no zero offset set.\n\n"
+                    f"It's recommended to capture zero first (with empty scale).\n\n"
+                    f"Continue anyway with zero offset = 0?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply != QMessageBox.Yes:
+                    return
+            
+            # Confirm
+            reply = QMessageBox.question(
+                self,
+                "Software Span Calibration",
+                f"Channel {channel} - SPAN CALIBRATION\n\n"
+                f"Known weight: {known_weight:.3f} kg\n\n"
+                f"Please confirm:\n"
+                f"• {known_weight:.3f} kg is on the scale for channel {channel}\n"
+                f"• The reading is stable\n\n"
+                f"This will calculate the calibration factor.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Perform calibration
+            success, message = interface.software_calibrate_span(channel, known_weight)
+            
+            if success:
+                self.sw_result_label.setText(f"✓ Channel {channel}: {message}")
+                self.sw_result_label.setStyleSheet("font-size: 11px; color: #2e7d32; font-weight: bold;")
+                QMessageBox.information(self, "Span Captured", f"✓ Channel {channel}\n\n{message}\n\nCalibration complete!")
+            else:
+                self.sw_result_label.setText(f"✗ {message}")
+                self.sw_result_label.setStyleSheet("font-size: 11px; color: #c62828; font-weight: bold;")
+                QMessageBox.warning(self, "Error", message)
+            
+            self.update_sw_cal_display()
+            
+        except Exception as e:
+            logger.error(f"SW span calibration error: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Calibration failed:\n{e}")
+    
+    def clear_sw_calibration(self) -> None:
+        """Clear software calibration for the selected channel."""
+        try:
+            channel = self.sw_channel_combo.currentIndex() + 1
+            
+            main_window = self.parent()
+            if not main_window or not hasattr(main_window, 'modbus_interface') or not main_window.modbus_interface:
+                QMessageBox.warning(self, "Error", "Modbus interface not available.")
+                return
+            
+            interface = main_window.modbus_interface
+            
+            reply = QMessageBox.question(
+                self,
+                "Clear Calibration",
+                f"Clear software calibration for Channel {channel}?\n\n"
+                f"This will reset zero offset and calibration factor to defaults.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            success, message = interface.clear_software_calibration(channel)
+            
+            if success:
+                self.sw_result_label.setText(f"Channel {channel}: Calibration cleared")
+                self.sw_result_label.setStyleSheet("font-size: 11px; color: #666;")
+            else:
+                QMessageBox.warning(self, "Error", message)
+            
+            self.update_sw_cal_display()
+            
+        except Exception as e:
+            logger.error(f"Clear calibration error: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to clear calibration:\n{e}")
     
     def create_footer(self) -> QHBoxLayout:
         """Create footer with action buttons."""
@@ -2828,6 +3245,34 @@ class SPIConfigDialog(QDialog):
             config['hardware']['modbus']['slave_address'] = self.modbus_slave_spin.value()
             config['hardware']['modbus']['timeout'] = self.modbus_timeout_spin.value()
             config['hardware']['modbus']['debug'] = self.modbus_debug_check.isChecked()
+            
+            # Save software calibration values from the Modbus interface
+            main_window = self.parent()
+            if main_window and hasattr(main_window, 'modbus_interface') and main_window.modbus_interface:
+                interface = main_window.modbus_interface
+                
+                # Ensure TLB4 config structure exists
+                if 'tlb4' not in config['hardware']['modbus']:
+                    config['hardware']['modbus']['tlb4'] = {}
+                if 'channel_scaling' not in config['hardware']['modbus']['tlb4']:
+                    config['hardware']['modbus']['tlb4']['channel_scaling'] = {}
+                
+                channel_scaling = config['hardware']['modbus']['tlb4']['channel_scaling']
+                
+                # Save each channel's software calibration
+                for ch in range(1, 5):
+                    cal = interface.get_software_calibration(ch)
+                    ch_key = f"channel_{ch}"
+                    
+                    if ch_key not in channel_scaling:
+                        channel_scaling[ch_key] = {}
+                    
+                    channel_scaling[ch_key]['zero_offset'] = cal.get('zero_offset', 0.0)
+                    channel_scaling[ch_key]['calibration_factor'] = cal.get('calibration_factor', 1.0)
+                    channel_scaling[ch_key]['is_calibrated'] = cal.get('is_calibrated', False)
+                    channel_scaling[ch_key]['enabled'] = cal.get('enabled', True)
+                
+                logger.info("Saved software calibration values for all channels")
             
             # Save to file
             with open(self.config_file_path, 'w') as f:

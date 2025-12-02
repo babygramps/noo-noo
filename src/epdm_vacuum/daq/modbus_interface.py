@@ -44,24 +44,77 @@ class DataFormat(Enum):
 
 @dataclass
 class TLB4ChannelConfig:
-    """Configuration for a single load cell channel."""
+    """Configuration for a single load cell channel.
+    
+    Software Calibration Formula:
+        Weight (kg) = (Raw Value - zero_offset) / calibration_factor
+    
+    Where:
+        - zero_offset: Raw value when scale is empty
+        - calibration_factor: Raw points per kg (calculated during span calibration)
+    """
     
     # Register address for this channel's divisions/raw value
     register_address: int = 0
     
-    # Scaling parameters for Division-to-kg conversion
-    # Formula: Load_kg = (Channel_Value / full_scale_divisions) * load_cell_capacity_kg
-    full_scale_divisions: float = 10000.0
-    load_cell_capacity_kg: float = 250.0
-    
     # Data format for this channel
     data_format: DataFormat = DataFormat.INT32
     
-    # Offset for calibration
+    # =========================================================================
+    # Software Calibration Parameters
+    # These are determined by the calibration wizard, NOT the TLB4 hardware
+    # =========================================================================
+    
+    # Zero offset: Raw value when the scale is empty (no load)
+    # Set this by reading raw value with empty scale
     zero_offset: float = 0.0
+    
+    # Calibration factor: Number of raw points that equal 1 kg
+    # Formula: calibration_factor = (loaded_raw - zero_offset) / known_weight_kg
+    # Example: (11500 - 1500) / 5.0 kg = 2000 points/kg
+    calibration_factor: float = 1.0
+    
+    # Whether this channel has been calibrated
+    is_calibrated: bool = False
+    
+    # Legacy fields (kept for backwards compatibility)
+    full_scale_divisions: float = 10000.0
+    load_cell_capacity_kg: float = 250.0
     
     # Whether this channel is enabled
     enabled: bool = True
+    
+    def raw_to_kg(self, raw_value: float) -> float:
+        """Convert raw Modbus value to kilograms using software calibration.
+        
+        Formula: Weight (kg) = (Raw Value - zero_offset) / calibration_factor
+        
+        Args:
+            raw_value: Raw integer value from Modbus register
+            
+        Returns:
+            Weight in kilograms
+        """
+        if self.calibration_factor == 0:
+            return 0.0
+        return (raw_value - self.zero_offset) / self.calibration_factor
+    
+    def calculate_calibration_factor(self, loaded_raw: float, known_weight_kg: float) -> float:
+        """Calculate calibration factor from a known weight reading.
+        
+        Args:
+            loaded_raw: Raw value when known weight is on the scale
+            known_weight_kg: The actual weight in kg
+            
+        Returns:
+            Calibration factor (points per kg)
+        """
+        if known_weight_kg <= 0:
+            return 1.0
+        spread = loaded_raw - self.zero_offset
+        if spread <= 0:
+            return 1.0
+        return spread / known_weight_kg
 
 
 @dataclass
@@ -391,19 +444,27 @@ class ModbusInterface(HardwareInterface):
                     raw_value = self._read_value(reg, ch_cfg.data_format)
                     result[f"load_cell_{i}_raw"] = raw_value
                     
-                    # Convert divisions to kg
-                    kg_value = self._convert_divisions_to_kg(
-                        raw_value,
-                        ch_cfg.full_scale_divisions,
-                        ch_cfg.load_cell_capacity_kg,
-                        ch_cfg.zero_offset
-                    )
+                    # Convert raw value to kg using software calibration
+                    if ch_cfg.is_calibrated and ch_cfg.calibration_factor > 0:
+                        # Use new software calibration formula:
+                        # Weight (kg) = (Raw Value - zero_offset) / calibration_factor
+                        kg_value = ch_cfg.raw_to_kg(raw_value)
+                    else:
+                        # Fallback to legacy formula for uncalibrated channels
+                        kg_value = self._convert_divisions_to_kg(
+                            raw_value,
+                            ch_cfg.full_scale_divisions,
+                            ch_cfg.load_cell_capacity_kg,
+                            ch_cfg.zero_offset
+                        )
+                    
                     # Apply software tare offset (TLB4 only tares total, not channels)
                     kg_value -= self._channel_tare_offsets[i - 1]
                     result[f"load_cell_{i}_kg"] = kg_value
                     
                     if debug_this_read:
-                        logger.info(f"  CH{i} @ reg {reg}: raw={raw_value}, kg={kg_value:.2f}")
+                        cal_status = "calibrated" if ch_cfg.is_calibrated else "uncalibrated"
+                        logger.info(f"  CH{i} @ reg {reg}: raw={raw_value}, kg={kg_value:.3f} ({cal_status})")
                 else:
                     result[f"load_cell_{i}_raw"] = 0
                     result[f"load_cell_{i}_kg"] = 0.0
@@ -1079,6 +1140,228 @@ class ModbusInterface(HardwareInterface):
             logger.error(f"✗ {error_msg}")
             self.handle_error(e)
             return False, error_msg, -1
+    
+    # =========================================================================
+    # Software Calibration Methods
+    # These calibrate in software, NOT on the TLB4 hardware
+    # Formula: Weight (kg) = (Raw Value - zero_offset) / calibration_factor
+    # =========================================================================
+    
+    def get_channel_raw_value(self, channel: int) -> Tuple[bool, int, str]:
+        """
+        Get the current raw Modbus value for a specific channel.
+        
+        Args:
+            channel: Channel number (1-4)
+            
+        Returns:
+            Tuple[bool, int, str]: (success, raw_value, message)
+        """
+        try:
+            if not self.initialized or self.instrument is None:
+                return False, 0, "Modbus interface not connected"
+            
+            if channel < 1 or channel > 4:
+                return False, 0, f"Invalid channel {channel} (must be 1-4)"
+            
+            cfg = self.tlb4_config
+            ch_cfg = cfg.channels[channel - 1]
+            
+            if not ch_cfg.enabled:
+                return False, 0, f"Channel {channel} is disabled"
+            
+            channel_regs = [cfg.reg_channel_1, cfg.reg_channel_2, cfg.reg_channel_3, cfg.reg_channel_4]
+            reg = channel_regs[channel - 1]
+            
+            with self._lock:
+                raw_value = int(self._read_value(reg, ch_cfg.data_format))
+            
+            logger.info(f"Channel {channel} raw value: {raw_value}")
+            return True, raw_value, f"Raw value: {raw_value}"
+            
+        except Exception as e:
+            error_msg = f"Failed to read channel {channel}: {e}"
+            logger.error(error_msg)
+            return False, 0, error_msg
+    
+    def software_calibrate_zero(self, channel: int) -> Tuple[bool, str]:
+        """
+        Perform software zero calibration for a specific channel.
+        
+        This saves the current raw reading as the zero offset.
+        The scale must be empty (no load) when calling this.
+        
+        Args:
+            channel: Channel number (1-4)
+            
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        try:
+            if channel < 1 or channel > 4:
+                return False, f"Invalid channel {channel} (must be 1-4)"
+            
+            # Get current raw value
+            success, raw_value, msg = self.get_channel_raw_value(channel)
+            if not success:
+                return False, msg
+            
+            # Save as zero offset
+            ch_cfg = self.tlb4_config.channels[channel - 1]
+            ch_cfg.zero_offset = float(raw_value)
+            
+            logger.info(f"Channel {channel} zero offset set to {raw_value}")
+            return True, f"Zero offset saved: {raw_value}"
+            
+        except Exception as e:
+            error_msg = f"Software zero calibration failed: {e}"
+            logger.error(error_msg)
+            return False, error_msg
+    
+    def software_calibrate_span(self, channel: int, known_weight_kg: float) -> Tuple[bool, str]:
+        """
+        Perform software span calibration for a specific channel.
+        
+        This calculates the calibration factor from a known weight.
+        Place the known weight on the scale before calling this.
+        Zero calibration must be done first.
+        
+        Formula: calibration_factor = (loaded_raw - zero_offset) / known_weight_kg
+        
+        Args:
+            channel: Channel number (1-4)
+            known_weight_kg: The actual weight on the scale in kg
+            
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        try:
+            if channel < 1 or channel > 4:
+                return False, f"Invalid channel {channel} (must be 1-4)"
+            
+            if known_weight_kg <= 0:
+                return False, "Known weight must be greater than 0"
+            
+            ch_cfg = self.tlb4_config.channels[channel - 1]
+            
+            # Get current raw value
+            success, raw_value, msg = self.get_channel_raw_value(channel)
+            if not success:
+                return False, msg
+            
+            # Calculate calibration factor
+            spread = raw_value - ch_cfg.zero_offset
+            if spread <= 0:
+                return False, f"Invalid reading: raw ({raw_value}) must be greater than zero offset ({ch_cfg.zero_offset})"
+            
+            calibration_factor = spread / known_weight_kg
+            ch_cfg.calibration_factor = calibration_factor
+            ch_cfg.is_calibrated = True
+            
+            logger.info(f"Channel {channel} calibration factor set to {calibration_factor:.2f} points/kg")
+            logger.info(f"  Zero offset: {ch_cfg.zero_offset}")
+            logger.info(f"  Loaded raw: {raw_value}")
+            logger.info(f"  Known weight: {known_weight_kg} kg")
+            logger.info(f"  Spread: {spread}")
+            
+            # Verify by calculating current weight
+            current_kg = ch_cfg.raw_to_kg(raw_value)
+            logger.info(f"  Verification: {raw_value} raw -> {current_kg:.3f} kg (expected {known_weight_kg:.3f} kg)")
+            
+            return True, f"Calibration factor: {calibration_factor:.2f} points/kg"
+            
+        except Exception as e:
+            error_msg = f"Software span calibration failed: {e}"
+            logger.error(error_msg)
+            return False, error_msg
+    
+    def get_software_calibration(self, channel: int) -> Dict[str, Any]:
+        """
+        Get the current software calibration settings for a channel.
+        
+        Args:
+            channel: Channel number (1-4)
+            
+        Returns:
+            Dict with calibration settings
+        """
+        if channel < 1 or channel > 4:
+            return {"error": f"Invalid channel {channel}"}
+        
+        ch_cfg = self.tlb4_config.channels[channel - 1]
+        return {
+            "channel": channel,
+            "zero_offset": ch_cfg.zero_offset,
+            "calibration_factor": ch_cfg.calibration_factor,
+            "is_calibrated": ch_cfg.is_calibrated,
+            "enabled": ch_cfg.enabled,
+        }
+    
+    def set_software_calibration(
+        self,
+        channel: int,
+        zero_offset: float,
+        calibration_factor: float
+    ) -> Tuple[bool, str]:
+        """
+        Manually set software calibration values for a channel.
+        
+        Use this to restore previously saved calibration values.
+        
+        Args:
+            channel: Channel number (1-4)
+            zero_offset: Zero offset (raw value when empty)
+            calibration_factor: Points per kg
+            
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        try:
+            if channel < 1 or channel > 4:
+                return False, f"Invalid channel {channel} (must be 1-4)"
+            
+            if calibration_factor <= 0:
+                return False, "Calibration factor must be greater than 0"
+            
+            ch_cfg = self.tlb4_config.channels[channel - 1]
+            ch_cfg.zero_offset = zero_offset
+            ch_cfg.calibration_factor = calibration_factor
+            ch_cfg.is_calibrated = True
+            
+            logger.info(f"Channel {channel} calibration set: zero={zero_offset}, factor={calibration_factor}")
+            return True, f"Calibration set: zero={zero_offset}, factor={calibration_factor:.2f}"
+            
+        except Exception as e:
+            error_msg = f"Failed to set calibration: {e}"
+            logger.error(error_msg)
+            return False, error_msg
+    
+    def clear_software_calibration(self, channel: int) -> Tuple[bool, str]:
+        """
+        Clear software calibration for a channel.
+        
+        Args:
+            channel: Channel number (1-4)
+            
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        try:
+            if channel < 1 or channel > 4:
+                return False, f"Invalid channel {channel} (must be 1-4)"
+            
+            ch_cfg = self.tlb4_config.channels[channel - 1]
+            ch_cfg.zero_offset = 0.0
+            ch_cfg.calibration_factor = 1.0
+            ch_cfg.is_calibrated = False
+            
+            logger.info(f"Channel {channel} calibration cleared")
+            return True, "Calibration cleared"
+            
+        except Exception as e:
+            error_msg = f"Failed to clear calibration: {e}"
+            logger.error(error_msg)
+            return False, error_msg
     
     def _write_32bit_value(self, register: int, value: int) -> None:
         """

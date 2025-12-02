@@ -342,12 +342,22 @@ def create_tlb4_config_from_settings(settings: Optional[Settings] = None) -> "TL
         ch_key = f"channel_{i}"
         ch_settings = channel_scaling.get(ch_key, {})
         
+        # Get calibration factor (new field for software calibration)
+        cal_factor = ch_settings.get("calibration_factor", 1.0)
+        is_calibrated = ch_settings.get("is_calibrated", False)
+        
+        # Auto-detect if calibration was done (factor != 1.0 means it was calibrated)
+        if cal_factor != 1.0 and cal_factor > 0:
+            is_calibrated = True
+        
         channels.append(TLB4ChannelConfig(
             register_address=registers.get(ch_key, 8 + (i - 1) * 2),
             full_scale_divisions=ch_settings.get("full_scale_divisions", default_fs),
             load_cell_capacity_kg=ch_settings.get("capacity_kg", default_cap),
             data_format=data_format,
             zero_offset=ch_settings.get("zero_offset", 0.0),
+            calibration_factor=cal_factor,
+            is_calibrated=is_calibrated,
             enabled=ch_settings.get("enabled", True),
         ))
     
