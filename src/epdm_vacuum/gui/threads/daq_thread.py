@@ -57,22 +57,41 @@ class DataAcquisitionThread(QThread):
         
         Continuously reads sensors at the specified rate until stopped.
         """
-        logger.info("=" * 50)
-        logger.info("DAQ thread started")
+        logger.info("=" * 60)
+        logger.info("DAQ THREAD STARTED")
+        logger.info("=" * 60)
         logger.info(f"  Sample rate: {self.sample_rate} Hz")
         logger.info(f"  Sample interval: {self.sample_interval:.3f} s")
-        logger.info(f"  WidgetLords interface: {'Connected' if self.widgetlords else 'NOT CONNECTED'}")
-        logger.info(f"  Modbus interface: {'Connected' if self.modbus else 'NOT CONNECTED'}")
+        logger.info(f"  WidgetLords interface: {'CONNECTED' if self.widgetlords else 'NOT CONNECTED'}")
+        logger.info(f"  Modbus interface: {'CONNECTED' if self.modbus else 'NOT CONNECTED'}")
         
         if self.widgetlords:
-            logger.info(f"  WidgetLords modules: {self.widgetlords.list_modules() if hasattr(self.widgetlords, 'list_modules') else 'N/A'}")
+            modules = self.widgetlords.list_modules() if hasattr(self.widgetlords, 'list_modules') else {}
+            logger.info(f"  WidgetLords modules: {modules}")
+            
+            # Log analog input modules specifically
+            if hasattr(self.widgetlords, 'analog_input_modules'):
+                for name, module in self.widgetlords.analog_input_modules.items():
+                    logger.info(f"    Analog Module '{name}':")
+                    logger.info(f"      Chip Enable: {module.chip_enable}")
+                    logger.info(f"      Hardware initialized: {module._hardware is not None}")
+                    for ch in module.channels:
+                        if ch.enabled:
+                            logger.info(f"      Ch{ch.channel} '{ch.name}': {ch.input_type}, "
+                                      f"span {ch.low_input}->{ch.high_input} to {ch.low_output}->{ch.high_output} {ch.units}")
         
         self.running = True
         
         # Check hardware interfaces
-        if self.widgetlords is None or self.modbus is None:
-            logger.warning("Hardware interfaces not initialized - using mock data")
-        logger.info("=" * 50)
+        if self.widgetlords is None and self.modbus is None:
+            logger.warning("=" * 60)
+            logger.warning("NO HARDWARE INTERFACES - USING MOCK DATA")
+            logger.warning("=" * 60)
+        elif self.widgetlords is None:
+            logger.warning("WidgetLords interface not initialized - analog inputs will use mock data")
+        elif self.modbus is None:
+            logger.warning("Modbus interface not initialized - load cells will use mock data")
+        logger.info("=" * 60)
         
         while self.running:
             try:
@@ -104,21 +123,40 @@ class DataAcquisitionThread(QThread):
         """
         timestamp = time.time()
         
+        # Track read count for verbose logging of first few reads
+        if not hasattr(self, '_sensor_read_count'):
+            self._sensor_read_count = 0
+        self._sensor_read_count += 1
+        
         # Read WidgetLords (pressure sensor)
         if self.widgetlords:
             try:
                 wl_data = self.widgetlords.read()
-                # Log pressure-related keys for debugging
-                pressure_keys = ["pressure_voltage", "pressure_psi", "vacuum_psi", "vacuum_bar", "analog_inputs"]
-                pressure_data = {k: wl_data.get(k) for k in pressure_keys if k in wl_data}
-                if pressure_data:
-                    logger.debug(f"WidgetLords pressure data: {pressure_data}")
+                # Log first 5 reads at INFO level for debugging
+                if self._sensor_read_count <= 5:
+                    logger.info(f"[DAQ Read #{self._sensor_read_count}] WidgetLords data keys: {list(wl_data.keys())}")
+                    pressure_keys = ["pressure_voltage", "pressure_psi", "vacuum_psi", "vacuum_bar"]
+                    pressure_data = {k: wl_data.get(k) for k in pressure_keys if k in wl_data}
+                    if pressure_data:
+                        logger.info(f"  Pressure data: {pressure_data}")
+                    # Also log raw analog inputs
+                    if "analog_inputs_raw" in wl_data:
+                        logger.info(f"  Raw analog inputs: {wl_data['analog_inputs_raw']}")
+                else:
+                    # Log at debug level after first 5
+                    pressure_keys = ["pressure_voltage", "pressure_psi", "vacuum_psi", "vacuum_bar", "analog_inputs"]
+                    pressure_data = {k: wl_data.get(k) for k in pressure_keys if k in wl_data}
+                    if pressure_data:
+                        logger.debug(f"WidgetLords pressure data: {pressure_data}")
             except Exception as e:
                 logger.error(f"WidgetLords read error: {e}", exc_info=True)
                 wl_data = {}
         else:
             # Mock data for development
-            logger.debug("WidgetLords not connected - using mock data")
+            if self._sensor_read_count <= 5:
+                logger.info(f"[DAQ Read #{self._sensor_read_count}] WidgetLords NOT CONNECTED - using mock data")
+            else:
+                logger.debug("WidgetLords not connected - using mock data")
             wl_data = {
                 "pressure_voltage": 5.0,
                 "pressure_psi": 15.0,

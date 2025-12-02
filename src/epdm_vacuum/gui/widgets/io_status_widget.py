@@ -336,6 +336,12 @@ class IOStatusWidget(QWidget):
         """)
         layout.addWidget(progress_bar)
         
+        # Raw voltage label (for debugging - shows the actual sensor reading)
+        raw_voltage_label = QLabel("Raw: -- V")
+        raw_voltage_label.setStyleSheet("font-size: 9pt; color: #888; font-family: monospace;")
+        raw_voltage_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        layout.addWidget(raw_voltage_label)
+        
         # Description row (if available)
         desc = device_info.get("description", "")
         if desc:
@@ -343,8 +349,8 @@ class IOStatusWidget(QWidget):
             desc_label.setStyleSheet("font-size: 9pt; color: #7f8c8d; font-style: italic;")
             layout.addWidget(desc_label)
         
-        # Store references for updates (indicator, value_label, progress_bar, device_info)
-        self.device_widgets[device_name] = (indicator, value_label, progress_bar, device_info)
+        # Store references for updates (indicator, value_label, progress_bar, device_info, raw_voltage_label)
+        self.device_widgets[device_name] = (indicator, value_label, progress_bar, device_info, raw_voltage_label)
         
         return frame
     
@@ -476,8 +482,8 @@ class IOStatusWidget(QWidget):
         
         widget_tuple = self.device_widgets[device_name]
         
-        # Check if this is an analog input (has 4 elements) or analog output (has 2 elements)
-        if len(widget_tuple) == 4:
+        # Check if this is an analog input (has 4 or 5 elements) or analog output (has 2 elements)
+        if len(widget_tuple) in (4, 5):
             # Analog input - use the dedicated method
             self.update_analog_input_value(device_name, value)
             return
@@ -499,13 +505,14 @@ class IOStatusWidget(QWidget):
         
         logger.debug(f"Updated device '{device_name}' analog value to: {value:.2f}")
     
-    def update_analog_input_value(self, device_name: str, value: float) -> None:
+    def update_analog_input_value(self, device_name: str, value: float, raw_voltage: float = None) -> None:
         """
         Update the value of an analog input sensor (like pressure transmitter).
         
         Args:
             device_name: Name of the analog input device
             value: Scaled value in engineering units (e.g., PSI)
+            raw_voltage: Optional raw voltage reading for debugging
         """
         if device_name not in self.device_widgets:
             logger.debug(f"Analog input '{device_name}' not found in IO status widget")
@@ -513,12 +520,17 @@ class IOStatusWidget(QWidget):
         
         widget_tuple = self.device_widgets[device_name]
         
-        # Analog inputs have 4 elements: (indicator, value_label, progress_bar, device_info)
-        if len(widget_tuple) != 4:
-            logger.warning(f"Device '{device_name}' is not an analog input")
+        # Analog inputs have 5 elements: (indicator, value_label, progress_bar, device_info, raw_voltage_label)
+        if len(widget_tuple) not in (4, 5):
+            logger.warning(f"Device '{device_name}' is not an analog input (tuple len={len(widget_tuple)})")
             return
         
-        indicator, value_label, progress_bar, device_info = widget_tuple
+        # Handle both old (4 element) and new (5 element) tuples
+        if len(widget_tuple) == 5:
+            indicator, value_label, progress_bar, device_info, raw_voltage_label = widget_tuple
+        else:
+            indicator, value_label, progress_bar, device_info = widget_tuple
+            raw_voltage_label = None
         
         # Store value
         self.analog_input_values[device_name] = value
@@ -530,6 +542,15 @@ class IOStatusWidget(QWidget):
         
         # Update value label
         value_label.setText(f"{value:.2f} {units}")
+        
+        # Update raw voltage label if available
+        if raw_voltage_label and raw_voltage is not None:
+            raw_voltage_label.setText(f"Raw: {raw_voltage:.4f} V")
+            # Color code: normal (green) if reading is reasonable, red if stuck at 0
+            if raw_voltage < 0.01:
+                raw_voltage_label.setStyleSheet("font-size: 9pt; color: #e74c3c; font-family: monospace;")
+            else:
+                raw_voltage_label.setStyleSheet("font-size: 9pt; color: #27ae60; font-family: monospace;")
         
         # Calculate percentage for progress bar
         if abs(high_out - low_out) > 0.001:
@@ -567,17 +588,24 @@ class IOStatusWidget(QWidget):
         Args:
             data: Data dictionary from DAQ thread containing sensor readings
         """
+        # Get raw voltage data if available
+        analog_inputs_raw = data.get("analog_inputs_raw", {})
+        
         # Update analog inputs from the nested structure
         analog_inputs = data.get("analog_inputs", {})
         for module_name, channels in analog_inputs.items():
             if isinstance(channels, dict):
+                # Get corresponding raw values
+                raw_channels = analog_inputs_raw.get(module_name, {})
                 for ch_name, value in channels.items():
                     if ch_name in self.analog_input_values:
-                        self.update_analog_input_value(ch_name, value)
+                        raw_voltage = raw_channels.get(ch_name) if isinstance(raw_channels, dict) else None
+                        self.update_analog_input_value(ch_name, value, raw_voltage=raw_voltage)
         
         # Also check for legacy format keys (pressure_psi, vacuum_bar, etc.)
         if "pressure_psi" in data and "pressure_sensor" in self.analog_input_values:
-            self.update_analog_input_value("pressure_sensor", data["pressure_psi"])
+            raw_voltage = data.get("pressure_voltage")
+            self.update_analog_input_value("pressure_sensor", data["pressure_psi"], raw_voltage=raw_voltage)
     
     def reset_device_state(self, device_name: str) -> None:
         """
@@ -593,15 +621,26 @@ class IOStatusWidget(QWidget):
         
         widget_tuple = self.device_widgets[device_name]
         
-        # Handle analog inputs (4 elements) vs digital/analog outputs (2 elements)
-        if len(widget_tuple) == 4:
-            # Analog input: (indicator, value_label, progress_bar, device_info)
-            indicator, value_label, progress_bar, device_info = widget_tuple
+        # Handle analog inputs (4 or 5 elements) vs digital/analog outputs (2 elements)
+        if len(widget_tuple) in (4, 5):
+            # Analog input: (indicator, value_label, progress_bar, device_info[, raw_voltage_label])
+            indicator = widget_tuple[0]
+            value_label = widget_tuple[1]
+            progress_bar = widget_tuple[2]
+            device_info = widget_tuple[3]
+            raw_voltage_label = widget_tuple[4] if len(widget_tuple) == 5 else None
+            
             indicator.setStyleSheet("color: #9E9E9E;")  # Gray
             units = device_info.get("units", "")
             value_label.setText(f"-- {units}")
             value_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #9E9E9E;")
             progress_bar.setValue(0)
+            
+            # Reset raw voltage label if present
+            if raw_voltage_label:
+                raw_voltage_label.setText("Raw: -- V")
+                raw_voltage_label.setStyleSheet("font-size: 9pt; color: #888; font-family: monospace;")
+            
             # Reset analog input value tracking
             if device_name in self.analog_input_values:
                 self.analog_input_values[device_name] = None

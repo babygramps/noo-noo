@@ -278,17 +278,21 @@ class AnalogInputModule(SPIModule):
                 }
                 
                 wl_ce = wl_ce_map.get(self.chip_enable, WLChipEnable.CE0)
-                logger.info(f"Creating Mod8AI with ChipEnable={wl_ce}")
+                logger.info(f"Creating Mod8AI with ChipEnable={wl_ce} (our enum: {self.chip_enable})")
+                logger.info(f"  This matches: inputs=Mod8AI(ChipEnable.{self.chip_enable.name})")
                 self._hardware = Mod8AI(wl_ce)
                 self._initialized = True
                 logger.info(f"Analog input module '{self.name}' initialized successfully with REAL hardware")
                 
-                # Test read to verify hardware is working
-                try:
-                    test_value = self._hardware.read_single(0)
-                    logger.info(f"  Test read channel 0: {test_value:.3f}V")
-                except Exception as test_e:
-                    logger.warning(f"  Test read failed: {test_e}")
+                # Test read to verify hardware is working - read all enabled channels
+                logger.info(f"  Performing test reads on enabled channels...")
+                for ch in self.channels:
+                    if ch.enabled:
+                        try:
+                            test_value = self._hardware.read_single(ch.channel)
+                            logger.info(f"    Channel {ch.channel} '{ch.name}' test read: {test_value:.4f}V (raw)")
+                        except Exception as test_e:
+                            logger.warning(f"    Channel {ch.channel} '{ch.name}' test read FAILED: {test_e}")
                 
             except ImportError as ie:
                 logger.warning(f"widgetlords library not available - analog module '{self.name}' in mock mode: {ie}")
@@ -361,6 +365,10 @@ class AnalogInputModule(SPIModule):
         """
         Read a single analog channel (raw voltage).
         
+        This method is equivalent to calling:
+            inputs.read_single(channel)
+        on a Mod8AI object directly.
+        
         Args:
             channel: Channel number (0-7)
         
@@ -373,8 +381,16 @@ class AnalogInputModule(SPIModule):
         
         try:
             if self._hardware:
+                # This is the same as: inputs.read_single(channel)
                 voltage = self._hardware.read_single(channel)
-                logger.debug(f"Analog module '{self.name}' ch{channel} raw read: {voltage:.4f}V")
+                # Log at INFO level for first few reads to help debug
+                if not hasattr(self, '_read_count'):
+                    self._read_count = 0
+                self._read_count += 1
+                if self._read_count <= 10:
+                    logger.info(f"Analog read ch{channel}: {voltage:.4f}V (read #{self._read_count})")
+                else:
+                    logger.debug(f"Analog module '{self.name}' ch{channel} raw read: {voltage:.4f}V")
             else:
                 voltage = 0.0  # Mock mode
                 logger.debug(f"Analog module '{self.name}' ch{channel} MOCK read: {voltage:.4f}V")
@@ -813,7 +829,15 @@ class WidgetLordsInterface(HardwareInterface):
         Read all analog inputs and digital inputs.
         
         Returns:
-            Dict containing all sensor readings
+            Dict containing all sensor readings including:
+            - analog_inputs: {module_name: {channel_name: scaled_value}}
+            - analog_inputs_raw: {module_name: {channel_name: raw_voltage}}
+            - digital_inputs: {module_name: {channel_name: state}}
+            - relay_states: {module_name: {channel_name: state}}
+            - pressure_voltage: raw voltage from pressure sensor
+            - pressure_psi: pressure in PSI
+            - vacuum_psi: vacuum in PSI
+            - vacuum_bar: vacuum in bar
         """
         try:
             if not self.initialized:
@@ -821,14 +845,17 @@ class WidgetLordsInterface(HardwareInterface):
             
             data = {
                 "analog_inputs": {},
+                "analog_inputs_raw": {},  # Raw voltage values for debugging
                 "digital_inputs": {},
                 "relay_states": {},
             }
             
-            # Read all analog inputs
+            # Read all analog inputs (both scaled and raw for debugging)
             for name, module in self.analog_input_modules.items():
-                readings = module.read_all_enabled()
-                data["analog_inputs"][name] = readings
+                scaled_readings = module.read_all_enabled(scaled=True)
+                raw_readings = module.read_all_enabled(scaled=False)
+                data["analog_inputs"][name] = scaled_readings
+                data["analog_inputs_raw"][name] = raw_readings
             
             # Read all digital inputs
             for name, module in self.digital_input_modules.items():
@@ -843,13 +870,20 @@ class WidgetLordsInterface(HardwareInterface):
             # Legacy format for backward compatibility (vacuum pressure display)
             if self.analog_input_modules:
                 first_ai = next(iter(self.analog_input_modules.values()))
+                module_name = first_ai.name
                 
-                # Get scaled reading (already in engineering units like PSI)
-                scaled_readings = first_ai.read_all_enabled(scaled=True)
-                # Also get raw voltage for debugging
-                raw_readings = first_ai.read_all_enabled(scaled=False)
+                # Get readings from data dict (already read above)
+                scaled_readings = data["analog_inputs"].get(module_name, {})
+                raw_readings = data["analog_inputs_raw"].get(module_name, {})
                 
-                logger.debug(f"Analog readings - raw: {raw_readings}, scaled: {scaled_readings}")
+                # Log first few reads at INFO level for debugging
+                if not hasattr(self, '_data_read_count'):
+                    self._data_read_count = 0
+                self._data_read_count += 1
+                if self._data_read_count <= 5:
+                    logger.info(f"[Read #{self._data_read_count}] Analog module '{module_name}':")
+                    logger.info(f"  Raw voltages: {raw_readings}")
+                    logger.info(f"  Scaled values: {scaled_readings}")
                 
                 if "pressure_sensor" in scaled_readings:
                     # The scaled reading is already in engineering units (e.g., PSI)
@@ -869,8 +903,12 @@ class WidgetLordsInterface(HardwareInterface):
                     vacuum_bar = vacuum_psi * 0.0689476
                     data["vacuum_bar"] = vacuum_bar
                     
-                    logger.debug(f"Pressure: raw_V={raw_voltage:.3f}V, PSI={pressure_psi:.2f}, "
-                               f"vacuum_PSI={vacuum_psi:.2f}, vacuum_bar={vacuum_bar:.4f}")
+                    if self._data_read_count <= 5:
+                        logger.info(f"  Pressure: raw_V={raw_voltage:.4f}V -> PSI={pressure_psi:.2f}")
+                        logger.info(f"  Vacuum: PSI={vacuum_psi:.2f}, bar={vacuum_bar:.4f}")
+                    else:
+                        logger.debug(f"Pressure: raw_V={raw_voltage:.3f}V, PSI={pressure_psi:.2f}, "
+                                   f"vacuum_PSI={vacuum_psi:.2f}, vacuum_bar={vacuum_bar:.4f}")
             
             return data
             

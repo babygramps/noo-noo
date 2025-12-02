@@ -157,6 +157,18 @@ class DisplayWidget(QWidget):
         psi_layout.addWidget(self.vacuum_psi_lcd)
         layout.addLayout(psi_layout)
         
+        # Raw voltage display (for debugging)
+        raw_layout = QHBoxLayout()
+        raw_label = QLabel("Raw V:")
+        raw_label.setStyleSheet("font-size: 9pt; color: #888;")
+        raw_label.setFixedWidth(35)
+        self.raw_voltage_label = QLabel("-- V")
+        self.raw_voltage_label.setStyleSheet("font-size: 9pt; color: #888; font-family: monospace;")
+        self.raw_voltage_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        raw_layout.addWidget(raw_label)
+        raw_layout.addWidget(self.raw_voltage_label)
+        layout.addLayout(raw_layout)
+        
         group.setLayout(layout)
         return group
     
@@ -296,6 +308,16 @@ class DisplayWidget(QWidget):
             # Calculate vacuum from pressure if not provided
             vacuum_psi = 14.7 - data["pressure_psi"]
             self.vacuum_psi_lcd.display(f"{vacuum_psi:.2f}")
+        
+        # Update raw voltage display for debugging
+        if "pressure_voltage" in data:
+            raw_v = data["pressure_voltage"]
+            self.raw_voltage_label.setText(f"{raw_v:.4f} V")
+            # Color code: normal (green) if reading is reasonable, red if seems stuck at 0
+            if raw_v < 0.01:
+                self.raw_voltage_label.setStyleSheet("font-size: 9pt; color: #e74c3c; font-family: monospace;")
+            else:
+                self.raw_voltage_label.setStyleSheet("font-size: 9pt; color: #27ae60; font-family: monospace;")
         
         # Update total force - sum of individual load cells (already software-tared)
         # This is more reliable than the TLB4's internal gross/net registers
