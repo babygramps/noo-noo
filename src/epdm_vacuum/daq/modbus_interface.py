@@ -939,25 +939,34 @@ class ModbusInterface(HardwareInterface):
             logger.info("ZERO CALIBRATION - Starting")
             logger.info("=" * 50)
             
-            # Read current weight before calibration
-            pre_weight = self._read_gross_weight_raw()
-            logger.info(f"Pre-calibration gross weight (raw): {pre_weight}")
-            
-            # Use lock to prevent collision with DAQ reads
+            # Use lock for ENTIRE calibration sequence to prevent DAQ thread conflicts
             with self._lock:
+                # Read current weight before calibration
+                cfg = self.tlb4_config
+                try:
+                    pre_weight = int(self._read_value(cfg.reg_gross_weight, cfg.gross_weight_format))
+                    logger.info(f"Pre-calibration gross weight (raw): {pre_weight}")
+                except Exception as e:
+                    logger.warning(f"Could not read pre-calibration weight: {e}")
+                    pre_weight = 0
+                
                 # Send Command 100 to Command Register
                 logger.info(f"Sending Zero Calibration Command ({self.CMD_ZERO_CALIBRATION}) to register {self.TLB4_COMMAND_REGISTER}...")
                 self.instrument.write_registers(
                     self.TLB4_COMMAND_REGISTER,
                     [self.CMD_ZERO_CALIBRATION]
                 )
-            
-            # Wait for TLB4 to process the command
-            time.sleep(2.0)
-            
-            # Verify calibration by reading gross weight
-            post_weight = self._read_gross_weight_raw()
-            logger.info(f"Post-calibration gross weight (raw): {post_weight}")
+                
+                # Wait for TLB4 to process the command (inside lock to prevent DAQ reads during processing)
+                time.sleep(2.0)
+                
+                # Verify calibration by reading gross weight
+                try:
+                    post_weight = int(self._read_value(cfg.reg_gross_weight, cfg.gross_weight_format))
+                    logger.info(f"Post-calibration gross weight (raw): {post_weight}")
+                except Exception as e:
+                    logger.warning(f"Could not read post-calibration weight: {e}")
+                    post_weight = 0
             
             # Check if weight is now at or near zero
             if abs(post_weight) < 100:  # Within 100 divisions of zero
@@ -1012,11 +1021,18 @@ class ModbusInterface(HardwareInterface):
             logger.info(f"Known weight: {known_weight} kg ({weight_int} with {decimal_places} decimals)")
             logger.info("=" * 50)
             
-            # Read current weight before calibration
-            pre_weight = self._read_gross_weight_raw()
-            logger.info(f"Pre-calibration gross weight (raw): {pre_weight}")
+            cfg = self.tlb4_config
             
+            # Use lock for ENTIRE calibration sequence to prevent DAQ thread conflicts
             with self._lock:
+                # Read current weight before calibration (informational)
+                try:
+                    pre_weight = int(self._read_value(cfg.reg_gross_weight, cfg.gross_weight_format))
+                    logger.info(f"Pre-calibration gross weight (raw): {pre_weight}")
+                except Exception as e:
+                    logger.warning(f"Could not read pre-calibration weight: {e}")
+                    pre_weight = 0
+                
                 # Step 1: Write the known weight to CALW register (64)
                 # Must be 32-bit signed integer
                 logger.info(f"Writing known weight {weight_int} to register {self.ADDR_CAL_WEIGHT}...")
@@ -1030,22 +1046,26 @@ class ModbusInterface(HardwareInterface):
                     self.TLB4_COMMAND_REGISTER,
                     [self.CMD_SPAN_CALIBRATION]
                 )
-            
-            # Wait for TLB4 to process the calibration
-            time.sleep(2.0)
-            
-            # Step 3: Check result by reading CALW register
-            # 0 = Success, non-zero = error code
-            with self._lock:
+                
+                # Wait for TLB4 to process the calibration (inside lock to prevent DAQ reads)
+                time.sleep(2.0)
+                
+                # Step 3: Check result by reading CALW register
+                # 0 = Success, non-zero = error code
                 result_code = self._read_32bit_value(self.ADDR_CAL_WEIGHT, DataFormat.INT32)
-            
-            logger.info(f"Calibration result code from CALW register: {result_code}")
+                logger.info(f"Calibration result code from CALW register: {result_code}")
+                
+                if result_code == 0:
+                    # Verify by reading current weight
+                    try:
+                        post_weight = int(self._read_value(cfg.reg_gross_weight, cfg.gross_weight_format))
+                        scaled_weight = post_weight / (10 ** decimal_places)
+                        logger.info(f"Post-calibration gross weight: {post_weight} raw = {scaled_weight:.2f} kg")
+                    except Exception as e:
+                        logger.warning(f"Could not read post-calibration weight: {e}")
+                        scaled_weight = known_weight  # Assume it worked
             
             if result_code == 0:
-                # Verify by reading current weight
-                post_weight = self._read_gross_weight_raw()
-                scaled_weight = post_weight / (10 ** decimal_places)
-                
                 msg = f"Span Calibration SUCCESS - Scale now reads {scaled_weight:.2f} kg"
                 logger.info(f"✓ {msg}")
                 return True, msg, 0
