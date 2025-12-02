@@ -39,6 +39,10 @@ except ImportError as e:
 class SimpleTLB4:
     """Minimal TLB4 interface for register discovery."""
     
+    # Command register and commands
+    ADDR_CMD_REG = 5          # Register 40006
+    CMD_ENABLE_HIRES = 25     # Enable 4x HiRes Channel Reading
+    
     def __init__(self, port: str, address: int = 1, baudrate: int = 9600):
         self.port = port
         self.address = address
@@ -70,6 +74,28 @@ class SimpleTLB4:
             return True
         except Exception as e:
             print(f"Connection error: {e}")
+            return False
+    
+    def enable_multichannel_mode(self) -> bool:
+        """
+        Send Command 25 to enable individual channel readings.
+        
+        This is REQUIRED to see individual load cell data!
+        After this command, registers 40051-40058 will contain
+        32-bit raw division values for channels 1-4.
+        """
+        if not self.instrument:
+            return False
+        try:
+            print("Sending Command 25 (Enable HiRes Multi-Channel Mode)...")
+            # TLB4 requires Function 16 (write multiple registers)
+            self.instrument.write_registers(self.ADDR_CMD_REG, [self.CMD_ENABLE_HIRES])
+            time.sleep(0.5)  # Give TLB4 time to switch modes
+            print("✓ Multi-channel mode enabled!")
+            print("  Channel data now available at registers 40051-40058")
+            return True
+        except Exception as e:
+            print(f"✗ Failed to enable multi-channel mode: {e}")
             return False
     
     def disconnect(self):
@@ -216,6 +242,45 @@ def monitor_for_changes(tlb4: SimpleTLB4, baseline: dict, duration: float = 60.0
     return changes_detected
 
 
+def read_channels_directly(tlb4: SimpleTLB4, duration: float = 10.0):
+    """
+    Read the 4 individual channels directly from the known HiRes registers.
+    This assumes Command 25 has already been sent.
+    """
+    print("\n" + "=" * 70)
+    print("READING INDIVIDUAL CHANNELS (HiRes Mode)")
+    print("=" * 70)
+    print("Channel addresses after Command 25:")
+    print("  CH1: 40051-40052 (addr 50-51)")
+    print("  CH2: 40053-40054 (addr 52-53)")
+    print("  CH3: 40055-40056 (addr 54-55)")
+    print("  CH4: 40057-40058 (addr 56-57)")
+    print("-" * 70)
+    print(f"{'Time':>6} | {'CH1 (raw)':>12} | {'CH2 (raw)':>12} | {'CH3 (raw)':>12} | {'CH4 (raw)':>12}")
+    print("-" * 70)
+    
+    # Channel register addresses (32-bit values, so step by 2)
+    ch_addrs = [50, 52, 54, 56]
+    
+    start_time = time.time()
+    try:
+        while (time.time() - start_time) < duration:
+            elapsed = time.time() - start_time
+            values = []
+            for addr in ch_addrs:
+                val = tlb4.read_32bit(addr)
+                values.append(val if val is not None else "ERROR")
+            
+            print(f"{elapsed:5.1f}s | {values[0]:>12} | {values[1]:>12} | {values[2]:>12} | {values[3]:>12}")
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\nStopped.")
+    
+    print("-" * 70)
+    print("NOTE: These are RAW DIVISIONS (ADC counts), not kg!")
+    print("To convert to kg, you need to calibrate (see docs).")
+
+
 def analyze_results(changes_detected: dict):
     """Analyze and display results with recommendations."""
     print("\n" + "=" * 70)
@@ -311,6 +376,11 @@ def interactive_mode(tlb4: SimpleTLB4):
     print("INTERACTIVE CHANNEL DISCOVERY")
     print("=" * 70)
     
+    # Step 0: Enable multi-channel mode (CRITICAL!)
+    print("\nStep 0: Enabling multi-channel mode...")
+    print("-" * 70)
+    tlb4.enable_multichannel_mode()
+    
     # Step 1: Baseline scan
     print("\nStep 1: Capturing baseline (no load)...")
     input("Ensure load cells are UNLOADED, then press ENTER...")
@@ -328,7 +398,16 @@ def interactive_mode(tlb4: SimpleTLB4):
     # Step 3: Analyze and recommend
     analyze_results(changes)
     
-    # Step 4: Optional verification
+    # Step 4: Read channels directly
+    print("\n" + "=" * 70)
+    print("DIRECT CHANNEL READING")
+    print("=" * 70)
+    print("Now let's read the 4 channels directly from their known addresses.")
+    input("Press ENTER to start 15-second channel reading (apply load to test)...")
+    
+    read_channels_directly(tlb4, duration=15.0)
+    
+    # Step 5: Optional verification
     print("\n" + "=" * 70)
     print("VERIFICATION (optional)")
     print("=" * 70)
@@ -344,10 +423,15 @@ def interactive_mode(tlb4: SimpleTLB4):
             
             start = time.time()
             while (time.time() - start) < 10:
-                value = tlb4.read_register(addr, signed=True)
-                if value is not None:
-                    kg_val = value / 100.0
-                    print(f"  Addr {addr}: raw={value:>8}, kg={kg_val:>8.2f}")
+                # Try 32-bit first for channel addresses
+                if addr in [50, 52, 54, 56]:
+                    value = tlb4.read_32bit(addr)
+                    if value is not None:
+                        print(f"  Addr {addr} (32-bit): {value:>12}")
+                else:
+                    value = tlb4.read_register(addr, signed=True)
+                    if value is not None:
+                        print(f"  Addr {addr} (16-bit): {value:>8}")
                 time.sleep(0.5)
                 
         except ValueError:

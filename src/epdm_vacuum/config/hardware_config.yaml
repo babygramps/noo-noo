@@ -136,69 +136,82 @@ hardware:
     
     # TLB4 4-Channel Load Cell Transmitter Configuration
     # 
+    # IMPORTANT: Command 25 must be sent to enable individual channel mode!
+    # The software does this automatically on connection.
+    #
     # MODBUS REGISTER MAPPING (TLB4 uses 40001-based addressing):
     #   In code, we use 0-based addresses: address = register_number - 40001
     #   
+    #   40006 (addr 5):           COMMAND REGISTER (write commands here)
     #   40008-40009 (addr 7-8):   GROSS WEIGHT H/L (32-bit combined)
     #   40010-40011 (addr 9-10):  NET WEIGHT H/L (32-bit)
     #   40012-40013 (addr 11-12): PEAK WEIGHT H/L (32-bit)
     #   40050 (addr 49):          INSTRUMENT STATUS
-    #   40051-40064 (addr 50-63): R1-R14 general purpose registers
     #
-    # Individual channel values are typically in R1-R4 (registers 50-53)
-    # Run: python scripts/discover_tlb4_channels.py --port COM4
-    # to discover actual register addresses for your TLB4 configuration.
+    # AFTER COMMAND 25 (4x HiRes Channel Mode):
+    #   40051-40052 (addr 50-51): Channel 1 - 32-bit signed raw divisions
+    #   40053-40054 (addr 52-53): Channel 2 - 32-bit signed raw divisions
+    #   40055-40056 (addr 54-55): Channel 3 - 32-bit signed raw divisions
+    #   40057-40058 (addr 56-57): Channel 4 - 32-bit signed raw divisions
     #
     tlb4:
       # Register addresses (0-based, subtract 40001 from TLB4 register number)
-      # Example: Register 40051 = address 50
       registers:
         gross_weight: 7      # 40008 - Total gross weight H (32-bit with next reg)
         net_weight: 9        # 40010 - Net weight H (32-bit with next reg)
         tare_weight: 11      # 40012 - Tare/Peak weight H
         status: 6            # 40007 - Status register (16-bit)
-        # Individual channel registers - MUST BE DISCOVERED FOR YOUR TLB4
-        # Common locations: R1-R4 (addresses 50-53) or extended registers
-        # Use discover_tlb4_channels.py to find correct addresses
-        channel_1: 50        # R1 (40051) - Individual load cell 1
-        channel_2: 51        # R2 (40052) - Individual load cell 2
-        channel_3: 52        # R3 (40053) - Individual load cell 3 (if connected)
-        channel_4: 53        # R4 (40054) - Individual load cell 4 (if connected)
+        command: 5           # 40006 - Command register (write 25 to enable channels)
+        # Individual channel registers (32-bit each, enabled by Command 25)
+        channel_1: 50        # 40051-40052 - Channel 1 raw divisions (32-bit)
+        channel_2: 52        # 40053-40054 - Channel 2 raw divisions (32-bit)
+        channel_3: 54        # 40055-40056 - Channel 3 raw divisions (32-bit)
+        channel_4: 56        # 40057-40058 - Channel 4 raw divisions (32-bit)
       
-      # Data format for weight values
-      # TLB4 individual channels typically use INT16 (single register each)
-      # Combined weights (gross/net) use INT32 (two registers)
-      data_format: int16     # int16, int32, uint32, or float32
-      decimal_places: 2      # Decimal places in raw values (e.g., 241 = 2.41 kg)
+      # Data format for channel values
+      # After Command 25, channels are 32-bit signed integers (raw divisions)
+      data_format: int32     # int32 for HiRes channel data
+      decimal_places: 0      # Raw divisions have no decimal places
       
       # Channel scaling configuration
-      # TLB4 transmits values as scaled integers with 2 decimal places
-      # Formula: kg = raw_value / 100 (using full_scale=100, capacity=1.0)
+      # 
+      # HiRes mode (Command 25) outputs RAW DIVISIONS (ADC counts), not kg!
+      # You must calibrate to convert divisions to kg:
+      #
+      # CALIBRATION PROCEDURE:
+      #   1. Zero the scale, note raw value (e.g., zero_offset = 500)
+      #   2. Apply known weight (e.g., 10kg), note new value (e.g., 20500)
+      #   3. Calculate: full_scale_divisions = (20500 - 500) / 10 = 2000 div/kg
+      #   4. Set capacity_kg = 1.0 (we're using divisions per kg)
+      #
+      # Formula: kg = (raw_value - zero_offset) / full_scale_divisions * capacity_kg
+      #
       channel_scaling:
-        # Default: raw/100 = kg (same as 2 decimal places)
-        full_scale_divisions: 100.0   # Divisor for decimal scaling
-        load_cell_capacity_kg: 1.0    # 1:1 ratio after division
+        # Default calibration values (ADJUST AFTER CALIBRATION!)
+        # These are placeholder values - run calibration to get accurate numbers
+        full_scale_divisions: 2000.0  # Divisions per kg (calibrate this!)
+        load_cell_capacity_kg: 1.0    # Multiplier (usually 1.0)
         
         # Per-channel configuration
         # Enable channels that have load cells connected
         channel_1:
           enabled: true               # Load cell 1 - CONNECTED
-          full_scale_divisions: 100.0
+          full_scale_divisions: 2000.0  # Calibrate: divisions when 1kg applied
           capacity_kg: 1.0
-          zero_offset: 0.0
+          zero_offset: 0.0            # Raw divisions at zero load
         channel_2:
           enabled: true               # Load cell 2 - CONNECTED
-          full_scale_divisions: 100.0
+          full_scale_divisions: 2000.0  # Calibrate: divisions when 1kg applied
           capacity_kg: 1.0
-          zero_offset: 0.0
+          zero_offset: 0.0            # Raw divisions at zero load
         channel_3:
           enabled: false              # Load cell 3 - Not connected
-          full_scale_divisions: 100.0
+          full_scale_divisions: 2000.0
           capacity_kg: 1.0
           zero_offset: 0.0
         channel_4:
           enabled: false              # Load cell 4 - Not connected
-          full_scale_divisions: 100.0
+          full_scale_divisions: 2000.0
           capacity_kg: 1.0
           zero_offset: 0.0
 
