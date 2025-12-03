@@ -224,7 +224,8 @@ epdm-vacuum-fixture/
 ### Modbus Device
 
 - **TLB4 Load Cell Transmitter**
-  - Port: `/dev/ttyUSB0`
+  - Connection: WidgetLords PI-SPI-DIN-RTC-RS485 module (recommended) or USB-RS485 adapter
+  - Port: `/tmp/modbus` (with modbusd daemon) or `/dev/ttyUSB0` (USB adapter)
   - Baud: 9600
   - Slave Address: 1
   - 4× Load cells (200 kg each)
@@ -250,10 +251,12 @@ pressure_sensor:
   pressure_max_psi: 30.0
 
 modbus:
-  port: /dev/ttyUSB0
+  port: /tmp/modbus  # Use /tmp/modbus for WidgetLords+modbusd
   baudrate: 9600
   slave_address: 1
   timeout: 1.0
+  rs485:
+    gpio_mode: modbusd  # modbusd (recommended) or manual
 
 safety:
   max_vacuum_bar: 1.0

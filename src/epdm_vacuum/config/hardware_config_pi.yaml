@@ -1,8 +1,8 @@
 # EPDM Vacuum Fixture - Raspberry Pi Hardware Configuration
-# Version: 1.1.0
+# Version: 1.2.0
 #
 # This configuration is for deployment on Raspberry Pi 5 with actual hardware:
-# - TLB4 Load Cell Transmitter via USB-RS485 adapter (/dev/ttyUSB0)
+# - TLB4 Load Cell Transmitter via WidgetLords PI-SPI-DIN-RTC-RS485 module
 # - WidgetLords SPI modules for analog I/O
 #
 # Copy this to hardware_config.yaml or set environment variable:
@@ -17,7 +17,10 @@ hardware:
   
   modbus:
     enabled: true
-    port: /dev/ttyUSB0  # Serial port for Modbus RTU (Raspberry Pi USB-RS485)
+    # Serial port configuration for TLB4 Load Cell Transmitter
+    # Using WidgetLords PI-SPI-DIN-RTC-RS485 module with modbusd daemon
+    # The modbusd daemon handles RS485 direction control and creates /tmp/modbus
+    port: /tmp/modbus  # Virtual port created by modbusd daemon
     baudrate: 9600  # Communication speed (TLB4 configured for 9600)
     slave_address: 1  # Modbus device address (TLB4 Addr setting)
     timeout: 1.0  # Communication timeout in seconds
@@ -28,6 +31,16 @@ hardware:
     wordorder: big  # Word order for 32-bit values: big or little
     close_port_after_each_call: false  # Close port after each read
     debug: false  # Enable debug logging for troubleshooting
+    
+    # RS485 Direction Control Configuration
+    # The WidgetLords PI-SPI-DIN-RTC-RS485 module uses GPIO25 for direction
+    # Using modbusd daemon which automatically handles direction control
+    rs485:
+      enabled: true                 # Enable RS485 mode
+      gpio_mode: modbusd            # modbusd handles direction (recommended)
+      direction_gpio: 25            # GPIO pin for direction (if manual mode)
+      tx_delay_ms: 1
+      rx_delay_ms: 1
     
     # TLB4 4-Channel Load Cell Transmitter Configuration
     # Discovered via register scanner

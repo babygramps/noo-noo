@@ -457,7 +457,7 @@ class IOConfigDialog(QDialog):
         # Serial Port
         port_layout = QHBoxLayout()
         self.modbus_port_edit = QLineEdit()
-        self.modbus_port_edit.setPlaceholderText("e.g., COM3 (Windows) or /dev/ttyUSB0 (Linux)")
+        self.modbus_port_edit.setPlaceholderText("e.g., /tmp/modbus (WidgetLords+modbusd) or COM3 (Windows)")
         port_layout.addWidget(self.modbus_port_edit)
         
         test_port_btn = QPushButton("Test Connection")
@@ -1454,7 +1454,7 @@ class IOConfigDialog(QDialog):
             
             # Populate Modbus form fields
             self.modbus_enabled_check.setChecked(modbus_config.get('enabled', False))
-            self.modbus_port_edit.setText(modbus_config.get('port', '/dev/ttyUSB0'))
+            self.modbus_port_edit.setText(modbus_config.get('port', '/tmp/modbus'))
             
             baudrate = str(modbus_config.get('baudrate', 9600))
             index = self.modbus_baudrate_combo.findText(baudrate)
@@ -1876,7 +1876,7 @@ class IOConfigDialog(QDialog):
 <h4>Configuration Tips:</h4>
 <ul>
 <li><b>IO Devices:</b> Use descriptive names, match channel numbers to physical wiring</li>
-<li><b>Modbus Port:</b> Windows: COM3, COM4, etc. | Linux: /dev/ttyUSB0, /dev/ttyUSB1</li>
+<li><b>Modbus Port:</b> WidgetLords+modbusd: /tmp/modbus | USB adapter: /dev/ttyUSB0 or COM3</li>
 <li><b>Slave Address:</b> Check device DIP switches or configuration (typically 1)</li>
 <li><b>Baudrate:</b> Must match TLB4 setting (check device display/manual)</li>
 <li><b>Troubleshooting:</b> Enable debug logging to see all Modbus communication</li>
@@ -1885,7 +1885,7 @@ class IOConfigDialog(QDialog):
 
 <h4>Example Configuration:</h4>
 <ul>
-<li><b>Modbus Port:</b> COM3 (Windows) or /dev/ttyUSB0 (Linux)</li>
+<li><b>Modbus Port:</b> /tmp/modbus (WidgetLords+modbusd) or /dev/ttyUSB0 (USB adapter)</li>
 <li><b>Baudrate:</b> 9600</li>
 <li><b>Slave Address:</b> 1</li>
 <li><b>Parity:</b> None</li>

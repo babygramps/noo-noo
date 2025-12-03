@@ -1565,7 +1565,7 @@ class SPIConfigDialog(QDialog):
         
         port_row = QHBoxLayout()
         self.modbus_port_edit = QLineEdit()
-        self.modbus_port_edit.setPlaceholderText("/dev/ttyUSB0 or COM3")
+        self.modbus_port_edit.setPlaceholderText("/tmp/modbus (WidgetLords+modbusd) or /dev/ttyUSB0")
         port_row.addWidget(self.modbus_port_edit, stretch=1)
         
         test_btn = QPushButton("Test")
@@ -3164,7 +3164,7 @@ class SPIConfigDialog(QDialog):
     def load_modbus_ui(self):
         """Load Modbus configuration into UI elements."""
         self.modbus_enabled_check.setChecked(self.modbus_config.get('enabled', False))
-        self.modbus_port_edit.setText(self.modbus_config.get('port', '/dev/ttyUSB0'))
+        self.modbus_port_edit.setText(self.modbus_config.get('port', '/tmp/modbus'))
         
         baudrate = str(self.modbus_config.get('baudrate', 9600))
         idx = self.modbus_baudrate_combo.findText(baudrate)

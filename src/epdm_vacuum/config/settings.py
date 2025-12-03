@@ -65,10 +65,17 @@ class Settings:
                 },
                 "modbus": {
                     "enabled": True,
-                    "port": "/dev/ttyUSB0",
+                    "port": "/tmp/modbus",  # Use /tmp/modbus for WidgetLords+modbusd
                     "baudrate": 9600,
                     "slave_address": 1,
                     "timeout": 1.0,
+                    "rs485": {
+                        "enabled": True,
+                        "gpio_mode": "modbusd",  # modbusd, manual, or disabled
+                        "direction_gpio": 25,
+                        "tx_delay_ms": 1,
+                        "rx_delay_ms": 1,
+                    },
                 },
             },
             "pressure_sensor": {
@@ -404,12 +411,15 @@ def create_modbus_interface_from_settings(
     # Get Modbus settings
     modbus_cfg = settings.get("hardware", "modbus", default={})
     
+    # Get RS485 settings
+    rs485_cfg = modbus_cfg.get("rs485", {})
+    
     # Create TLB4 config
     tlb4_config = create_tlb4_config_from_settings(settings)
     
     # Create interface
     interface = ModbusInterface(
-        port=modbus_cfg.get("port", "/dev/ttyUSB0"),
+        port=modbus_cfg.get("port", "/tmp/modbus"),
         slave_address=modbus_cfg.get("slave_address", 1),
         baudrate=modbus_cfg.get("baudrate", 9600),
         timeout=modbus_cfg.get("timeout", 1.0),
@@ -421,8 +431,14 @@ def create_modbus_interface_from_settings(
         close_port_after_each_call=modbus_cfg.get("close_port_after_each_call", False),
         debug=modbus_cfg.get("debug", False),
         tlb4_config=tlb4_config,
+        # RS485 configuration for WidgetLords PI-SPI-DIN-RTC-RS485 module
+        rs485_gpio_mode=rs485_cfg.get("gpio_mode", "modbusd"),
+        rs485_direction_gpio=rs485_cfg.get("direction_gpio", 25),
+        rs485_tx_delay_ms=rs485_cfg.get("tx_delay_ms", 1),
+        rs485_rx_delay_ms=rs485_cfg.get("rx_delay_ms", 1),
     )
     
     logger.info(f"ModbusInterface created for port {modbus_cfg.get('port')}")
+    logger.info(f"RS485 mode: {rs485_cfg.get('gpio_mode', 'modbusd')}")
     return interface
 

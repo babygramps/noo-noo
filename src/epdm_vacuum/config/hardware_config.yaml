@@ -122,7 +122,16 @@ hardware:
   
   modbus:
     enabled: true
-    port: /dev/ttyUSB0  # Serial port for Modbus RTU (Windows: COM4)
+    # Serial port configuration
+    # Option 1: WidgetLords PI-SPI-DIN-RTC-RS485 with modbusd daemon (RECOMMENDED)
+    #   - Install modbusd: see RS485 section below
+    #   - Port: /tmp/modbus (virtual port created by modbusd)
+    # Option 2: USB-RS485 Adapter (Waveshare, etc.)
+    #   - Port: /dev/ttyUSB0 (Linux) or COM4 (Windows)
+    # Option 3: WidgetLords module without modbusd (manual GPIO control)
+    #   - Port: /dev/serial0 (RPi built-in UART)
+    #   - Requires rs485.gpio_mode: manual
+    port: /tmp/modbus  # Use /tmp/modbus for WidgetLords+modbusd, /dev/ttyUSB0 for USB adapter
     baudrate: 9600  # Communication speed (TLB4 configured for 9600)
     slave_address: 1  # Modbus device address (TLB4 Addr setting)
     timeout: 1.0  # Communication timeout in seconds
@@ -133,6 +142,26 @@ hardware:
     wordorder: big  # Word order for 32-bit values: big or little
     close_port_after_each_call: false  # Close port after each read
     debug: false  # Enable debug logging for troubleshooting
+    
+    # RS485 Direction Control Configuration
+    # The WidgetLords PI-SPI-DIN-RTC-RS485 module uses GPIO25 for RS485 direction
+    # 
+    # RECOMMENDED: Use the modbusd daemon (handles direction control automatically)
+    #   1. Download modbusd from https://github.com/widgetlords/modbusd/releases
+    #   2. Install to /usr/local/bin/modbusd_arm64
+    #   3. Create systemd service (see CLAUDE.md for instructions)
+    #   4. Set port to /tmp/modbus
+    #
+    # ALTERNATIVE: Manual GPIO control (if modbusd is not available)
+    #   Set gpio_mode: manual and the driver will control GPIO25 directly
+    rs485:
+      enabled: true                 # Enable RS485 mode (for WidgetLords module)
+      gpio_mode: modbusd            # modbusd (recommended) or manual
+      direction_gpio: 25            # GPIO pin for direction control (DE/RE)
+      # Manual mode only: transmit delay in milliseconds after setting TX mode
+      tx_delay_ms: 1
+      # Manual mode only: delay after transmission before switching to RX mode
+      rx_delay_ms: 1
     
     # TLB4 4-Channel Load Cell Transmitter Configuration
     # 

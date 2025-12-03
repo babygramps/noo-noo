@@ -6,8 +6,8 @@ Quick diagnostic script to verify TLB4 Modbus communication is working
 on Raspberry Pi before running the full GUI application.
 
 Usage:
-    python scripts/test_tlb4_pi.py                    # Default /dev/ttyUSB0
-    python scripts/test_tlb4_pi.py --port /dev/ttyUSB1  # Custom port
+    python scripts/test_tlb4_pi.py                        # Default /tmp/modbus (WidgetLords)
+    python scripts/test_tlb4_pi.py --port /dev/ttyUSB0   # USB-RS485 adapter
     python scripts/test_tlb4_pi.py --scan             # Scan for registers
     python scripts/test_tlb4_pi.py --monitor          # Live monitoring
 
@@ -46,7 +46,7 @@ def check_serial_port(port: str) -> bool:
     if not os.path.exists(port):
         print(f"❌ Serial port NOT FOUND: {port}")
         print("\nAvailable serial ports:")
-        for dev in ['/dev/ttyUSB0', '/dev/ttyUSB1', '/dev/ttyACM0', '/dev/ttyACM1']:
+        for dev in ['/tmp/modbus', '/dev/serial0', '/dev/ttyUSB0', '/dev/ttyUSB1', '/dev/ttyACM0', '/dev/ttyACM1']:
             if os.path.exists(dev):
                 print(f"  ✓ {dev}")
         return False
@@ -281,7 +281,7 @@ def main():
         epilog="""
 Examples:
     python test_tlb4_pi.py                    # Basic connection test
-    python test_tlb4_pi.py --port /dev/ttyUSB1  # Custom port
+    python test_tlb4_pi.py --port /dev/ttyUSB0  # USB adapter
     python test_tlb4_pi.py --scan             # Scan for registers
     python test_tlb4_pi.py --monitor          # Live monitoring
     python test_tlb4_pi.py --tare             # Test tare function
@@ -289,8 +289,8 @@ Examples:
     )
     parser.add_argument(
         "--port", "-p",
-        default="/dev/ttyUSB0",
-        help="Serial port (default: /dev/ttyUSB0)"
+        default="/tmp/modbus",
+        help="Serial port (default: /tmp/modbus for WidgetLords+modbusd)"
     )
     parser.add_argument(
         "--address", "-a",
@@ -345,6 +345,7 @@ Examples:
 
 if __name__ == "__main__":
     main()
+
 
 
 

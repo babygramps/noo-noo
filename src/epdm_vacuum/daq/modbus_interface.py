@@ -2,7 +2,22 @@
 Modbus Interface - TLB4 Load Cell Transmitter
 
 Handles Modbus RTU communication with the Laumas TLB4 4-channel
-load cell transmitter via USB-RS485 adapter.
+load cell transmitter.
+
+CONNECTION OPTIONS:
+1. WidgetLords PI-SPI-DIN-RTC-RS485 with modbusd (RECOMMENDED):
+   - Port: /tmp/modbus (virtual port created by modbusd daemon)
+   - modbusd automatically handles GPIO25 direction control
+   - Install modbusd from: https://github.com/widgetlords/modbusd/releases
+
+2. WidgetLords PI-SPI-DIN-RTC-RS485 without modbusd:
+   - Port: /dev/serial0 (Raspberry Pi built-in UART)
+   - Set rs485_gpio_mode='manual' to control GPIO25 directly
+   - Enable UART: add 'enable_uart=1' to /boot/config.txt
+
+3. USB-RS485 Adapter (Waveshare, etc.):
+   - Port: /dev/ttyUSB0 (Linux) or COM4 (Windows)
+   - Adapter handles direction control internally
 
 Device Configuration (must be set manually on TLB4):
 - Protocol: Modbus RTU
@@ -165,11 +180,21 @@ class ModbusInterface(HardwareInterface):
     The TLB4 transmits individual channel values as "Divisions" (raw points).
     Conversion to kg requires applying a scaling factor:
         Load_kg = (Channel_Value / Full_Scale_Divisions) * Load_Cell_Capacity
+    
+    RS485 Direction Control:
+        When using WidgetLords PI-SPI-DIN-RTC-RS485 module, GPIO25 controls
+        the RS485 transceiver direction (DE/RE pins). Two modes are supported:
+        
+        1. modbusd mode (RECOMMENDED): The modbusd daemon handles direction
+           control automatically. Use port='/tmp/modbus'.
+        
+        2. manual mode: This driver controls GPIO25 directly before/after
+           each transmission. Use port='/dev/serial0'.
     """
     
     def __init__(
         self,
-        port: str = "/dev/ttyUSB0",
+        port: str = "/tmp/modbus",
         slave_address: int = 1,
         baudrate: int = 9600,
         timeout: float = 1.0,
@@ -181,12 +206,20 @@ class ModbusInterface(HardwareInterface):
         close_port_after_each_call: bool = False,
         debug: bool = False,
         tlb4_config: Optional[TLB4Config] = None,
+        rs485_gpio_mode: str = "modbusd",
+        rs485_direction_gpio: int = 25,
+        rs485_tx_delay_ms: int = 1,
+        rs485_rx_delay_ms: int = 1,
     ):
         """
         Initialize the Modbus interface for TLB4 Load Cell Transmitter.
         
         Args:
-            port: Serial port path (e.g., COM3 on Windows, /dev/ttyUSB0 on Linux)
+            port: Serial port path:
+                  - /tmp/modbus: WidgetLords with modbusd daemon (recommended)
+                  - /dev/serial0: WidgetLords with manual GPIO control
+                  - /dev/ttyUSB0: USB-RS485 adapter on Linux
+                  - COM3/COM4: USB-RS485 adapter on Windows
             slave_address: Modbus slave address (1-247, typically 1)
             baudrate: Serial baud rate (TLB4 configured for 9600)
             timeout: Communication timeout in seconds
@@ -198,6 +231,13 @@ class ModbusInterface(HardwareInterface):
             close_port_after_each_call: Close port after each communication
             debug: Enable debug logging for troubleshooting
             tlb4_config: TLB4-specific configuration (registers, scaling)
+            rs485_gpio_mode: RS485 direction control mode:
+                            - 'modbusd': modbusd daemon handles direction (default)
+                            - 'manual': this driver controls GPIO directly
+                            - 'disabled': no GPIO control (USB adapter)
+            rs485_direction_gpio: GPIO pin for RS485 direction (default: 25)
+            rs485_tx_delay_ms: Delay after setting TX mode before transmitting
+            rs485_rx_delay_ms: Delay after TX before switching to RX mode
         """
         super().__init__()
         self.port = port
@@ -213,6 +253,14 @@ class ModbusInterface(HardwareInterface):
         self.debug = debug
         self.instrument = None
         self.tlb4_config = tlb4_config or TLB4Config()
+        
+        # RS485 GPIO direction control settings
+        self.rs485_gpio_mode = rs485_gpio_mode.lower()
+        self.rs485_direction_gpio = rs485_direction_gpio
+        self.rs485_tx_delay_ms = rs485_tx_delay_ms
+        self.rs485_rx_delay_ms = rs485_rx_delay_ms
+        self._gpio_initialized = False
+        self._gpio_module = None
         
         # Cache for last readings
         self._last_reading: Dict[str, Any] = {}
@@ -236,16 +284,103 @@ class ModbusInterface(HardwareInterface):
             logger.info(f"  Timeout: {self.timeout}s")
             logger.info(f"  Byte Order: {self.byteorder}")
             logger.info(f"  Word Order: {self.wordorder}")
+            logger.info(f"  RS485 GPIO Mode: {self.rs485_gpio_mode}")
+            if self.rs485_gpio_mode == "manual":
+                logger.info(f"  RS485 Direction GPIO: {self.rs485_direction_gpio}")
+    
+    def _init_rs485_gpio(self) -> bool:
+        """
+        Initialize GPIO for RS485 direction control (manual mode only).
+        
+        The WidgetLords PI-SPI-DIN-RTC-RS485 uses GPIO25 for direction:
+        - HIGH = Transmit mode (DE=1, /RE=1)
+        - LOW = Receive mode (DE=0, /RE=0)
+        
+        Returns:
+            bool: True if GPIO initialized successfully
+        """
+        if self.rs485_gpio_mode != "manual":
+            return True  # Not needed for modbusd mode
+        
+        if self._gpio_initialized:
+            return True
+        
+        try:
+            import RPi.GPIO as GPIO
+            self._gpio_module = GPIO
+            
+            # Use BCM pin numbering
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)
+            
+            # Configure direction pin as output, default to receive mode (LOW)
+            GPIO.setup(self.rs485_direction_gpio, GPIO.OUT)
+            GPIO.output(self.rs485_direction_gpio, GPIO.LOW)
+            
+            self._gpio_initialized = True
+            logger.info(f"RS485 GPIO{self.rs485_direction_gpio} initialized for manual direction control")
+            return True
+            
+        except ImportError:
+            logger.warning("RPi.GPIO not available - RS485 manual mode disabled")
+            logger.warning("Install with: pip install RPi.GPIO")
+            self.rs485_gpio_mode = "disabled"
+            return False
+        except Exception as e:
+            logger.error(f"Failed to initialize RS485 GPIO: {e}")
+            self.rs485_gpio_mode = "disabled"
+            return False
+    
+    def _rs485_set_tx_mode(self) -> None:
+        """Set RS485 transceiver to transmit mode (manual GPIO control only)."""
+        if self.rs485_gpio_mode != "manual" or not self._gpio_initialized:
+            return
+        
+        self._gpio_module.output(self.rs485_direction_gpio, self._gpio_module.HIGH)
+        if self.rs485_tx_delay_ms > 0:
+            time.sleep(self.rs485_tx_delay_ms / 1000.0)
+    
+    def _rs485_set_rx_mode(self) -> None:
+        """Set RS485 transceiver to receive mode (manual GPIO control only)."""
+        if self.rs485_gpio_mode != "manual" or not self._gpio_initialized:
+            return
+        
+        if self.rs485_rx_delay_ms > 0:
+            time.sleep(self.rs485_rx_delay_ms / 1000.0)
+        self._gpio_module.output(self.rs485_direction_gpio, self._gpio_module.LOW)
+    
+    def _cleanup_rs485_gpio(self) -> None:
+        """Clean up GPIO resources."""
+        if self._gpio_initialized and self._gpio_module:
+            try:
+                self._gpio_module.output(self.rs485_direction_gpio, self._gpio_module.LOW)
+                # Note: Don't call GPIO.cleanup() as it may affect other GPIO users
+                logger.debug(f"RS485 GPIO{self.rs485_direction_gpio} set to RX mode")
+            except Exception as e:
+                logger.warning(f"Error cleaning up RS485 GPIO: {e}")
         
     def connect(self) -> bool:
         """
         Establish Modbus RTU connection to TLB4.
+        
+        For WidgetLords PI-SPI-DIN-RTC-RS485 module:
+        - With modbusd: port should be /tmp/modbus
+        - Without modbusd: port should be /dev/serial0, rs485_gpio_mode='manual'
+        
+        For USB-RS485 adapter:
+        - Port: /dev/ttyUSB0 (Linux) or COM4 (Windows)
         
         Returns:
             bool: True if connection successful
         """
         try:
             logger.info(f"Connecting to TLB4 on {self.port} at {self.baudrate} baud...")
+            logger.info(f"RS485 mode: {self.rs485_gpio_mode}")
+            
+            # Initialize RS485 GPIO if using manual mode
+            if self.rs485_gpio_mode == "manual":
+                if not self._init_rs485_gpio():
+                    logger.warning("RS485 GPIO init failed - continuing without GPIO control")
             
             import minimalmodbus
             import serial
@@ -279,6 +414,12 @@ class ModbusInterface(HardwareInterface):
                 2.0: serial.STOPBITS_TWO,
             }
             stopbits_setting = stopbits_map.get(self.stopbits, serial.STOPBITS_ONE)
+            
+            # Check if using modbusd virtual port
+            if self.port == "/tmp/modbus":
+                logger.info("Using modbusd virtual port - RS485 direction handled by daemon")
+            elif self.port == "/dev/serial0":
+                logger.info("Using RPi built-in UART - ensure enable_uart=1 in /boot/config.txt")
             
             # Create Modbus instrument
             self.instrument = minimalmodbus.Instrument(
@@ -319,6 +460,15 @@ class ModbusInterface(HardwareInterface):
             logger.error("Install with: pip install minimalmodbus pyserial")
             self.handle_error(ie)
             return False
+        except FileNotFoundError as fnf:
+            logger.error(f"Serial port not found: {self.port}")
+            if self.port == "/tmp/modbus":
+                logger.error("modbusd daemon may not be running. Start it with:")
+                logger.error("  sudo systemctl start modbusd")
+            elif self.port == "/dev/serial0":
+                logger.error("UART may not be enabled. Add 'enable_uart=1' to /boot/config.txt")
+            self.handle_error(fnf)
+            return False
         except Exception as e:
             self.handle_error(e)
             return False
@@ -332,6 +482,9 @@ class ModbusInterface(HardwareInterface):
         """
         try:
             logger.info("Disconnecting from TLB4...")
+            
+            # Clean up RS485 GPIO if using manual mode
+            self._cleanup_rs485_gpio()
             
             if self.instrument and hasattr(self.instrument, 'serial'):
                 if self.instrument.serial.is_open:

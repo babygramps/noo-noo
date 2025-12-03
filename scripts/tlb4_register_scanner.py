@@ -40,7 +40,13 @@ from epdm_vacuum.daq.modbus_interface import ModbusInterface, TLB4Config
 
 
 def detect_port() -> str:
-    """Detect the most likely serial port for the USB-RS485 adapter."""
+    """Detect the most likely serial port for RS485 communication.
+    
+    Priority order:
+    1. /tmp/modbus - WidgetLords module with modbusd daemon (recommended)
+    2. /dev/serial0 - WidgetLords module without modbusd
+    3. /dev/ttyUSB* - USB-RS485 adapter
+    """
     import platform
     
     if platform.system() == "Windows":
@@ -57,18 +63,30 @@ def detect_port() -> str:
             return ports[0].device
         return "COM3"
     else:
-        # Linux/Mac - try common USB serial paths
+        # Linux/Mac - try common serial paths
+        # Priority: modbusd virtual port > RPi UART > USB adapters
         candidates = [
-            "/dev/ttyUSB0",
+            "/tmp/modbus",     # WidgetLords modbusd daemon (recommended)
+            "/dev/serial0",    # RPi built-in UART (WidgetLords without modbusd)
+            "/dev/ttyUSB0",    # USB-RS485 adapter
             "/dev/ttyUSB1",
             "/dev/ttyACM0",
             "/dev/ttyACM1",
-            "/dev/serial0",
         ]
         for path in candidates:
             if os.path.exists(path):
+                if path == "/tmp/modbus":
+                    print("Detected: WidgetLords modbusd virtual port")
+                elif path == "/dev/serial0":
+                    print("Detected: Raspberry Pi built-in UART")
+                else:
+                    print(f"Detected: USB serial adapter at {path}")
                 return path
-        return "/dev/ttyUSB0"
+        
+        print("No serial port detected. Defaulting to /tmp/modbus")
+        print("If using WidgetLords module, ensure modbusd service is running:")
+        print("  sudo systemctl start modbusd")
+        return "/tmp/modbus"
 
 
 def scan_basic(interface: ModbusInterface) -> dict:
@@ -368,10 +386,20 @@ Examples:
     if not interface.connect():
         print("\n[ERROR] Failed to connect to TLB4!")
         print("\nTroubleshooting:")
-        print("  1. Check USB-RS485 adapter connection")
+        if port == "/tmp/modbus":
+            print("  1. Check if modbusd service is running:")
+            print("     sudo systemctl status modbusd")
+            print("  2. Start modbusd if not running:")
+            print("     sudo systemctl start modbusd")
+        elif port == "/dev/serial0":
+            print("  1. Ensure UART is enabled in /boot/config.txt:")
+            print("     enable_uart=1")
+            print("  2. Disable serial console in raspi-config")
+        else:
+            print("  1. Check USB-RS485 adapter connection")
         print("  2. Verify TLB4 is powered and configured for Modbus")
         print("  3. Check wiring: Terminal 29=A/+, Terminal 30=B/-")
-        print("  4. Confirm correct COM port")
+        print("  4. Confirm correct serial port with --port option")
         print("\nRun with --instructions for TLB4 setup guide")
         return 1
     

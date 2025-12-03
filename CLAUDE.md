@@ -14,7 +14,7 @@ python -m epdm_vacuum.app_main
 python -m epdm_vacuum.api_main
 
 # TLB4 register scanner (discover Modbus registers)
-python scripts/tlb4_register_scanner.py --port COM4 --interactive
+python scripts/tlb4_register_scanner.py --interactive  # Auto-detects port
 
 # Install dependencies
 pip install -r requirements.txt
@@ -200,7 +200,46 @@ The PI-SPI-DIN-4KO uses MCP23S08 with 4 addresses (0-3) per chip enable, allowin
 **Configuration:** Settings → Hardware Configuration (`Ctrl+H`)
 
 ### TLB4 Load Cell Transmitter (Modbus RTU)
-- Port: COM4 (Windows) or /dev/ttyUSB0 (Linux)
+
+The TLB4 connects via RS485. Two connection methods are supported:
+
+**Option 1: WidgetLords PI-SPI-DIN-RTC-RS485 Module (Recommended)**
+- Port: `/tmp/modbus` (virtual port created by modbusd daemon)
+- The modbusd daemon handles GPIO25 direction control automatically
+- Wiring: Terminal A (+) to TLB4 pin 29, Terminal B (-) to TLB4 pin 30
+
+**Option 2: USB-RS485 Adapter (Waveshare, etc.)**
+- Port: `/dev/ttyUSB0` (Linux) or `COM4` (Windows)
+- No GPIO control needed (adapter handles direction)
+
+**RS485 Direction Control Modes:**
+1. `modbusd` service (recommended for WidgetLords): Install the WidgetLords `modbusd` daemon which automatically handles GPIO25 direction switching
+2. Manual GPIO: Set `rs485.gpio_mode: manual` in config to let the driver control GPIO25
+
+**Setup modbusd service:**
+```bash
+# Download from: https://github.com/widgetlords/modbusd/releases
+sudo cp modbusd_arm64 /usr/local/bin/
+sudo chmod +x /usr/local/bin/modbusd_arm64
+
+# Create systemd service
+sudo tee /etc/systemd/system/modbusd.service << 'EOF'
+[Unit]
+Description=modbusd RS485 direction control
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/modbusd_arm64 -d 25 -s /dev/serial0
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable modbusd
+sudo systemctl start modbusd
+```
+
+**Common Settings:**
 - Baud: 9600, Parity: None, Stop bits: 1
 - Slave address: 1
 - Data format: 16-bit integers with 2 decimal places (246 = 2.46 kg)
@@ -239,6 +278,14 @@ The PI-SPI-DIN-4KO uses MCP23S08 with 4 addresses (0-3) per chip enable, allowin
 - Check COM port is correct and not in use by another process
 - Verify TLB4 is in Modbus mode (not "nOnE")
 - Ensure correct baud rate (9600)
+
+### RS485 communication issues (WidgetLords module)
+- Verify wiring: A(+) to TLB4 terminal 29, B(-) to TLB4 terminal 30
+- Check if `modbusd` service is running: `sudo systemctl status modbusd`
+- If using manual GPIO mode, ensure RPi.GPIO is installed: `pip install RPi.GPIO`
+- Check GPIO25 is not used by another process
+- Enable UART: add `enable_uart=1` to `/boot/config.txt` and reboot
+- Disable serial console: `sudo raspi-config` → Interface Options → Serial → No to login shell, Yes to serial hardware
 
 ### Permission errors on COM port
 - Another Python process may have the port open

@@ -7,7 +7,7 @@
 # load cell transmitter support.
 #
 # Prerequisites:
-#   1. USB-RS485 adapter connected (usually /dev/ttyUSB0)
+#   1. WidgetLords PI-SPI-DIN-RTC-RS485 module with modbusd (/tmp/modbus)
 #   2. User must be in 'dialout' group for serial port access:
 #      sudo usermod -a -G dialout $USER
 #      (Log out and back in after adding to group)
@@ -16,7 +16,7 @@
 # Usage:
 #   ./scripts/run_gui_pi.sh              # Use default Pi config
 #   ./scripts/run_gui_pi.sh --debug      # Enable debug logging
-#   ./scripts/run_gui_pi.sh --port /dev/ttyUSB1  # Custom serial port
+#   ./scripts/run_gui_pi.sh --port /dev/ttyUSB0  # USB-RS485 adapter
 #
 #===============================================================================
 
@@ -66,7 +66,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --debug, -d          Enable debug logging"
-            echo "  --port, -p PORT      Use custom serial port (default: /dev/ttyUSB0)"
+            echo "  --port, -p PORT      Use custom serial port (default: /tmp/modbus)"
             echo "  --config, -c FILE    Use custom config file"
             echo "  --help, -h           Show this help message"
             echo ""
@@ -111,7 +111,7 @@ fi
 #-------------------------------------------------------------------------------
 # Check USB-RS485 adapter / serial port
 #-------------------------------------------------------------------------------
-DEFAULT_PORT="/dev/ttyUSB0"
+DEFAULT_PORT="/tmp/modbus"
 if [ -n "$CUSTOM_PORT" ]; then
     SERIAL_PORT="$CUSTOM_PORT"
 else
@@ -144,7 +144,10 @@ else
     # List available serial ports
     echo ""
     echo -e "Available serial ports:"
-    ls -la /dev/ttyUSB* /dev/ttyACM* 2>/dev/null || echo "  (none found)"
+    echo "Checking for modbusd virtual port..."
+    ls -la /tmp/modbus 2>/dev/null || echo "  /tmp/modbus not found (modbusd may not be running)"
+    echo "Checking for USB serial devices..."
+    ls -la /dev/ttyUSB* /dev/ttyACM* /dev/serial0 2>/dev/null || echo "  (none found)"
 fi
 
 #-------------------------------------------------------------------------------
@@ -210,6 +213,7 @@ else
 fi
 
 exit $EXIT_CODE
+
 
 
 

@@ -145,11 +145,12 @@ def detect_port() -> str:
             pass
         return "COM4"
     else:
-        candidates = ["/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyACM0"]
+        # Priority: modbusd > RPi UART > USB adapters
+        candidates = ["/tmp/modbus", "/dev/serial0", "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyACM0"]
         for path in candidates:
             if os.path.exists(path):
                 return path
-        return "/dev/ttyUSB0"
+        return "/tmp/modbus"  # Default to WidgetLords modbusd
 
 
 def scan_all_registers(tlb4: SimpleTLB4) -> dict:
