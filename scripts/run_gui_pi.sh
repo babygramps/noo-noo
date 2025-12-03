@@ -45,7 +45,7 @@ echo ""
 #-------------------------------------------------------------------------------
 DEBUG_MODE=""
 CUSTOM_PORT=""
-CONFIG_FILE="$PROJECT_ROOT/src/epdm_vacuum/config/hardware_config_pi.yaml"
+CONFIG_FILE="$PROJECT_ROOT/src/epdm_vacuum/config/hardware_config.yaml"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
