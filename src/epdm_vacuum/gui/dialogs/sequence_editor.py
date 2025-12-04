@@ -127,7 +127,16 @@ class SequenceEditorDialog(QDialog):
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Enter sequence name...")
         self.name_edit.textChanged.connect(self.on_metadata_changed)
-        layout.addWidget(self.name_edit, 0, 1, 1, 3)
+        layout.addWidget(self.name_edit, 0, 1)
+        
+        # Number of cycles
+        layout.addWidget(QLabel("Cycles:"), 0, 2)
+        self.cycles_spinbox = QSpinBox()
+        self.cycles_spinbox.setRange(1, 999)
+        self.cycles_spinbox.setValue(1)
+        self.cycles_spinbox.setToolTip("Number of times to repeat the full sequence")
+        self.cycles_spinbox.valueChanged.connect(self.on_metadata_changed)
+        layout.addWidget(self.cycles_spinbox, 0, 3)
         
         # Description
         layout.addWidget(QLabel("Description:"), 1, 0, Qt.AlignTop)
@@ -432,6 +441,7 @@ class SequenceEditorDialog(QDialog):
         # Set metadata
         self.name_edit.setText(self.sequence.name)
         self.description_edit.setPlainText(self.sequence.description)
+        self.cycles_spinbox.setValue(self.sequence.cycles)
         
         # Populate stages
         self.refresh_stages_table()
@@ -798,11 +808,16 @@ class SequenceEditorDialog(QDialog):
     
     def update_status(self) -> None:
         """Update status displays."""
+        # Update sequence cycles from UI (for live preview)
+        self.sequence.cycles = self.cycles_spinbox.value()
+        
         # Update duration
         duration = self.sequence.get_estimated_duration()
         minutes = int(duration // 60)
         seconds = int(duration % 60)
-        self.duration_label.setText(f"Total Duration: ~{minutes}m {seconds}s ({len(self.sequence.stages)} stages)")
+        cycles = self.sequence.cycles
+        cycles_str = f" x {cycles} cycles" if cycles > 1 else ""
+        self.duration_label.setText(f"Total Duration: ~{minutes}m {seconds}s ({len(self.sequence.stages)} stages{cycles_str})")
         
         # Build config limits with device roles for validation
         validation_config = dict(self.config_limits) if self.config_limits else {}
@@ -828,6 +843,7 @@ class SequenceEditorDialog(QDialog):
         """Update sequence object from UI fields."""
         self.sequence.name = self.name_edit.text()
         self.sequence.description = self.description_edit.toPlainText()
+        self.sequence.cycles = self.cycles_spinbox.value()
     
     def on_save(self) -> None:
         """Handle save button click."""

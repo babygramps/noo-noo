@@ -415,11 +415,14 @@ class TestSequence:
     Represents a complete test sequence with metadata and stages.
     
     A sequence contains one or more stages that are executed sequentially
-    during a test run.
+    during a test run. The sequence can be repeated for multiple cycles.
     """
     
     name: str
     stages: List[TestStage] = field(default_factory=list)
+    
+    # Cycle control - how many times to repeat the full sequence
+    cycles: int = 1
     
     # Metadata
     description: str = ""
@@ -554,13 +557,13 @@ class TestSequence:
     
     def get_estimated_duration(self) -> float:
         """
-        Get estimated total duration for entire sequence.
+        Get estimated total duration for entire sequence (all cycles).
         
         Returns:
             float: Estimated duration in seconds
         """
-        total = sum(stage.get_estimated_duration() for stage in self.stages)
-        return total
+        single_cycle = sum(stage.get_estimated_duration() for stage in self.stages)
+        return single_cycle * self.cycles
     
     def get_stage_count(self) -> int:
         """Get number of stages in sequence."""
@@ -580,6 +583,7 @@ class TestSequence:
         return {
             "name": self.name,
             "description": self.description,
+            "cycles": self.cycles,
             "created_date": self.created_date,
             "modified_date": self.modified_date,
             "author": self.author,
@@ -607,5 +611,6 @@ class TestSequence:
     
     def __str__(self) -> str:
         """String representation."""
-        return f"TestSequence '{self.name}': {len(self.stages)} stages, ~{self.get_estimated_duration():.0f}s"
+        cycles_str = f" x {self.cycles} cycles" if self.cycles > 1 else ""
+        return f"TestSequence '{self.name}': {len(self.stages)} stages{cycles_str}, ~{self.get_estimated_duration():.0f}s"
 
