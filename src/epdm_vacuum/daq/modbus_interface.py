@@ -520,6 +520,9 @@ class ModbusInterface(HardwareInterface):
         """
         Read a 32-bit value from two consecutive registers.
         
+        Uses minimalmodbus read_long() for reliable 32-bit reads, matching
+        the TLB4 protocol manual's recommended approach.
+        
         Args:
             register: Starting register address (0-based)
             data_format: Data format (INT32, UINT32, FLOAT32)
@@ -530,40 +533,38 @@ class ModbusInterface(HardwareInterface):
         if self.instrument is None:
             raise RuntimeError("Instrument not initialized")
         
-        # Read 2 consecutive 16-bit registers
-        regs = self.instrument.read_registers(register, 2, functioncode=3)
+        import minimalmodbus
         
-        # Combine registers based on word order
-        if self.wordorder == "big":
-            high_word, low_word = regs[0], regs[1]
-        else:
-            low_word, high_word = regs[0], regs[1]
-        
-        # Pack into bytes
+        # Determine byte order for minimalmodbus
         if self.byteorder == "big":
-            raw_bytes = struct.pack('>HH', high_word, low_word)
+            byte_order = minimalmodbus.BYTEORDER_BIG
         else:
-            raw_bytes = struct.pack('<HH', low_word, high_word)
+            byte_order = minimalmodbus.BYTEORDER_LITTLE
         
-        # Unpack based on data format
-        if data_format == DataFormat.INT32:
-            if self.byteorder == "big":
-                return struct.unpack('>i', raw_bytes)[0]
-            else:
-                return struct.unpack('<i', raw_bytes)[0]
-        elif data_format == DataFormat.UINT32:
-            if self.byteorder == "big":
-                return struct.unpack('>I', raw_bytes)[0]
-            else:
-                return struct.unpack('<I', raw_bytes)[0]
+        # Use minimalmodbus read_long for reliable 32-bit reads
+        # This matches the TLB4 protocol manual's recommended approach
+        if data_format in (DataFormat.INT32, DataFormat.UINT32):
+            signed = (data_format == DataFormat.INT32)
+            return self.instrument.read_long(
+                register,
+                functioncode=3,
+                signed=signed,
+                byteorder=byte_order
+            )
         elif data_format == DataFormat.FLOAT32:
-            if self.byteorder == "big":
-                return struct.unpack('>f', raw_bytes)[0]
-            else:
-                return struct.unpack('<f', raw_bytes)[0]
+            return self.instrument.read_float(
+                register,
+                functioncode=3,
+                byteorder=byte_order
+            )
         else:
             # Default to signed 32-bit
-            return struct.unpack('>i', raw_bytes)[0]
+            return self.instrument.read_long(
+                register,
+                functioncode=3,
+                signed=True,
+                byteorder=byte_order
+            )
     
     def _read_16bit_value(
         self,
