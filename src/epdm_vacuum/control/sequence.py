@@ -393,9 +393,17 @@ class TestStage:
         io_actions_data = data.pop("io_actions", [])
         io_actions = [IOAction.from_dict(action_data) for action_data in io_actions_data]
         
-        # Convert pump_mode if it's a string
-        if "pump_mode" in data and isinstance(data["pump_mode"], str):
-            data["pump_mode"] = PumpMode.from_string(data["pump_mode"])
+        # Convert pump_mode if it's not already a PumpMode enum
+        if "pump_mode" in data:
+            pm = data["pump_mode"]
+            if isinstance(pm, str):
+                data["pump_mode"] = PumpMode.from_string(pm)
+            elif isinstance(pm, bool):
+                # Handle legacy boolean: True=continuous, False=off
+                data["pump_mode"] = PumpMode.CONTINUOUS if pm else PumpMode.OFF
+            elif not isinstance(pm, PumpMode):
+                # Unknown type, default to continuous
+                data["pump_mode"] = PumpMode.CONTINUOUS
         
         # Handle legacy fields (for backward compatibility)
         legacy_mappings = {
@@ -461,8 +469,13 @@ class TestSequence:
         
         # Ensure pump_mode is PumpMode enum in all stages
         for stage in self.stages:
-            if isinstance(stage.pump_mode, str):
-                stage.pump_mode = PumpMode.from_string(stage.pump_mode)
+            pm = stage.pump_mode
+            if isinstance(pm, str):
+                stage.pump_mode = PumpMode.from_string(pm)
+            elif isinstance(pm, bool):
+                stage.pump_mode = PumpMode.CONTINUOUS if pm else PumpMode.OFF
+            elif not isinstance(pm, PumpMode):
+                stage.pump_mode = PumpMode.CONTINUOUS
     
     def add_stage(self, stage: TestStage, index: Optional[int] = None) -> None:
         """

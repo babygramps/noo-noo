@@ -497,7 +497,10 @@ class SequenceEditorDialog(QDialog):
         col += 1
         
         # Pump mode
-        pump_str = stage.pump_mode.value.title()
+        if hasattr(stage.pump_mode, 'value'):
+            pump_str = stage.pump_mode.value.title()
+        else:
+            pump_str = str(stage.pump_mode).title()
         item = QTableWidgetItem(pump_str)
         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
         self.stages_table.setItem(row, col, item)
