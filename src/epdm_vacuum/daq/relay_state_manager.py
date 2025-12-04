@@ -91,37 +91,41 @@ class RelayStateManager:
         Returns:
             List of interlock rule dictionaries
         """
+        # IMPORTANT: These valves are NORMALLY-OPEN (NO) type:
+        #   - relay OFF (state=False) → valve PHYSICALLY OPEN
+        #   - relay ON (state=True) → valve PHYSICALLY CLOSED
+        #
+        # So for safety checks, we need to check if relay is OFF (valve open)
         return [
             {
                 "name": "pump_vent_interlock",
-                "description": "Pump cannot run with vent valve open (would pump to atmosphere)",
+                "description": "Pump cannot run with vent valve physically open (would pump to atmosphere)",
                 "condition": lambda states: (
                     states.get("vacuum_pump", False) and 
-                    states.get("vent_valve", False)
+                    not states.get("vent_valve", False)  # vent_valve=False means NO valve is OPEN
                 ),
-                "action": "block",  # Prevent the state change
-                "message": "Cannot run pump with vent valve open - close vent valve first"
+                "action": "block",
+                "message": "Cannot run pump with vent valve open - close vent valve first (click to energize)"
             },
             {
                 "name": "dual_valve_interlock", 
-                "description": "Vacuum and vent valves cannot both be open simultaneously",
+                "description": "Vacuum and vent valves cannot both be physically open simultaneously",
                 "condition": lambda states: (
-                    states.get("vacuum_valve", False) and 
-                    states.get("vent_valve", False)
+                    not states.get("vacuum_valve", False) and  # NO valve OPEN when de-energized
+                    not states.get("vent_valve", False)        # NO valve OPEN when de-energized
                 ),
-                "action": "block",
-                "message": "Cannot open both valves simultaneously - close one first"
+                "action": "warn",  # Just warn, don't block - both open at startup is normal
+                "message": "Warning: Both valves are open"
             },
             {
                 "name": "pump_vacuum_valve_warning",
-                "description": "Pump running without vacuum valve open is ineffective",
+                "description": "Pump running without vacuum valve physically open is ineffective",
                 "condition": lambda states: (
                     states.get("vacuum_pump", False) and 
-                    not states.get("vacuum_valve", False) and
-                    not states.get("vent_valve", False)
+                    states.get("vacuum_valve", False)  # vacuum_valve=True means NO valve is CLOSED (not connected)
                 ),
-                "action": "warn",  # Log warning but allow
-                "message": "Warning: Pump running but vacuum valve is closed"
+                "action": "warn",
+                "message": "Warning: Pump running but vacuum valve is closed (not connected to chamber)"
             },
         ]
     
