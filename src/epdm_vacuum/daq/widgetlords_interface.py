@@ -412,7 +412,7 @@ class AnalogInputModule(SPIModule):
             sense_resistor = float(settings.value("sense_resistor_ohms", 454.0))
             input_value = (raw_value / sense_resistor) * 1000.0  # mA
             if verbose:
-                logger.info(f"  [Span #{self._scale_count}] 4-20mA: {raw_value:.4f}V / {sense_resistor:.1f}Ω = {input_value:.2f}mA")
+                logger.info(f"  [Span #{self._scale_count}] 4-20mA: {raw_value:.4f}V / {sense_resistor:.1f}ohm = {input_value:.2f}mA")
         elif input_type == "0-5V":
             input_value = raw_value
             if verbose:
