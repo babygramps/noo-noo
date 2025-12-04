@@ -259,54 +259,45 @@ class DataAcquisitionThread(QThread):
     
     def _verify_hardware_states(self) -> None:
         """
-        Verify that software relay states match actual hardware states.
+        Verify software state consistency across components.
         
-        HARDWARE STATE READBACK: This is a standard PLC pattern where the
-        control loop periodically reads back output states to verify that
-        commanded states were actually applied. This detects:
-        - Stuck relays
-        - Hardware faults
-        - Software/hardware state desync
+        NOTE: This does NOT read actual hardware state (no DI feedback available).
+        The PI-SPI-DIN-4KO relay module only supports write operations.
         
-        If a mismatch is detected, RelayStateManager is updated to match
-        hardware and a warning is logged.
+        This method just checks that the RelayModule's cached state matches
+        what RelayStateManager has - detecting software bugs, not hardware faults.
+        
+        For true hardware feedback, you would need:
+        - Digital inputs connected to relay auxiliary contacts, OR
+        - Process feedback (e.g., pressure changes when pump runs)
         """
+        # Skip verification if no interface or too frequent
         if not self.widgetlords:
             return
         
+        # Only check every 50 reads (5 seconds at 10Hz) to reduce overhead
+        if self._sensor_read_count % 50 != 0:
+            return
+        
         try:
-            # Read current relay states from hardware interface
-            wl_data = {}
+            # Compare RelayModule cached state with RelayStateManager state
+            # Both are SOFTWARE state - not actual hardware readback
             if hasattr(self.widgetlords, 'relay_modules'):
-                for mod_name, module in self.widgetlords.relay_modules.items():
-                    hardware_states = module.get_all_states()
-                    if hardware_states:
-                        wl_data[mod_name] = hardware_states
-            
-            if wl_data:
-                # Sync with RelayStateManager
                 from ...daq.relay_state_manager import relay_state_manager
+                manager_states = relay_state_manager.get_all_states()
                 
-                # Get software's view of state
-                software_states = relay_state_manager.get_all_states()
-                
-                # Compare and log any mismatches (but don't fix automatically
-                # as the software state is authoritative - hardware may just be slow)
-                for mod_name, channels in wl_data.items():
-                    sw_mod = software_states.get(mod_name, {})
-                    for ch_name, hw_state in channels.items():
-                        sw_state = sw_mod.get(ch_name)
-                        if sw_state is not None and sw_state != hw_state:
-                            # Log mismatch but don't auto-correct
-                            # (hardware readback can be delayed)
-                            if self._sensor_read_count <= 10:
-                                logger.warning(
-                                    f"State mismatch: {mod_name}/{ch_name} "
-                                    f"software={sw_state} hardware={hw_state}"
-                                )
+                for mod_name, module in self.widgetlords.relay_modules.items():
+                    module_states = module.get_all_states()  # Software cache
+                    mgr_mod_states = manager_states.get(mod_name, {})
+                    
+                    for ch_name, mod_state in module_states.items():
+                        mgr_state = mgr_mod_states.get(ch_name)
+                        if mgr_state is not None and mgr_state != mod_state:
+                            logger.warning(
+                                f"SOFTWARE STATE MISMATCH: {mod_name}/{ch_name} "
+                                f"RelayModule={mod_state} RelayStateManager={mgr_state}"
+                            )
                             
         except Exception as e:
-            # Don't fail DAQ loop on state check errors
-            if self._sensor_read_count <= 5:
-                logger.debug(f"Hardware state verification skipped: {e}")
+            logger.debug(f"State consistency check skipped: {e}")
 

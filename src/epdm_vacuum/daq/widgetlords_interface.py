@@ -237,29 +237,37 @@ class RelayModule(SPIModule):
         try:
             # Get channel name for interlock checking
             channel_name = self._get_channel_name(relay)
+            logger.info(f"[RelayModule] write_single: relay={relay}, channel='{channel_name}', state={state}")
             
             # Check interlocks via state manager BEFORE writing to hardware
             if channel_name:
+                logger.info(f"[RelayModule] Calling RelayStateManager.set_state('{self.name}', '{channel_name}', {state})")
                 success, error_msg = self._state_manager.set_state(
                     self.name, channel_name, state, 
                     bypass_interlocks=bypass_interlocks
                 )
                 if not success:
-                    logger.warning(f"Relay write blocked by interlock: {error_msg}")
+                    logger.warning(f"[RelayModule] Relay write blocked by interlock: {error_msg}")
                     return False
+                logger.info(f"[RelayModule] RelayStateManager accepted state change")
             
             # Interlock passed (or no channel name) - write to hardware
             if self._hardware:
+                logger.info(f"[RelayModule] Writing to HARDWARE: relay={relay}, value={1 if state else 0}")
                 self._hardware.write_single(relay, 1 if state else 0)
+            else:
+                logger.info(f"[RelayModule] No hardware (mock mode): relay={relay}, value={1 if state else 0}")
             
             # Update local cache
+            old_cache = self._relay_states[relay]
             self._relay_states[relay] = state
+            logger.info(f"[RelayModule] Local cache updated: relay={relay}, old={old_cache}, new={state}")
             
-            logger.debug(f"Relay module '{self.name}': K{relay+1} = {'ON' if state else 'OFF'}")
+            logger.info(f"[RelayModule] write_single SUCCESS: K{relay+1} = {'ON' if state else 'OFF'}")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to write relay {relay}: {e}")
+            logger.error(f"[RelayModule] Failed to write relay {relay}: {e}", exc_info=True)
             return False
     
     def _get_channel_name(self, relay: int) -> Optional[str]:
@@ -1107,16 +1115,16 @@ class WidgetLordsInterface(HardwareInterface):
         channel_name = str(state_or_channel)
         relay_state = bool(state) if state is not None else False
         
-        logger.info(f"[set_relay] module='{module_name}', channel='{channel_name}', state={relay_state}")
-        logger.info(f"[set_relay] Available relay modules: {list(self.relay_modules.keys())}")
+        logger.info(f"[WLInterface.set_relay] module='{module_name}', channel='{channel_name}', state={relay_state}, raw_state_arg={state}")
+        logger.info(f"[WLInterface.set_relay] Available relay modules: {list(self.relay_modules.keys())}")
         
         if module_name in self.relay_modules:
-            logger.info(f"[set_relay] Found module '{module_name}', calling write_by_name")
+            logger.info(f"[WLInterface.set_relay] Found module '{module_name}', calling write_by_name('{channel_name}', {relay_state})")
             result = self.relay_modules[module_name].write_by_name(channel_name, relay_state)
-            logger.info(f"[set_relay] write_by_name returned: {result}")
+            logger.info(f"[WLInterface.set_relay] write_by_name returned: {result}")
             return result
         
-        logger.warning(f"[set_relay] Relay module '{module_name}' not found in {list(self.relay_modules.keys())}")
+        logger.warning(f"[WLInterface.set_relay] Relay module '{module_name}' not found in {list(self.relay_modules.keys())}")
         return False
     
     def read_analog(self, module_name: str, channel_name: str) -> Optional[float]:

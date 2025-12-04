@@ -155,8 +155,10 @@ class RelayStateManager:
         with self._state_lock:
             if module_name not in self._states:
                 self._states[module_name] = {}
+                logger.info(f"[RSM] Created module entry: {module_name}")
             
             old_state = self._states[module_name].get(channel_name)
+            logger.info(f"[RSM] set_state called: {module_name}/{channel_name} old={old_state} new={state} bypass={bypass_interlocks}")
             
             # Skip interlock check if disabled, bypassed, or turning OFF (always allow off)
             if not bypass_interlocks and self._interlocks_enabled and state:
@@ -172,12 +174,16 @@ class RelayStateManager:
             
             # Apply the state change
             self._states[module_name][channel_name] = state
+            logger.info(f"[RSM] State applied: {module_name}/{channel_name} = {state}")
             
             # Only notify if state actually changed
             if notify and old_state != state:
+                logger.info(f"[RSM] Notifying {len(self._listeners)} listeners (old={old_state} != new={state})")
                 self._notify_listeners(module_name, channel_name, state)
+            else:
+                logger.info(f"[RSM] Skipping notification (old={old_state}, new={state}, notify={notify})")
         
-        logger.debug(f"Relay state set: {module_name}:{channel_name} = {'ON' if state else 'OFF'}")
+        logger.info(f"[RSM] set_state SUCCESS: {module_name}/{channel_name} = {'ON' if state else 'OFF'}")
         return (True, None)
     
     def _get_flat_states_locked(self) -> Dict[str, bool]:

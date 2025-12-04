@@ -53,6 +53,12 @@ class ControlPanel(QWidget):
             "vacuum_valve": False,
         }
         
+        # Pending action flags to prevent callback interference
+        # When a user clicks a button, we set these flags to prevent
+        # the RelayStateManager callback from fighting with the click handler
+        self._pending_pump_action = False
+        self._pending_valve_actions = set()
+        
         self.init_ui()
         self._sync_from_relay_manager()
         logger.info("ControlPanel initialized")
@@ -238,20 +244,41 @@ class ControlPanel(QWidget):
         self.stop_test_requested.emit()
     
     def on_pump_toggle(self) -> None:
-        """Handle pump toggle button click."""
+        """
+        Handle pump toggle button click.
+        
+        Similar to valve handling, uses _pending_pump_action flag to prevent
+        the RelayStateManager callback from interfering with the click handling.
+        """
         self.pump_on = self.pump_btn.isChecked()
         
-        if self.pump_on:
-            self.pump_btn.setText("Pump ON")
-            logger.info("Pump ON requested")
-        else:
-            self.pump_btn.setText("Pump OFF")
-            logger.info("Pump OFF requested")
+        # Update button text immediately for responsive UI
+        self.pump_btn.setText("Pump ON" if self.pump_on else "Pump OFF")
+        logger.info(f"[ControlPanel] Pump {'ON' if self.pump_on else 'OFF'} requested")
         
+        # Mark pending action to prevent callback interference
+        self._pending_pump_action = True
+        
+        # Emit signal to request hardware change
         self.pump_control_requested.emit(self.pump_on)
+        
+        # Clear pending flag
+        self._pending_pump_action = False
+        logger.info(f"[ControlPanel] Pump action complete")
     
     def on_valve_toggle(self, valve_name: str) -> None:
-        """Handle valve toggle button click."""
+        """
+        Handle valve toggle button click.
+        
+        NOTE: This is called when the user physically clicks the button.
+        The button's checked state has ALREADY been toggled by Qt before
+        this handler is called. We read the new state and emit a signal
+        to request the hardware change.
+        
+        The RelayStateManager callback (on_relay_state_changed) will be
+        called during the hardware write, but we use _pending_valve_action
+        to prevent it from fighting with this handler.
+        """
         logger.info(f"[ControlPanel] on_valve_toggle called for: {valve_name}")
         
         if valve_name == "vacuum_valve":
@@ -264,19 +291,24 @@ class ControlPanel(QWidget):
         
         state = btn.isChecked()
         self.valve_states[valve_name] = state
-        logger.info(f"[ControlPanel] {valve_name} button checked={state}")
+        logger.info(f"[ControlPanel] {valve_name} button checked={state}, requesting hardware change")
         
-        # Update button text
+        # Update button text immediately for responsive UI
         valve_label = valve_name.replace("_", " ").title()
-        if state:
-            btn.setText(f"{valve_label}\nOPEN")
-            logger.info(f"[ControlPanel] {valve_name} OPEN requested - emitting signal")
-        else:
-            btn.setText(f"{valve_label}\nCLOSED")
-            logger.info(f"[ControlPanel] {valve_name} CLOSED requested - emitting signal")
+        btn.setText(f"{valve_label}\n{'OPEN' if state else 'CLOSED'}")
         
+        # Mark that we're handling this valve action (prevents callback interference)
+        if not hasattr(self, '_pending_valve_actions'):
+            self._pending_valve_actions = set()
+        self._pending_valve_actions.add(valve_name)
+        
+        # Emit signal to request hardware change
+        logger.info(f"[ControlPanel] Emitting valve_control_requested({valve_name}, {state})")
         self.valve_control_requested.emit(valve_name, state)
-        logger.info(f"[ControlPanel] Signal emitted for {valve_name}={state}")
+        
+        # Clear pending flag after signal handling completes
+        self._pending_valve_actions.discard(valve_name)
+        logger.info(f"[ControlPanel] Valve action complete for {valve_name}")
     
     def on_tare(self) -> None:
         """Handle tare button click."""
@@ -356,13 +388,30 @@ class ControlPanel(QWidget):
     
     def on_relay_state_changed(self, module_name: str, channel_name: str, state: bool) -> None:
         """
-        Handle relay state change from global manager.
+        Handle relay state change from global RelayStateManager.
+        
+        This callback is triggered when ANY component changes relay state,
+        including this ControlPanel's own button clicks. We need to avoid
+        interfering with in-progress user actions.
         
         Args:
             module_name: Name of the relay module
             channel_name: Name of the channel/device
             state: New state (True = ON/OPEN)
         """
+        # Check if this is from our own pending action (avoid feedback loop)
+        pending = getattr(self, '_pending_valve_actions', set())
+        if channel_name in pending:
+            logger.debug(f"[ControlPanel] Ignoring callback for {channel_name} - pending user action")
+            return
+        
+        pending_pump = getattr(self, '_pending_pump_action', False)
+        if channel_name == "vacuum_pump" and pending_pump:
+            logger.debug(f"[ControlPanel] Ignoring callback for pump - pending user action")
+            return
+        
+        logger.debug(f"[ControlPanel] on_relay_state_changed: {channel_name} -> {state}")
+        
         if channel_name == "vacuum_pump":
             self.set_pump_state(state)
         elif channel_name in ["vacuum_valve", "vent_valve"]:
