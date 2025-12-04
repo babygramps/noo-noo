@@ -689,7 +689,13 @@ class TestController:
         logger.info(f"  Executing {len(actions)} I/O action(s) at timing: {timing.value}")
         
         for i, action in enumerate(actions, 1):
-            logger.info(f"    [{i}/{len(actions)}] {action.device_name}: {'OPEN' if action.value else 'CLOSED'}")
+            # Log the DESIRED state (what the sequence wants)
+            is_valve = "valve" in action.device_name.lower()
+            if is_valve:
+                state_str = "OPEN" if action.value else "CLOSED"
+            else:
+                state_str = "ON" if action.value else "OFF"
+            logger.info(f"    [{i}/{len(actions)}] {action.device_name}: {state_str} (desired)")
             self._execute_single_io_action(action)
     
     def _execute_single_io_action(self, action: IOAction) -> None:
@@ -699,6 +705,11 @@ class TestController:
         STATE MANAGEMENT: The _set_digital_output method updates the global
         RelayStateManager, which is the single source of truth for all relay states.
         The IO callback is then fired to notify listeners (GUI, etc.).
+        
+        VALVE LOGIC: Valves are NORMALLY-OPEN (NO) type, so the relay state is
+        INVERTED from the desired physical state:
+            - Sequence says "OPEN" (value=True) → relay OFF (False) → valve physically OPEN
+            - Sequence says "CLOSED" (value=False) → relay ON (True) → valve physically CLOSED
         
         Args:
             action: IOAction to execute
@@ -713,18 +724,33 @@ class TestController:
             
             # Execute based on action type
             if action.action_type == IOActionType.DIGITAL_OUTPUT:
-                state = bool(action.value)
-                logger.info(f"[IO_ACTION] Calling _set_digital_output('{action.device_name}', {state})")
-                success = self._set_digital_output(action.device_name, state)
+                desired_state = bool(action.value)
+                
+                # VALVE INVERSION: Valves are NORMALLY-OPEN (NO) type
+                # - To physically OPEN a NO valve, de-energize relay (False)
+                # - To physically CLOSE a NO valve, energize relay (True)
+                # In sequences: value=True means "I want it OPEN", value=False means "I want it CLOSED"
+                # So for valves, we INVERT: relay_state = NOT desired_state
+                is_valve = "valve" in action.device_name.lower()
+                
+                if is_valve:
+                    relay_state = not desired_state  # Invert for NO valves
+                    logger.info(f"[IO_ACTION] VALVE '{action.device_name}': desired={desired_state} (OPEN={desired_state}), relay_state={relay_state} (inverted for NO valve)")
+                else:
+                    relay_state = desired_state  # Non-valves: state = relay state directly
+                    logger.info(f"[IO_ACTION] OUTPUT '{action.device_name}': state={relay_state}")
+                
+                success = self._set_digital_output(action.device_name, relay_state)
                 logger.info(f"[IO_ACTION] _set_digital_output returned: {success}")
                 
                 # NOTE: State is now tracked by RelayStateManager (SSOT)
                 # The _set_digital_output method updates RelayStateManager
                 
-                # Notify IO callback (GUI thread listening)
+                # Notify IO callback with RELAY state (not desired state)
+                # The UI correctly interprets relay state for NO valves
                 if self.io_callback:
-                    logger.info(f"[IO_ACTION] Notifying IO callback: {action.device_name} = {state}")
-                    self.io_callback(action.device_name, state)
+                    logger.info(f"[IO_ACTION] Notifying IO callback: {action.device_name} = {relay_state}")
+                    self.io_callback(action.device_name, relay_state)
                 else:
                     logger.warning(f"[IO_ACTION] No IO callback registered!")
             
@@ -732,19 +758,25 @@ class TestController:
                 self._set_analog_output(action.device_name, float(action.value))
             
             elif action.action_type == IOActionType.PULSE:
-                # Turn on
-                self._set_digital_output(action.device_name, True)
+                # PULSE: Turn on, wait, turn off
+                # For valves (NO type): "on" means physically OPEN (relay OFF), "off" means physically CLOSED (relay ON)
+                is_valve = "valve" in action.device_name.lower()
+                
+                # Turn on (for valves: OPEN = relay OFF)
+                relay_on = False if is_valve else True
+                self._set_digital_output(action.device_name, relay_on)
                 if self.io_callback:
-                    self.io_callback(action.device_name, True)
+                    self.io_callback(action.device_name, relay_on)
                 
                 # Wait for duration
                 if action.duration_seconds:
                     time.sleep(action.duration_seconds)
                 
-                # Turn off
-                self._set_digital_output(action.device_name, False)
+                # Turn off (for valves: CLOSED = relay ON)
+                relay_off = True if is_valve else False
+                self._set_digital_output(action.device_name, relay_off)
                 if self.io_callback:
-                    self.io_callback(action.device_name, False)
+                    self.io_callback(action.device_name, relay_off)
             
         except Exception as e:
             logger.error(f"Error executing I/O action {action}: {e}", exc_info=True)

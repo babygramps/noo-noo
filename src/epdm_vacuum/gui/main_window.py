@@ -869,11 +869,16 @@ class MainWindow(QMainWindow):
         allowing state changes. If a change would create a dangerous condition
         (e.g., pump running with vent open), it is blocked and the user is notified.
         
+        VALVE TYPE: Valves are NORMALLY-OPEN (NO) type:
+            - state=True (relay energized) → valve physically CLOSED
+            - state=False (relay de-energized) → valve physically OPEN
+        
         Args:
             valve_name: Name of the valve (e.g., "vacuum_valve", "vent_valve")
-            state: True to open valve, False to close
+            state: Relay state - True=energized (CLOSED), False=de-energized (OPEN)
         """
-        state_str = "OPEN" if state else "CLOSED"
+        # For NO valves: True (energized) = CLOSED, False (de-energized) = OPEN
+        state_str = "CLOSED" if state else "OPEN"
         logger.info(f"[MainWindow] on_valve_control received: {valve_name} -> {state_str}")
         
         # Control valve via WidgetLords interface
