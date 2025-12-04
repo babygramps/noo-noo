@@ -553,10 +553,14 @@ class MainWindow(QMainWindow):
         
         # Initialize WidgetLords interface if enabled
         widgetlords_config = settings.get("hardware", "widgetlords", default={})
+        logger.info(f"[init_hardware] WidgetLords config: enabled={widgetlords_config.get('enabled')}")
         if widgetlords_config.get("enabled", False):
             try:
                 # Pass SPI modules configuration to the interface
                 spi_modules = widgetlords_config.get("spi_modules", [])
+                logger.info(f"[init_hardware] SPI modules from config: {len(spi_modules)} modules")
+                for i, mod in enumerate(spi_modules):
+                    logger.info(f"[init_hardware]   Module {i}: {mod.get('name')}, channels: {len(mod.get('channels', []))}")
                 widgetlords_iface = WidgetLordsInterface(spi_modules_config=spi_modules)
                 widgetlords_iface.connect()
                 logger.info(f"WidgetLords interface initialized with {len(spi_modules)} SPI module(s)")

@@ -247,8 +247,12 @@ class RelayModule(SPIModule):
         Returns:
             bool: True if successful
         """
+        available_channels = [(ch.name, ch.channel, ch.enabled) for ch in self.channels]
+        logger.info(f"[write_by_name] Looking for '{channel_name}' in channels: {available_channels}")
+        
         for ch in self.channels:
             if ch.name == channel_name and ch.enabled:
+                logger.info(f"[write_by_name] Found channel '{channel_name}' at index {ch.channel}")
                 return self.write_single(ch.channel, state)
         
         logger.warning(f"Channel '{channel_name}' not found in relay module '{self.name}'")
@@ -772,6 +776,9 @@ class WidgetLordsInterface(HardwareInterface):
     def _create_module(self, config: Dict) -> Optional[SPIModule]:
         """Create a module instance from config."""
         try:
+            logger.info(f"[_create_module] Creating module from config: {config.get('name')}")
+            logger.info(f"[_create_module] Raw channels in config: {config.get('channels', [])}")
+            
             # Parse channels
             channels = []
             for ch_cfg in config.get("channels", []):
@@ -793,6 +800,7 @@ class WidgetLordsInterface(HardwareInterface):
                     inverted=ch_cfg.get("inverted", False),
                 )
                 channels.append(ch_config)
+                logger.info(f"[_create_module] Added channel: {ch_config.name} (ch={ch_config.channel}, enabled={ch_config.enabled})")
                 logger.debug(f"Parsed channel config: ch={ch_config.channel}, name={ch_config.name}, "
                            f"input_type={ch_config.input_type}, low={ch_config.low_input}->{ch_config.low_output}, "
                            f"high={ch_config.high_input}->{ch_config.high_output}, units={ch_config.units}")
