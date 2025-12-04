@@ -561,20 +561,32 @@ class TestController:
     
     def _control_pump(self, state: bool) -> None:
         """
-        Control vacuum pump state.
+        Control vacuum pump state via relay.
         
         Args:
             state: True for ON, False for OFF
         """
-        logger.info(f"Setting pump to {'ON' if state else 'OFF'}")
+        logger.info(f"[PUMP] Setting pump to {'ON' if state else 'OFF'}")
         
-        if self.pump:
-            # TODO: Use pump controller
-            # self.pump.set_pump_state(state)
-            pass
-        elif self.widgetlords:
-            # Direct control via WidgetLords
-            self.widgetlords.write({"pump": state})
+        if self.widgetlords:
+            # Control pump via relay module
+            try:
+                success = self.widgetlords.set_relay("relay_module", "vacuum_pump", state)
+                if success:
+                    logger.info(f"[PUMP] Pump {'ON' if state else 'OFF'} - SUCCESS")
+                else:
+                    logger.warning(f"[PUMP] Pump {'ON' if state else 'OFF'} - FAILED (set_relay returned False)")
+            except Exception as e:
+                logger.error(f"[PUMP] Failed to control pump: {e}")
+        elif self.pump:
+            # Use pump controller if available
+            try:
+                self.pump.set_pump_state(state)
+                logger.info(f"[PUMP] Pump {'ON' if state else 'OFF'} via pump controller")
+            except Exception as e:
+                logger.error(f"[PUMP] Pump controller error: {e}")
+        else:
+            logger.warning("[PUMP] No pump control available (no widgetlords or pump controller)")
         
         time.sleep(0.5)
     
