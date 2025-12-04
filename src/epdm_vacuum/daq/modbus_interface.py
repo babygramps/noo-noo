@@ -16,6 +16,7 @@ Device Configuration (must be set manually on TLB4):
 
 from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass, field
+from collections import deque
 from enum import Enum
 import logging
 import struct
@@ -189,6 +190,9 @@ class ModbusInterface(HardwareInterface):
         
         # Software tare offsets for individual channels (TLB4 only tares total, not channels)
         self._channel_tare_offsets: List[float] = [0.0, 0.0, 0.0, 0.0]
+        
+        # Moving average buffers for smoothing channel readings (10 samples = ~1 sec at 10Hz)
+        self._channel_buffers: List[deque] = [deque(maxlen=10) for _ in range(4)]
         
         # Log configuration for troubleshooting
         if self.debug:
@@ -410,15 +414,21 @@ class ModbusInterface(HardwareInterface):
                     raw_value = self._read_value(reg, ch_cfg.data_format)
                     result[f"load_cell_{i}_raw"] = raw_value
                     
-                    # Simple conversion: kg = raw / kg_per_division
-                    kg_value = ch_cfg.raw_to_kg(raw_value, cfg.kg_per_division)
+                    # Add to moving average buffer for smoothing
+                    self._channel_buffers[i - 1].append(raw_value)
+                    
+                    # Use averaged raw value for stable readings
+                    avg_raw = sum(self._channel_buffers[i - 1]) / len(self._channel_buffers[i - 1])
+                    
+                    # Simple conversion: kg = avg_raw / kg_per_division
+                    kg_value = ch_cfg.raw_to_kg(avg_raw, cfg.kg_per_division)
                     
                     # Apply software tare offset
                     kg_value -= self._channel_tare_offsets[i - 1]
                     result[f"load_cell_{i}_kg"] = kg_value
                     
                     if debug_this_read:
-                        logger.info(f"  CH{i} @ reg {reg}: raw={raw_value}, kg={kg_value:.3f}")
+                        logger.info(f"  CH{i} @ reg {reg}: raw={raw_value}, avg={avg_raw:.0f}, kg={kg_value:.3f}")
                 else:
                     result[f"load_cell_{i}_raw"] = 0
                     result[f"load_cell_{i}_kg"] = 0.0
@@ -815,11 +825,17 @@ class ModbusInterface(HardwareInterface):
                 for i, (reg, ch_cfg) in enumerate(zip(channel_regs, cfg.channels)):
                     try:
                         if ch_cfg.enabled:
-                            raw_value = self._read_value(reg, ch_cfg.data_format)
+                            # Use averaged value from buffer for stable tare
+                            if len(self._channel_buffers[i]) > 0:
+                                avg_raw = sum(self._channel_buffers[i]) / len(self._channel_buffers[i])
+                            else:
+                                # Buffer empty, read current value
+                                avg_raw = self._read_value(reg, ch_cfg.data_format)
+                            
                             # Convert to kg using simple scaling
-                            kg_value = ch_cfg.raw_to_kg(raw_value, cfg.kg_per_division)
+                            kg_value = ch_cfg.raw_to_kg(avg_raw, cfg.kg_per_division)
                             self._channel_tare_offsets[i] = kg_value
-                            logger.info(f"Channel {i+1} tare offset: {kg_value:.3f} kg (raw={raw_value})")
+                            logger.info(f"Channel {i+1} tare offset: {kg_value:.3f} kg (avg_raw={avg_raw:.0f})")
                     except Exception as e:
                         logger.warning(f"Failed to capture channel {i+1} tare offset: {e}")
                         self._channel_tare_offsets[i] = 0.0
