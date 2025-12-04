@@ -10,7 +10,7 @@ stages:
     target_vacuum_bar: 0.3
     max_time_seconds: 120.0
     min_time_seconds: 5.0
-    pump_mode: maintain
+    pump_mode: continuous
     vacuum_tolerance_bar: 0.02
     collect_data: true
     io_actions:
