@@ -812,7 +812,7 @@ class ModbusInterface(HardwareInterface):
         try:
             logger.info("Executing Software Tare on load cells...")
             
-            # Capture current channel values for software tare
+            # Hold lock for ENTIRE tare operation to prevent DAQ thread collision
             with self._lock:
                 cfg = self.tlb4_config
                 channel_regs = [
@@ -839,13 +839,13 @@ class ModbusInterface(HardwareInterface):
                     except Exception as e:
                         logger.warning(f"Failed to capture channel {i+1} tare offset: {e}")
                         self._channel_tare_offsets[i] = 0.0
-            
-            logger.info(f"Software tare offsets: {[f'{x:.3f}' for x in self._channel_tare_offsets]}")
-            
-            # Also send hardware tare to TLB4 for gross/net weight
-            time.sleep(0.1)
-            self._write_command(self.CMD_TARE)
-            
+                
+                logger.info(f"Software tare offsets: {[f'{x:.3f}' for x in self._channel_tare_offsets]}")
+                
+                # Send hardware tare to TLB4 (inside lock to prevent collision)
+                time.sleep(0.05)
+                self.instrument.write_registers(self.TLB4_COMMAND_REGISTER, [self.CMD_TARE])
+                
             logger.info("Tare complete")
             return True
             
@@ -1523,3 +1523,40 @@ class ModbusInterface(HardwareInterface):
         
         self.tlb4_config.kg_per_division = value
         logger.info(f"kg_per_division set to {value}")
+    
+    def get_channel_raw_value(self, channel: int) -> Tuple[bool, int, str]:
+        """
+        Get the current raw Modbus value for a specific channel.
+        
+        Uses the moving average buffer for a stable reading.
+        
+        Args:
+            channel: Channel number (1-4)
+            
+        Returns:
+            Tuple[bool, int, str]: (success, raw_value, message)
+        """
+        try:
+            if not self.initialized or self.instrument is None:
+                return False, 0, "Modbus interface not connected"
+            
+            if channel < 1 or channel > 4:
+                return False, 0, f"Invalid channel {channel} (must be 1-4)"
+            
+            cfg = self.tlb4_config
+            ch_cfg = cfg.channels[channel - 1]
+            
+            if not ch_cfg.enabled:
+                return False, 0, f"Channel {channel} is disabled"
+            
+            # Use averaged value from buffer for stable reading
+            if len(self._channel_buffers[channel - 1]) > 0:
+                avg_raw = sum(self._channel_buffers[channel - 1]) / len(self._channel_buffers[channel - 1])
+                return True, int(avg_raw), f"Averaged raw value: {int(avg_raw)}"
+            else:
+                return False, 0, "No data in buffer yet"
+            
+        except Exception as e:
+            error_msg = f"Failed to read channel {channel}: {e}"
+            logger.error(error_msg)
+            return False, 0, error_msg
