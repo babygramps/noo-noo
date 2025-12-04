@@ -755,11 +755,17 @@ class ModbusInterface(HardwareInterface):
         
         # Use lock to prevent collision with DAQ reads
         with self._lock:
+            # Flush serial buffers before writing to prevent checksum errors
+            if hasattr(self.instrument, 'serial') and self.instrument.serial:
+                self.instrument.serial.reset_input_buffer()
+                self.instrument.serial.reset_output_buffer()
+            
+            time.sleep(0.02)  # Brief delay after flush
+            
             # TLB4 only supports Function 16 (Write Multiple Registers)
-            # Use write_registers() which uses FC16 by default
             self.instrument.write_registers(
                 self.TLB4_COMMAND_REGISTER,
-                [command]  # List of values to write
+                [command]
             )
         return True
     
@@ -842,8 +848,15 @@ class ModbusInterface(HardwareInterface):
                 
                 logger.info(f"Software tare offsets: {[f'{x:.3f}' for x in self._channel_tare_offsets]}")
                 
-                # Send hardware tare to TLB4 (inside lock to prevent collision)
+                # Flush serial buffers before writing to prevent checksum errors
+                # from leftover read data in the buffer
+                if hasattr(self.instrument, 'serial') and self.instrument.serial:
+                    self.instrument.serial.reset_input_buffer()
+                    self.instrument.serial.reset_output_buffer()
+                
                 time.sleep(0.05)
+                
+                # Send hardware tare to TLB4
                 self.instrument.write_registers(self.TLB4_COMMAND_REGISTER, [self.CMD_TARE])
                 
             logger.info("Tare complete")
