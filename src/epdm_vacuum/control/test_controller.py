@@ -242,43 +242,63 @@ class TestController:
         if not self.current_sequence:
             return False
         
-        logger.info(f"Executing sequence '{self.current_sequence.name}' with {len(self.current_sequence.stages)} stages")
+        total_cycles = getattr(self.current_sequence, 'cycles', 1) or 1
+        stages_per_cycle = len(self.current_sequence.stages)
+        total_stages = stages_per_cycle * total_cycles
         
-        total_stages = len(self.current_sequence.stages)
+        logger.info(f"Executing sequence '{self.current_sequence.name}' with {stages_per_cycle} stages x {total_cycles} cycles = {total_stages} total stages")
         
-        for stage_index, stage in enumerate(self.current_sequence.stages):
-            if self.state != TestState.RUNNING:
-                logger.warning("Test stopped during sequence execution")
-                return False
-            
-            self.current_stage_index = stage_index
-            stage_name = stage.name or f"Stage {stage_index + 1}"
-            
-            # Enhanced logging with formatted output
-            logger.info("=" * 60)
-            logger.info(f"[STAGE {stage_index + 1}/{total_stages}] {stage_name} - STARTED")
-            logger.info(f"  Target Vacuum: {stage.target_vacuum_bar:.3f} bar" if stage.target_vacuum_bar else "  Target Vacuum: None")
-            logger.info(f"  Time Limit: {stage.max_time_seconds:.1f}s" if stage.max_time_seconds else "  Time Limit: None")
-            logger.info(f"  Pump Mode: {stage.pump_mode.value}")
-            logger.info(f"  IO Actions: {len(stage.io_actions)}")
-            logger.info("=" * 60)
-            
-            self._update_status(f"Stage {stage_index + 1}/{total_stages}: {stage_name}")
-            
-            # Notify stage change
-            if self.stage_callback:
-                self.stage_callback(stage_index, total_stages, stage)
-            
-            # Execute the stage
-            stage_success = self._execute_stage(stage)
-            
-            if not stage_success:
-                logger.error(f"[STAGE {stage_index + 1}/{total_stages}] {stage_name} - FAILED")
-                return False
-            
-            logger.info(f"[STAGE {stage_index + 1}/{total_stages}] {stage_name} - COMPLETED SUCCESSFULLY")
+        global_stage_index = 0
         
-        logger.info(f"Sequence '{self.current_sequence.name}' completed successfully")
+        for cycle in range(total_cycles):
+            if total_cycles > 1:
+                logger.info("#" * 60)
+                logger.info(f"### CYCLE {cycle + 1}/{total_cycles} ###")
+                logger.info("#" * 60)
+            
+            for stage_index, stage in enumerate(self.current_sequence.stages):
+                if self.state != TestState.RUNNING:
+                    logger.warning("Test stopped during sequence execution")
+                    return False
+                
+                self.current_stage_index = global_stage_index
+                stage_name = stage.name or f"Stage {stage_index + 1}"
+                
+                # Enhanced logging with formatted output
+                logger.info("=" * 60)
+                if total_cycles > 1:
+                    logger.info(f"[CYCLE {cycle + 1}/{total_cycles}] [STAGE {stage_index + 1}/{stages_per_cycle}] {stage_name} - STARTED")
+                else:
+                    logger.info(f"[STAGE {stage_index + 1}/{stages_per_cycle}] {stage_name} - STARTED")
+                logger.info(f"  Target Vacuum: {stage.target_vacuum_bar:.3f} bar" if stage.target_vacuum_bar else "  Target Vacuum: None")
+                logger.info(f"  Time Limit: {stage.max_time_seconds:.1f}s" if stage.max_time_seconds else "  Time Limit: None")
+                logger.info(f"  Pump Mode: {stage.pump_mode.value}")
+                logger.info(f"  IO Actions: {len(stage.io_actions)}")
+                logger.info("=" * 60)
+                
+                if total_cycles > 1:
+                    self._update_status(f"Cycle {cycle + 1}/{total_cycles} - Stage {stage_index + 1}/{stages_per_cycle}: {stage_name}")
+                else:
+                    self._update_status(f"Stage {stage_index + 1}/{stages_per_cycle}: {stage_name}")
+                
+                # Notify stage change (use global index for progress tracking)
+                if self.stage_callback:
+                    self.stage_callback(global_stage_index, total_stages, stage)
+                
+                # Execute the stage
+                stage_success = self._execute_stage(stage)
+                
+                if not stage_success:
+                    logger.error(f"[STAGE {global_stage_index + 1}/{total_stages}] {stage_name} - FAILED")
+                    return False
+                
+                logger.info(f"[STAGE {global_stage_index + 1}/{total_stages}] {stage_name} - COMPLETED SUCCESSFULLY")
+                global_stage_index += 1
+            
+            if total_cycles > 1:
+                logger.info(f"### CYCLE {cycle + 1}/{total_cycles} COMPLETED ###")
+        
+        logger.info(f"Sequence '{self.current_sequence.name}' completed successfully ({total_cycles} cycles)")
         return True
     
     def _run_single_test(self) -> bool:
