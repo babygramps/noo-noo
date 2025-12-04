@@ -192,7 +192,8 @@ class TestStage:
         Validate stage parameters against safety limits.
         
         Args:
-            config_limits: Dictionary with safety limits from config
+            config_limits: Dictionary with safety limits from config.
+                          Can include 'io_device_roles' dict mapping device names to roles.
         
         Returns:
             Tuple of (is_valid, list_of_error_messages, list_of_warnings)
@@ -245,39 +246,71 @@ class TestStage:
                     errors.append(f"I/O Action {i+1}: {error}")
         
         # Check for recommended I/O actions (warnings, not errors)
-        if self.target_vacuum_bar is not None and self.target_vacuum_bar > 0.0:  # Only for vacuum stages
-            # Check if vacuum valve is open (needed to connect pump to chamber)
+        # Only check for vacuum stages
+        if self.target_vacuum_bar is not None and self.target_vacuum_bar > 0.0:
+            # Get device roles from config if provided, otherwise use name-based detection
+            io_device_roles = config_limits.get("io_device_roles", {}) if config_limits else {}
+            
+            # Build sets of device names by role
+            vacuum_valve_names = set()
+            vent_valve_names = set()
+            
+            # If roles provided in config, use them
+            if io_device_roles:
+                for device_name, role in io_device_roles.items():
+                    if role == "vacuum_valve":
+                        vacuum_valve_names.add(device_name)
+                    elif role == "vent_valve":
+                        vent_valve_names.add(device_name)
+            else:
+                # Fallback: detect roles from device names
+                for action in self.io_actions:
+                    name_lower = action.device_name.lower()
+                    if "vacuum" in name_lower and "valve" in name_lower:
+                        vacuum_valve_names.add(action.device_name)
+                    elif "vent" in name_lower:
+                        vent_valve_names.add(action.device_name)
+                # Also add common names as defaults if no actions defined them
+                if not vacuum_valve_names:
+                    vacuum_valve_names.add("vacuum_valve")
+                if not vent_valve_names:
+                    vent_valve_names.add("vent_valve")
+            
+            # Check if any vacuum valve is opened at start (needed to connect pump to chamber)
             has_vacuum_valve_open = any(
-                action.device_name == "vacuum_valve" and 
+                action.device_name in vacuum_valve_names and 
                 action.value == True and
                 action.timing in (IOActionTiming.BEFORE_STAGE, IOActionTiming.START_OF_STAGE)
                 for action in self.io_actions
             )
             
-            if not has_vacuum_valve_open:
-                warnings.append("⚠️ No I/O action opens 'vacuum_valve' - pump won't connect to chamber")
+            if not has_vacuum_valve_open and vacuum_valve_names:
+                valve_names = ", ".join(sorted(vacuum_valve_names))
+                warnings.append(f"⚠️ No I/O action opens vacuum valve ({valve_names}) - pump won't connect to chamber")
             
-            # Check if vent valve is being closed during vacuum
+            # Check if any vent valve is closed during vacuum
             has_vent_close = any(
-                action.device_name == "vent_valve" and 
+                action.device_name in vent_valve_names and 
                 action.value == False and
                 action.timing in (IOActionTiming.BEFORE_STAGE, IOActionTiming.START_OF_STAGE)
                 for action in self.io_actions
             )
             
-            if not has_vent_close:
-                warnings.append("⚠️ No I/O action closes 'vent_valve' - vacuum will leak to atmosphere")
+            if not has_vent_close and vent_valve_names:
+                valve_names = ", ".join(sorted(vent_valve_names))
+                warnings.append(f"⚠️ No I/O action closes vent valve ({valve_names}) - vacuum will leak to atmosphere")
             
             # Check if vent valve opens at end
             has_vent_open = any(
-                action.device_name == "vent_valve" and 
+                action.device_name in vent_valve_names and 
                 action.value == True and
                 action.timing in (IOActionTiming.END_OF_STAGE, IOActionTiming.AFTER_STAGE)
                 for action in self.io_actions
             )
             
-            if not has_vent_open:
-                warnings.append("ℹ️ Consider adding I/O action to open 'vent_valve' at end of stage")
+            if not has_vent_open and vent_valve_names:
+                valve_names = ", ".join(sorted(vent_valve_names))
+                warnings.append(f"ℹ️ Consider adding I/O action to open vent valve ({valve_names}) at end of stage")
         
         is_valid = len(errors) == 0
         return is_valid, errors, warnings

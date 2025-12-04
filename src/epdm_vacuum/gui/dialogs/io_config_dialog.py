@@ -1230,8 +1230,8 @@ class IOConfigDialog(QDialog):
         
         # Device table
         self.device_table = QTableWidget()
-        self.device_table.setColumnCount(5)
-        self.device_table.setHorizontalHeaderLabels(["Name", "Type", "Channel", "I/O", "Description"])
+        self.device_table.setColumnCount(6)
+        self.device_table.setHorizontalHeaderLabels(["Name", "Type", "Channel", "I/O", "Role", "Description"])
         self.device_table.horizontalHeader().setStretchLastSection(True)
         self.device_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.device_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -1310,6 +1310,23 @@ class IOConfigDialog(QDialog):
         self.default_state_check = QCheckBox("ON/OPEN by default")
         self.default_state_check.stateChanged.connect(self.on_form_changed)
         form.addRow("Default State:", self.default_state_check)
+        
+        # Device Role (for sequencing defaults and validation)
+        self.device_role_combo = QComboBox()
+        self.device_role_combo.addItems([
+            "generic",        # No special handling
+            "vacuum_pump",    # Main vacuum pump (controlled automatically)
+            "vacuum_valve",   # Valve between pump and chamber
+            "vent_valve",     # Valve to atmosphere
+        ])
+        self.device_role_combo.setToolTip(
+            "Device role determines automatic defaults in test sequences:\n"
+            "• vacuum_pump: Controlled automatically by pump mode\n"
+            "• vacuum_valve: Opens at stage start\n"
+            "• vent_valve: Closes at start, opens at end"
+        )
+        self.device_role_combo.currentTextChanged.connect(self.on_form_changed)
+        form.addRow("Device Role:", self.device_role_combo)
         
         # Analog-specific settings
         self.analog_settings_group = QGroupBox("Analog Settings")
@@ -1545,9 +1562,13 @@ class IOConfigDialog(QDialog):
             io_str = "Output" if io_type == "output" else "Input"
             self.device_table.setItem(row, 3, QTableWidgetItem(io_str))
             
+            # Device Role
+            role = device.get('device_role', 'generic')
+            self.device_table.setItem(row, 4, QTableWidgetItem(role))
+            
             # Description
             desc = device.get('description', '')
-            self.device_table.setItem(row, 4, QTableWidgetItem(desc))
+            self.device_table.setItem(row, 5, QTableWidgetItem(desc))
     
     def on_device_selected(self) -> None:
         """Handle device selection in table."""
@@ -1589,6 +1610,14 @@ class IOConfigDialog(QDialog):
         default_state = device.get('default_state', False)
         self.default_state_check.setChecked(default_state)
         
+        # Device role (for sequencing)
+        device_role = device.get('device_role', 'generic')
+        index = self.device_role_combo.findText(device_role)
+        if index >= 0:
+            self.device_role_combo.setCurrentIndex(index)
+        else:
+            self.device_role_combo.setCurrentText('generic')
+        
         # Analog settings
         if device_type == 'analog':
             self.min_value_spin.setValue(int(device.get('min_value', 0)))
@@ -1601,6 +1630,7 @@ class IOConfigDialog(QDialog):
         self.channel_spin.setValue(0)
         self.type_combo.setCurrentIndex(0)
         self.default_state_check.setChecked(False)
+        self.device_role_combo.setCurrentText('generic')
         self.min_value_spin.setValue(0)
         self.max_value_spin.setValue(10)
         self.current_edit_index = None
@@ -1636,6 +1666,7 @@ class IOConfigDialog(QDialog):
             'channel': self.channel_spin.value(),
             'device_type': device_type,
             'io_type': io_type,
+            'device_role': self.device_role_combo.currentText(),
         }
         
         if io_type == 'output':
@@ -1648,10 +1679,10 @@ class IOConfigDialog(QDialog):
         # Update or add
         if self.current_edit_index is not None:
             self.io_devices[self.current_edit_index] = device
-            logger.info(f"Updated device: {name}")
+            logger.info(f"Updated device: {name} (role: {device['device_role']})")
         else:
             self.io_devices.append(device)
-            logger.info(f"Added device: {name}")
+            logger.info(f"Added device: {name} (role: {device['device_role']})")
         
         self.refresh_table()
         self.clear_form()

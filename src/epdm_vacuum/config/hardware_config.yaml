@@ -274,19 +274,29 @@ sequences:
 io_devices:
   # Define available I/O devices for sequencing
   # Based on actual hardware: vent valve, vacuum valve, vacuum pump relay
+  #
+  # device_role field identifies the function of each device for auto-defaults:
+  #   - vacuum_pump: The main vacuum pump (controlled automatically by pump mode)
+  #   - vacuum_valve: Valve between pump and chamber (opens to draw vacuum)
+  #   - vent_valve: Valve to atmosphere (opens to release vacuum)
+  #   - generic: Other devices (no special handling in sequences)
+  #
   digital_outputs:
     - name: vacuum_pump
       channel: 0
+      device_role: vacuum_pump
       description: Main vacuum pump relay (controlled automatically by pump mode)
       default_state: false
     
     - name: vent_valve
       channel: 1
+      device_role: vent_valve
       description: Vent valve - releases chamber to atmosphere
       default_state: false
     
     - name: vacuum_valve
       channel: 2
+      device_role: vacuum_valve
       description: Vacuum valve - between pump and chamber
       default_state: false
 

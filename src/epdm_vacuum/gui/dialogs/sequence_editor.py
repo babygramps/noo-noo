@@ -313,7 +313,7 @@ class SequenceEditorDialog(QDialog):
         
         # Info label with helpful guidance
         info_label = QLabel(
-            "ℹ️ Common setup for vacuum: vacuum_valve OPEN, vent_valve CLOSED at start then OPEN at end."
+            "ℹ️ For vacuum stages: open vacuum valve at start, close vent valve at start, open vent at end."
         )
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
@@ -338,7 +338,7 @@ class SequenceEditorDialog(QDialog):
         layout.addWidget(self.io_table)
         
         # Note about vacuum pump
-        pump_note = QLabel("Note: Vacuum pump is controlled automatically - it will turn ON at stage start and OFF at stage end.")
+        pump_note = QLabel("Note: Devices with 'vacuum_pump' role are controlled automatically by the pump mode setting above.")
         pump_note.setWordWrap(True)
         pump_note.setStyleSheet("color: #0066cc; font-size: 10pt; padding: 5px; background-color: #f0f8ff; border-radius: 3px;")
         layout.addWidget(pump_note)
@@ -695,8 +695,12 @@ class SequenceEditorDialog(QDialog):
         # Update sequence from UI
         self.update_sequence_from_ui()
         
+        # Build config limits with device roles for validation
+        validation_config = dict(self.config_limits) if self.config_limits else {}
+        validation_config["io_device_roles"] = self._get_device_roles_for_validation()
+        
         # Validate
-        is_valid, errors, warnings = self.sequence.validate(self.config_limits)
+        is_valid, errors, warnings = self.sequence.validate(validation_config)
         
         if is_valid:
             if warnings:
@@ -724,6 +728,16 @@ class SequenceEditorDialog(QDialog):
         
         return is_valid
     
+    def _get_device_roles_for_validation(self) -> Dict[str, str]:
+        """
+        Get device name to role mapping for validation.
+        
+        Returns:
+            Dict mapping device names to their roles
+        """
+        device_configs = self._get_io_device_configs()
+        return {name: config.get("role", "generic") for name, config in device_configs.items()}
+    
     def update_status(self) -> None:
         """Update status displays."""
         # Update duration
@@ -732,8 +746,12 @@ class SequenceEditorDialog(QDialog):
         seconds = int(duration % 60)
         self.duration_label.setText(f"Total Duration: ~{minutes}m {seconds}s ({len(self.sequence.stages)} stages)")
         
+        # Build config limits with device roles for validation
+        validation_config = dict(self.config_limits) if self.config_limits else {}
+        validation_config["io_device_roles"] = self._get_device_roles_for_validation()
+        
         # Quick validation check
-        is_valid, errors, warnings = self.sequence.validate(self.config_limits)
+        is_valid, errors, warnings = self.sequence.validate(validation_config)
         if is_valid:
             if warnings:
                 self.validation_label.setText(f"Validation: OK ({len(warnings)} warnings)")
@@ -758,8 +776,12 @@ class SequenceEditorDialog(QDialog):
         # Update sequence from UI
         self.update_sequence_from_ui()
         
+        # Build config limits with device roles for validation
+        validation_config = dict(self.config_limits) if self.config_limits else {}
+        validation_config["io_device_roles"] = self._get_device_roles_for_validation()
+        
         # Validate before saving
-        is_valid, errors, warnings = self.sequence.validate(self.config_limits)
+        is_valid, errors, warnings = self.sequence.validate(validation_config)
         if not is_valid:
             error_msg = "Cannot save invalid sequence:\n\n" + "\n".join(f"• {err}" for err in errors)
             QMessageBox.warning(self, "Validation Errors", error_msg)
@@ -810,35 +832,66 @@ class SequenceEditorDialog(QDialog):
         Returns:
             List of device names
         """
-        try:
-            from ...config.settings import get_settings
-            from pathlib import Path
-            
-            config_file = Path(__file__).parent.parent.parent / "config" / "hardware_config.yaml"
-            settings = get_settings(str(config_file))
-            
-            devices = []
-            
-            # Load digital outputs
-            digital_outputs = settings.get("io_devices", "digital_outputs", default=[])
-            if isinstance(digital_outputs, list):
-                for device in digital_outputs:
-                    if isinstance(device, dict) and "name" in device:
-                        devices.append(device["name"])
-            
-            # Load analog outputs
-            analog_outputs = settings.get("io_devices", "analog_outputs", default=[])
-            if isinstance(analog_outputs, list):
-                for device in analog_outputs:
-                    if isinstance(device, dict) and "name" in device:
-                        devices.append(device["name"])
-            
-            logger.debug(f"Loaded {len(devices)} I/O devices from config")
-            return devices
-            
-        except Exception as e:
-            logger.warning(f"Could not load I/O devices from config: {e}")
-            return []
+        # Use the detailed config loader to get device info
+        device_configs = self._get_io_device_configs()
+        return list(device_configs.keys())
+    
+    def _detect_device_role(self, device_name: str, device_config: Dict[str, Any]) -> str:
+        """
+        Detect the role of a device based on config or name patterns.
+        
+        Roles:
+        - "vacuum_pump": The main vacuum pump (controlled automatically)
+        - "vacuum_valve": Valve between pump and chamber
+        - "vent_valve": Valve to vent chamber to atmosphere
+        - "generic": Other device (no special handling)
+        
+        Args:
+            device_name: Name of the device
+            device_config: Configuration dict for the device
+        
+        Returns:
+            Role string
+        """
+        # First check for explicit role in config
+        explicit_role = device_config.get("device_role", "").lower()
+        if explicit_role in ("vacuum_pump", "vacuum_valve", "vent_valve"):
+            return explicit_role
+        
+        # Infer role from device name
+        name_lower = device_name.lower()
+        
+        # Check for pump
+        if "pump" in name_lower:
+            return "vacuum_pump"
+        
+        # Check for vacuum valve (valve between pump and chamber)
+        if "vacuum" in name_lower and "valve" in name_lower:
+            return "vacuum_valve"
+        
+        # Check for vent valve (releases to atmosphere)
+        if "vent" in name_lower:
+            return "vent_valve"
+        
+        # Check for inlet/isolation valves (treat as vacuum valve)
+        if ("inlet" in name_lower or "isolation" in name_lower) and "valve" in name_lower:
+            return "vacuum_valve"
+        
+        return "generic"
+    
+    def _get_vacuum_valve_name(self) -> Optional[str]:
+        """Get the name of the vacuum valve device from config."""
+        for name, config in self._get_io_device_configs().items():
+            if config.get("role") == "vacuum_valve":
+                return name
+        return None
+    
+    def _get_vent_valve_name(self) -> Optional[str]:
+        """Get the name of the vent valve device from config."""
+        for name, config in self._get_io_device_configs().items():
+            if config.get("role") == "vent_valve":
+                return name
+        return None
     
     def refresh_io_table(self) -> None:
         """Refresh I/O states table for currently selected stage."""
@@ -913,10 +966,11 @@ class SequenceEditorDialog(QDialog):
     
     def _get_io_device_configs(self) -> Dict[str, Dict[str, Any]]:
         """
-        Get all available I/O device configurations.
+        Get all available I/O device configurations with detected roles.
         
         Returns:
-            Dict mapping device_name to configuration dict with 'type' field
+            Dict mapping device_name to configuration dict with 'type' and 'role' fields.
+            Roles: "vacuum_pump", "vacuum_valve", "vent_valve", or "generic"
         """
         try:
             from ...config.settings import get_settings
@@ -932,25 +986,34 @@ class SequenceEditorDialog(QDialog):
             if isinstance(digital_outputs, list):
                 for device in digital_outputs:
                     if isinstance(device, dict) and "name" in device:
-                        devices[device["name"]] = {
+                        device_name = device["name"]
+                        config = {
                             "type": "Digital",
                             "description": device.get("description", ""),
-                            "channel": device.get("channel", 0)
+                            "channel": device.get("channel", 0),
+                            "default_state": device.get("default_state", False),
                         }
+                        # Detect role from config or name
+                        config["role"] = self._detect_device_role(device_name, device)
+                        devices[device_name] = config
             
             # Load analog outputs
             analog_outputs = settings.get("io_devices", "analog_outputs", default=[])
             if isinstance(analog_outputs, list):
                 for device in analog_outputs:
                     if isinstance(device, dict) and "name" in device:
-                        devices[device["name"]] = {
+                        device_name = device["name"]
+                        config = {
                             "type": "Analog",
                             "description": device.get("description", ""),
                             "channel": device.get("channel", 0),
                             "min_value": device.get("min_value", 0.0),
-                            "max_value": device.get("max_value", 10.0)
+                            "max_value": device.get("max_value", 10.0),
                         }
+                        config["role"] = self._detect_device_role(device_name, device)
+                        devices[device_name] = config
             
+            logger.debug(f"Loaded {len(devices)} I/O device configs: {list(devices.keys())}")
             return devices
             
         except Exception as e:
@@ -1023,17 +1086,30 @@ class SequenceEditorDialog(QDialog):
         """
         Add default I/O actions required for basic vacuum operation.
         
+        Uses device roles detected from config to set appropriate defaults:
+        - vacuum_valve: OPEN at start (connects pump to chamber), stays OPEN
+        - vent_valve: CLOSED at start (seal chamber), OPEN at end (release vacuum)
+        
         Args:
             stage: TestStage to add I/O actions to
         """
-        # Set default states for common devices based on actual hardware
-        defaults = {
+        # Get device configs with roles
+        device_configs = self._get_io_device_configs()
+        
+        # Define default states by role
+        role_defaults = {
             "vacuum_valve": {"start": True, "end": True},   # OPEN to connect pump to chamber
             "vent_valve": {"start": False, "end": True},    # CLOSED during vacuum, OPEN at end to vent
         }
         
-        for device_name, states in defaults.items():
-            if device_name in self.available_io_devices:
+        added_count = 0
+        for device_name, config in device_configs.items():
+            role = config.get("role", "generic")
+            
+            # Skip pump (controlled automatically) and generic devices
+            if role in role_defaults:
+                states = role_defaults[role]
+                
                 # Add start state
                 stage.add_io_action(IOAction(
                     device_name=device_name,
@@ -1041,8 +1117,9 @@ class SequenceEditorDialog(QDialog):
                     value=states["start"],
                     timing=IOActionTiming.START_OF_STAGE,
                     delay_seconds=0.0,
-                    description=f"Set {device_name} to {'OPEN' if states['start'] else 'CLOSED'} at stage start"
+                    description=f"Set {device_name} ({role}) to {'OPEN' if states['start'] else 'CLOSED'} at stage start"
                 ))
+                added_count += 1
                 
                 # Add end state if different from start
                 if states["end"] != states["start"]:
@@ -1052,8 +1129,9 @@ class SequenceEditorDialog(QDialog):
                         value=states["end"],
                         timing=IOActionTiming.END_OF_STAGE,
                         delay_seconds=0.0,
-                        description=f"Set {device_name} to {'OPEN' if states['end'] else 'CLOSED'} at stage end"
+                        description=f"Set {device_name} ({role}) to {'OPEN' if states['end'] else 'CLOSED'} at stage end"
                     ))
+                    added_count += 1
         
-        logger.info(f"Added {len(stage.io_actions)} default I/O actions to stage")
+        logger.info(f"Added {added_count} default I/O actions to stage based on device roles")
 
