@@ -13,7 +13,7 @@ from collections import deque
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QComboBox, QLabel
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QComboBox, QLabel, QPushButton
 from PyQt5.QtCore import Qt
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,17 @@ class PlotWidget(QWidget):
     def init_ui(self) -> None:
         """Initialize the user interface."""
         layout = QVBoxLayout(self)
+        
+        # Top control bar with reset button
+        top_controls = QHBoxLayout()
+        top_controls.addStretch()
+        
+        self.reset_btn = QPushButton("Reset Plots")
+        self.reset_btn.setToolTip("Clear all plot data and start fresh")
+        self.reset_btn.clicked.connect(self.clear_data)
+        top_controls.addWidget(self.reset_btn)
+        
+        layout.addLayout(top_controls)
         
         # Create tab widget for multiple plots
         self.tab_widget = QTabWidget()
