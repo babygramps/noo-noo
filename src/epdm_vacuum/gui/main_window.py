@@ -679,6 +679,10 @@ class MainWindow(QMainWindow):
         # Clear data buffer for new test
         self.data_buffer.clear()
         
+        # Reset leak rate calculation for fresh start
+        if hasattr(self.display_widget, 'reset_leak_rate'):
+            self.display_widget.reset_leak_rate()
+        
         # Initialize test status panel with sequence
         self.test_status_panel.set_sequence(current_seq)
         

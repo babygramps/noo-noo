@@ -7,8 +7,10 @@ Shows current sensor readings in large, easy-to-read formats:
 - Individual load cell readings
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
 import logging
+import time
+from collections import deque
 
 from PyQt5.QtWidgets import (
     QWidget,
@@ -76,6 +78,13 @@ class DisplayWidget(QWidget):
         self._sense_resistor_ohms = float(self.settings.value(
             "sense_resistor_ohms", DEFAULT_SENSE_RESISTOR_OHMS
         ))
+        
+        # Leak rate tracking - stores (timestamp, vacuum_bar) tuples
+        # Uses a sliding window to calculate rate of change
+        self._vacuum_history: deque = deque(maxlen=60)  # ~6 seconds at 10Hz
+        self._leak_rate_mbar_per_min = 0.0
+        self._leak_rate_update_interval = 1.0  # Update rate calculation every 1 second
+        self._last_leak_rate_update = 0.0
         
         self.init_ui()
         
@@ -243,6 +252,27 @@ class DisplayWidget(QWidget):
         vacuum_level_layout.addWidget(vacuum_level_title)
         vacuum_level_layout.addWidget(self.vacuum_level_label)
         layout.addLayout(vacuum_level_layout)
+        
+        # Leak Rate display - rate of vacuum change over time
+        leak_rate_layout = QHBoxLayout()
+        leak_rate_title = QLabel("Leak Rate:")
+        leak_rate_title.setStyleSheet("font-size: 10pt; font-weight: bold; color: #e67e22;")
+        leak_rate_title.setToolTip("Rate of vacuum decay (positive = leaking, negative = improving)")
+        self.leak_rate_label = QLabel("-- mbar/min")
+        self.leak_rate_label.setStyleSheet("""
+            font-size: 12pt; 
+            font-weight: bold; 
+            color: #7f8c8d; 
+            font-family: monospace;
+            background-color: #f5f5f5;
+            padding: 4px 8px;
+            border-radius: 4px;
+        """)
+        self.leak_rate_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.leak_rate_label.setToolTip("Positive = vacuum decreasing (leak)\nNegative = vacuum increasing (pumping)")
+        leak_rate_layout.addWidget(leak_rate_title)
+        leak_rate_layout.addWidget(self.leak_rate_label)
+        layout.addLayout(leak_rate_layout)
         
         # Raw current display (4-20mA transmitter) with calibration button
         raw_layout = QHBoxLayout()
@@ -438,6 +468,121 @@ class DisplayWidget(QWidget):
         # Display the converted value
         self.pressure_lcd.display(round(converted_value, decimals))
     
+    def _update_leak_rate(self, vacuum_bar: float) -> None:
+        """
+        Calculate and update the leak rate display.
+        
+        Leak rate is calculated as the rate of change of vacuum level over time.
+        Positive rate = vacuum decreasing (leaking)
+        Negative rate = vacuum increasing (pumping/improving)
+        
+        Args:
+            vacuum_bar: Current vacuum level in bar
+        """
+        current_time = time.time()
+        
+        # Add current reading to history
+        self._vacuum_history.append((current_time, vacuum_bar))
+        
+        # Only update the displayed rate periodically (not every sample)
+        if current_time - self._last_leak_rate_update < self._leak_rate_update_interval:
+            return
+        
+        self._last_leak_rate_update = current_time
+        
+        # Need at least 2 points spanning some time to calculate rate
+        if len(self._vacuum_history) < 10:
+            self.leak_rate_label.setText("-- mbar/min")
+            self.leak_rate_label.setStyleSheet("""
+                font-size: 12pt; font-weight: bold; color: #7f8c8d;
+                font-family: monospace; background-color: #f5f5f5;
+                padding: 4px 8px; border-radius: 4px;
+            """)
+            return
+        
+        # Calculate rate using oldest and newest points in the history window
+        oldest_time, oldest_vacuum = self._vacuum_history[0]
+        newest_time, newest_vacuum = self._vacuum_history[-1]
+        
+        time_delta = newest_time - oldest_time
+        if time_delta < 0.5:  # Need at least 0.5 seconds of data
+            return
+        
+        # Calculate rate: change in vacuum per minute
+        # vacuum_bar: 0 = atmosphere, 1 = full vacuum
+        # So a DECREASE in vacuum_bar means vacuum is being lost (positive leak rate)
+        vacuum_change = oldest_vacuum - newest_vacuum  # Positive if vacuum is decreasing
+        vacuum_change_mbar = vacuum_change * 1000  # Convert bar to mbar
+        
+        # Convert to per-minute rate
+        minutes = time_delta / 60.0
+        self._leak_rate_mbar_per_min = vacuum_change_mbar / minutes
+        
+        # Display the leak rate
+        if abs(self._leak_rate_mbar_per_min) < 0.1:
+            # Very low rate - show as stable
+            self.leak_rate_label.setText("~0 mbar/min")
+            self.leak_rate_label.setStyleSheet("""
+                font-size: 12pt; font-weight: bold; color: #27ae60;
+                font-family: monospace; background-color: #e8f5e9;
+                padding: 4px 8px; border-radius: 4px;
+            """)
+        elif self._leak_rate_mbar_per_min > 0:
+            # Positive = vacuum is decreasing (leak detected)
+            self.leak_rate_label.setText(f"+{self._leak_rate_mbar_per_min:.1f} mbar/min")
+            # Color based on severity
+            if self._leak_rate_mbar_per_min > 50:
+                # Severe leak - red
+                self.leak_rate_label.setStyleSheet("""
+                    font-size: 12pt; font-weight: bold; color: #c0392b;
+                    font-family: monospace; background-color: #fadbd8;
+                    padding: 4px 8px; border-radius: 4px;
+                """)
+            elif self._leak_rate_mbar_per_min > 10:
+                # Moderate leak - orange
+                self.leak_rate_label.setStyleSheet("""
+                    font-size: 12pt; font-weight: bold; color: #e67e22;
+                    font-family: monospace; background-color: #fdebd0;
+                    padding: 4px 8px; border-radius: 4px;
+                """)
+            else:
+                # Minor leak - yellow
+                self.leak_rate_label.setStyleSheet("""
+                    font-size: 12pt; font-weight: bold; color: #b7950b;
+                    font-family: monospace; background-color: #fcf3cf;
+                    padding: 4px 8px; border-radius: 4px;
+                """)
+        else:
+            # Negative = vacuum is increasing (pumping)
+            self.leak_rate_label.setText(f"{self._leak_rate_mbar_per_min:.1f} mbar/min")
+            self.leak_rate_label.setStyleSheet("""
+                font-size: 12pt; font-weight: bold; color: #2980b9;
+                font-family: monospace; background-color: #d6eaf8;
+                padding: 4px 8px; border-radius: 4px;
+            """)
+    
+    def reset_leak_rate(self) -> None:
+        """Reset the leak rate calculation (e.g., when starting a new test)."""
+        self._vacuum_history.clear()
+        self._leak_rate_mbar_per_min = 0.0
+        self._last_leak_rate_update = 0.0
+        self.leak_rate_label.setText("-- mbar/min")
+        self.leak_rate_label.setStyleSheet("""
+            font-size: 12pt; font-weight: bold; color: #7f8c8d;
+            font-family: monospace; background-color: #f5f5f5;
+            padding: 4px 8px; border-radius: 4px;
+        """)
+        logger.info("Leak rate calculation reset")
+    
+    def get_leak_rate(self) -> float:
+        """
+        Get the current leak rate.
+        
+        Returns:
+            float: Leak rate in mbar/min (positive = leaking, negative = pumping)
+        """
+        return self._leak_rate_mbar_per_min
+    
     def create_force_display(self) -> QGroupBox:
         """
         Create total force display group - LARGE and prominent.
@@ -627,6 +772,9 @@ class DisplayWidget(QWidget):
             
             if self._update_count <= 5:
                 logger.info(f"  -> vacuum_level: {vacuum_bar:.3f} bar")
+            
+            # Calculate and update leak rate
+            self._update_leak_rate(vacuum_bar)
         
         # Update raw current display (4-20mA transmitter)
         # Uses calibrated sense resistor value (user-adjustable via Cal button)
