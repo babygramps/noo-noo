@@ -174,8 +174,12 @@ class MainWindow(QMainWindow):
         self.control_panel.start_test_requested.connect(self.on_start_test)
         self.control_panel.stop_test_requested.connect(self.on_stop_test)
         self.control_panel.pump_control_requested.connect(self.on_pump_control)
+        self.control_panel.valve_control_requested.connect(self.on_valve_control)
         self.control_panel.tare_requested.connect(self.on_tare)
         self.control_panel.save_data_requested.connect(self.on_save_data)
+        
+        # Register control panel as listener for relay state changes
+        self._register_relay_state_listener()
         
         # Connect sequence selector signals
         self.sequence_selector.sequence_changed.connect(self.on_sequence_changed)
@@ -758,6 +762,45 @@ class MainWindow(QMainWindow):
         else:
             logger.warning("WidgetLords interface not available - pump control disabled")
             self.statusBar().showMessage("Hardware not connected - pump control unavailable", 3000)
+    
+    def on_valve_control(self, valve_name: str, state: bool) -> None:
+        """
+        Handle valve control request.
+        
+        Args:
+            valve_name: Name of the valve (e.g., "vacuum_valve", "vent_valve")
+            state: True to open valve, False to close
+        """
+        state_str = "OPEN" if state else "CLOSED"
+        logger.info(f"Setting {valve_name} to {state_str}")
+        
+        # Control valve via WidgetLords interface
+        if self.widgetlords_interface and self.widgetlords_interface.is_connected():
+            try:
+                success = self.widgetlords_interface.set_relay("relay_module", valve_name, state)
+                
+                if success:
+                    self.statusBar().showMessage(f"{valve_name}: {state_str}", 3000)
+                    logger.info(f"{valve_name} set to {state_str}")
+                else:
+                    self.statusBar().showMessage(f"{valve_name} control failed", 3000)
+                    logger.error(f"Failed to set {valve_name}")
+                    
+            except Exception as e:
+                logger.error(f"Error controlling {valve_name}: {e}")
+                self.statusBar().showMessage(f"Valve error: {e}", 5000)
+        else:
+            logger.warning(f"WidgetLords interface not available - {valve_name} control disabled")
+            self.statusBar().showMessage("Hardware not connected - valve control unavailable", 3000)
+    
+    def _register_relay_state_listener(self) -> None:
+        """Register control panel as listener for global relay state changes."""
+        try:
+            from ..daq.relay_state_manager import relay_state_manager
+            relay_state_manager.add_listener(self.control_panel.on_relay_state_changed)
+            logger.info("Registered control panel as relay state listener")
+        except Exception as e:
+            logger.warning(f"Could not register relay state listener: {e}")
     
     def on_tare(self) -> None:
         """Handle tare request."""
