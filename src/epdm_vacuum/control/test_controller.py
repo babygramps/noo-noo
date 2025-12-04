@@ -399,21 +399,33 @@ class TestController:
                 time.sleep(sample_interval)
                 continue
             
+            # Read actual vacuum level from sensor FIRST
+            # vacuum_bar: 0 = atmosphere, ~1 = full vacuum (matches sequence setpoint units)
+            # pressure_psig: gauge pressure (negative = vacuum, positive = above atmosphere)
+            current_vacuum = 0.0
+            current_pressure_psig = 0.0
+            if self.widgetlords:
+                try:
+                    sensor_data = self.widgetlords.read()
+                    current_vacuum = sensor_data.get("vacuum_bar", 0.0)
+                    current_pressure_psig = sensor_data.get("pressure_psig", 0.0)
+                except Exception as e:
+                    logger.warning(f"Failed to read vacuum sensor: {e}")
+            
             # Calculate progress percentage
             progress = 0.0
             if stage.max_time_seconds is not None and stage.max_time_seconds > 0:
                 progress = min(1.0, elapsed / stage.max_time_seconds)
             elif stage.target_vacuum_bar is not None and stage.target_vacuum_bar > 0:
-                # For setpoint-based, estimate progress
-                estimated_vacuum = min(elapsed * 0.1, stage.target_vacuum_bar)
-                current_vacuum = estimated_vacuum
+                # Use actual vacuum reading for progress
                 progress = min(1.0, current_vacuum / stage.target_vacuum_bar)
             
             # Emit progress update every second
             if elapsed - last_progress_log >= 1.0:
                 status_text = f"Elapsed: {elapsed:.1f}s"
                 if stage.target_vacuum_bar is not None:
-                    status_text += f" | Vacuum: {current_vacuum:.3f} bar"
+                    status_text += f" | Vacuum: {current_vacuum:.3f}/{stage.target_vacuum_bar:.3f} bar"
+                    status_text += f" ({current_pressure_psig:.1f} PSIG)"
                 
                 # Notify progress callback
                 if self.progress_callback:
@@ -429,14 +441,12 @@ class TestController:
             
             # Condition 1: Setpoint reached
             if stage.target_vacuum_bar is not None:
-                # TODO: Replace with actual vacuum reading
-                # For now, estimate that vacuum builds at ~0.1 bar/sec
-                estimated_vacuum = min(elapsed * 0.1, stage.target_vacuum_bar)
-                current_vacuum = estimated_vacuum
-                
-                if current_vacuum >= stage.target_vacuum_bar:
-                    logger.info(f"  ✓ Setpoint reached: {current_vacuum:.3f} >= {stage.target_vacuum_bar:.3f} bar")
-                    return f"setpoint reached ({current_vacuum:.3f} bar)"
+                # Check if minimum time has passed before allowing setpoint completion
+                if elapsed >= stage.min_time_seconds:
+                    if current_vacuum >= stage.target_vacuum_bar:
+                        logger.info(f"  ✓ Setpoint reached: {current_vacuum:.3f} bar >= {stage.target_vacuum_bar:.3f} bar")
+                        logger.info(f"    (Pressure: {current_pressure_psig:.2f} PSIG)")
+                        return f"setpoint reached ({current_vacuum:.3f} bar)"
             
             # Condition 2: Time limit exceeded
             if stage.max_time_seconds is not None:
@@ -459,6 +469,8 @@ class TestController:
                     "stage_index": self.current_stage_index,
                     "stage_name": stage.name or f"Stage {self.current_stage_index + 1}",
                     "vacuum_bar": current_vacuum,
+                    "pressure_psig": current_pressure_psig,
+                    "target_vacuum_bar": stage.target_vacuum_bar,
                     "test_state": self.state.value,
                 }
                 

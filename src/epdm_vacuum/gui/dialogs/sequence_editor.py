@@ -239,8 +239,20 @@ class SequenceEditorDialog(QDialog):
         self.setpoint_spinbox.setDecimals(3)
         self.setpoint_spinbox.setSuffix(" bar")
         self.setpoint_spinbox.setValue(0.5)
+        self.setpoint_spinbox.setToolTip(
+            "Vacuum level in bar (0 = atmosphere, 1 = full vacuum)\n"
+            "This matches the 'Vacuum Level' display in the main GUI"
+        )
         self.setpoint_spinbox.valueChanged.connect(self.on_stage_config_changed)
+        self.setpoint_spinbox.valueChanged.connect(self._update_psig_equivalent)
         completion_layout.addWidget(self.setpoint_spinbox, 0, 1)
+        
+        # Show equivalent PSIG for clarity
+        self.psig_equivalent_label = QLabel("≈ -7.25 PSIG")
+        self.psig_equivalent_label.setStyleSheet("color: #666; font-size: 9pt; font-style: italic;")
+        self.psig_equivalent_label.setToolTip("Equivalent gauge pressure (negative = vacuum)")
+        completion_layout.addWidget(self.psig_equivalent_label, 0, 2)
+        self._update_psig_equivalent()  # Initial update
         
         # Time limit
         self.time_enabled = QCheckBox("Time Limit:")
@@ -1081,6 +1093,16 @@ class SequenceEditorDialog(QDialog):
         
         self.modified = True
         self.update_status()
+    
+    def _update_psig_equivalent(self) -> None:
+        """Update the PSIG equivalent label when vacuum bar setpoint changes."""
+        vacuum_bar = self.setpoint_spinbox.value()
+        # Convert vacuum_bar to PSIG: vacuum_bar = vacuum_psi * 0.0689476
+        # So vacuum_psi = vacuum_bar / 0.0689476
+        # PSIG is negative of vacuum_psi (negative = vacuum)
+        vacuum_psi = vacuum_bar / 0.0689476
+        psig = -vacuum_psi
+        self.psig_equivalent_label.setText(f"≈ {psig:.1f} PSIG")
     
     def _add_default_io_actions(self, stage: TestStage) -> None:
         """

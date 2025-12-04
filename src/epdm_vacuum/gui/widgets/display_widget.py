@@ -222,6 +222,28 @@ class DisplayWidget(QWidget):
         pressure_layout.addWidget(self.pressure_lcd)
         layout.addLayout(pressure_layout)
         
+        # Vacuum Level display (matches sequence setpoint units!)
+        # vacuum_bar: 0 = atmosphere, ~1 = full vacuum
+        vacuum_level_layout = QHBoxLayout()
+        vacuum_level_title = QLabel("Vacuum Level:")
+        vacuum_level_title.setStyleSheet("font-size: 10pt; font-weight: bold; color: #27ae60;")
+        vacuum_level_title.setToolTip("Vacuum level in bar (0 = atm, 1 = full vacuum)\nThis matches sequence setpoint units!")
+        self.vacuum_level_label = QLabel("0.000 bar")
+        self.vacuum_level_label.setStyleSheet("""
+            font-size: 14pt; 
+            font-weight: bold; 
+            color: #27ae60; 
+            font-family: monospace;
+            background-color: #e8f5e9;
+            padding: 4px 8px;
+            border-radius: 4px;
+        """)
+        self.vacuum_level_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.vacuum_level_label.setToolTip("Use this value for sequence setpoints")
+        vacuum_level_layout.addWidget(vacuum_level_title)
+        vacuum_level_layout.addWidget(self.vacuum_level_label)
+        layout.addLayout(vacuum_level_layout)
+        
         # Raw current display (4-20mA transmitter) with calibration button
         raw_layout = QHBoxLayout()
         raw_label = QLabel("mA:")
@@ -573,6 +595,38 @@ class DisplayWidget(QWidget):
         else:
             if self._update_count <= 5:
                 logger.warning(f"  -> pressure_psig NOT in data!")
+        
+        # Update vacuum level display (matches sequence setpoint units!)
+        # vacuum_bar: 0 = atmosphere, ~1.0 = full vacuum
+        if "vacuum_bar" in data:
+            vacuum_bar = data["vacuum_bar"]
+            self.vacuum_level_label.setText(f"{vacuum_bar:.3f} bar")
+            
+            # Color code based on vacuum level
+            if vacuum_bar >= 0.8:
+                # High vacuum - bright green
+                self.vacuum_level_label.setStyleSheet("""
+                    font-size: 14pt; font-weight: bold; color: #1e8449;
+                    font-family: monospace; background-color: #abebc6;
+                    padding: 4px 8px; border-radius: 4px;
+                """)
+            elif vacuum_bar >= 0.3:
+                # Medium vacuum - normal green
+                self.vacuum_level_label.setStyleSheet("""
+                    font-size: 14pt; font-weight: bold; color: #27ae60;
+                    font-family: monospace; background-color: #e8f5e9;
+                    padding: 4px 8px; border-radius: 4px;
+                """)
+            else:
+                # Low/no vacuum - grey
+                self.vacuum_level_label.setStyleSheet("""
+                    font-size: 14pt; font-weight: bold; color: #7f8c8d;
+                    font-family: monospace; background-color: #ecf0f1;
+                    padding: 4px 8px; border-radius: 4px;
+                """)
+            
+            if self._update_count <= 5:
+                logger.info(f"  -> vacuum_level: {vacuum_bar:.3f} bar")
         
         # Update raw current display (4-20mA transmitter)
         # Uses calibrated sense resistor value (user-adjustable via Cal button)
