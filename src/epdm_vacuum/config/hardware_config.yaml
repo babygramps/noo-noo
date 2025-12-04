@@ -22,13 +22,13 @@ hardware:
             enabled: true
             description: Main vacuum pump relay
           - channel: 1
-            name: vent_valve
-            enabled: true
-            description: Chamber vent valve
-          - channel: 2
             name: vacuum_valve
             enabled: true
-            description: Vacuum line isolation valve
+            description: Vacuum line isolation valve (SWAPPED with vent)
+          - channel: 2
+            name: vent_valve
+            enabled: true
+            description: Chamber vent valve (SWAPPED with vacuum)
           - channel: 3
             name: spare_relay
             enabled: false
@@ -288,16 +288,16 @@ io_devices:
       description: Main vacuum pump relay (controlled automatically by pump mode)
       default_state: false
     
-    - name: vent_valve
+    - name: vacuum_valve
       channel: 1
-      device_role: vent_valve
-      description: Vent valve - releases chamber to atmosphere
+      device_role: vacuum_valve
+      description: Vacuum valve - between pump and chamber (SWAPPED with vent)
       default_state: false
     
-    - name: vacuum_valve
+    - name: vent_valve
       channel: 2
-      device_role: vacuum_valve
-      description: Vacuum valve - between pump and chamber
+      device_role: vent_valve
+      description: Vent valve - releases chamber to atmosphere (SWAPPED with vacuum)
       default_state: false
 
 # Calibration Files

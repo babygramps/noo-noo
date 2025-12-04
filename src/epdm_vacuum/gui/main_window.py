@@ -747,10 +747,8 @@ class MainWindow(QMainWindow):
         # Reset test status panel
         self.test_status_panel.reset()
         
-        # Reset control panel buttons to match safe state
+        # Reset pump button state only (valves unchanged for easy restart)
         self.control_panel.set_pump_state(False)
-        self.control_panel.set_valve_state("vacuum_valve", False)
-        self.control_panel.set_valve_state("vent_valve", True)  # Vent open for safety
         
         self.statusBar().showMessage("Test stopped - system in safe state", 5000)
         logger.info("Test stopped by user - system in safe state")
@@ -758,40 +756,24 @@ class MainWindow(QMainWindow):
     
     def _execute_safe_shutdown(self) -> None:
         """
-        Execute safe hardware shutdown sequence.
+        Execute safe hardware shutdown sequence - pump off only (minimal failsafe).
         
-        This ensures the system reaches a safe state regardless of current
-        conditions. The sequence is:
-        1. Turn OFF vacuum pump
-        2. Close vacuum valve (isolate pump from chamber)
-        3. Open vent valve (release chamber to atmosphere)
-        
-        Uses bypass_interlocks=True via RelayStateManager to ensure
-        commands are executed even if they would normally be blocked.
+        SIMPLIFIED FAILSAFE: Only turns off the pump to prevent damage.
+        Valve states are NOT modified to avoid interfering with test restart.
         """
-        logger.info("Executing safe shutdown sequence...")
+        logger.info("Executing safe shutdown - pump off only...")
         
         if self.widgetlords_interface and self.widgetlords_interface.is_connected():
             try:
                 # Import relay state manager for bypass capability
                 from ..daq.relay_state_manager import relay_state_manager
                 
-                # Step 1: Turn off pump
+                # Only turn off pump - valve states remain unchanged for easy restart
                 logger.info("  [SAFE STOP] Turning OFF vacuum pump...")
                 relay_state_manager.set_state("relay_module", "vacuum_pump", False, bypass_interlocks=True)
                 self.widgetlords_interface.set_relay("relay_module", "vacuum_pump", False)
                 
-                # Step 2: Close vacuum valve
-                logger.info("  [SAFE STOP] Closing vacuum valve...")
-                relay_state_manager.set_state("relay_module", "vacuum_valve", False, bypass_interlocks=True)
-                self.widgetlords_interface.set_relay("relay_module", "vacuum_valve", False)
-                
-                # Step 3: Open vent valve to release vacuum
-                logger.info("  [SAFE STOP] Opening vent valve...")
-                relay_state_manager.set_state("relay_module", "vent_valve", True, bypass_interlocks=True)
-                self.widgetlords_interface.set_relay("relay_module", "vent_valve", True)
-                
-                logger.info("  [SAFE STOP] Hardware shutdown complete")
+                logger.info("  [SAFE STOP] Pump OFF - valves unchanged for easy restart")
                 
             except Exception as e:
                 logger.error(f"Error during safe shutdown: {e}", exc_info=True)

@@ -76,10 +76,17 @@ class RelayStateManager:
         
         # Safety interlocks configuration
         # These define forbidden state combinations for safety
-        self._interlocks_enabled = True
+        # DISABLED: Interlocks are disabled by default for development/testing
+        # Set to True to re-enable safety interlocks
+        self._interlocks_enabled = False
         self._interlock_rules = self._create_default_interlock_rules()
         
-        logger.info("RelayStateManager initialized with safety interlocks")
+        logger.warning("=" * 50)
+        logger.warning("INTERLOCKS DISABLED - Safety interlocks are OFF")
+        logger.warning("To re-enable, set _interlocks_enabled = True")
+        logger.warning("=" * 50)
+        
+        logger.info("RelayStateManager initialized")
     
     def _create_default_interlock_rules(self) -> List[Dict[str, Any]]:
         """

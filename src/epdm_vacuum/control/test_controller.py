@@ -860,36 +860,24 @@ class TestController:
     
     def _execute_io_emergency_stop(self) -> None:
         """
-        Execute emergency I/O actions (vent valves, etc.).
+        Execute emergency I/O actions - pump off only (minimal failsafe).
         
-        EMERGENCY STOP SAFETY: This method bypasses all interlocks to ensure
-        the system reaches a safe state regardless of current conditions.
-        The vent valve is opened and pump is stopped to release vacuum.
+        SIMPLIFIED FAILSAFE: Only turns off the pump to prevent damage.
+        Valve states are NOT modified to avoid interfering with test restart.
         """
         logger.warning("=" * 60)
-        logger.warning("EMERGENCY I/O STOP PROCEDURES")
+        logger.warning("EMERGENCY STOP - PUMP OFF ONLY (MINIMAL FAILSAFE)")
         logger.warning("=" * 60)
         
-        # BYPASS INTERLOCKS for emergency stop - safety is paramount
-        # Stop the pump first
+        # Only stop the pump - valve states remain unchanged
         logger.warning("  E-STOP: Stopping vacuum pump...")
         self._set_digital_output("vacuum_pump", False, bypass_interlocks=True)
         
-        # Close vacuum valve to isolate pump
-        logger.warning("  E-STOP: Closing vacuum valve...")
-        self._set_digital_output("vacuum_valve", False, bypass_interlocks=True)
-        
-        # Open vent valve to release chamber pressure
-        logger.warning("  E-STOP: Opening vent valve...")
-        self._set_digital_output("vent_valve", True, bypass_interlocks=True)
-        
-        # Notify callbacks that IO states have changed
+        # Notify callback that pump state changed
         if self.io_callback:
             self.io_callback("vacuum_pump", False)
-            self.io_callback("vacuum_valve", False)
-            self.io_callback("vent_valve", True)
         
-        logger.warning("  E-STOP: Emergency I/O actions completed")
+        logger.warning("  E-STOP: Pump OFF - valves unchanged for easy restart")
         logger.warning("=" * 60)
     
     def _update_status(self, message: str) -> None:
