@@ -235,14 +235,21 @@ class ControlThread(QThread):
                 time.sleep(1)
     
     def stop(self) -> None:
-        """Stop the control thread gracefully."""
+        """
+        Stop the control thread gracefully.
+        
+        This signals the thread to stop and triggers the test controller's
+        stop procedure if available, which handles the emergency I/O shutdown.
+        """
         logger.info("Stopping control thread...")
         self.running = False
         
-        # TODO: Implement emergency stop procedures
-        # - Turn off vacuum pump
-        # - Vent chamber
-        # - Save partial data
+        # Tell the test controller to stop (triggers emergency I/O shutdown)
+        if self.test_controller:
+            logger.info("Calling test controller stop_test()...")
+            self.test_controller.stop_test()
+        
+        logger.info("Control thread stop initiated")
     
     def set_test_controller(self, controller) -> None:
         """

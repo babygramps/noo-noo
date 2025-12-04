@@ -721,18 +721,84 @@ class MainWindow(QMainWindow):
         logger.info(f"Started test with sequence: {current_seq.name if current_seq else 'None'}")
     
     def on_stop_test(self) -> None:
-        """Handle stop test request."""
-        logger.info("Stopping test...")
-        self.statusBar().showMessage("Stopping test...")
+        """
+        Handle stop test request.
         
-        # Stop control thread
+        SAFETY: This performs a controlled stop that:
+        1. Stops the control thread
+        2. Turns off the vacuum pump
+        3. Closes the vacuum valve
+        4. Opens the vent valve (to release vacuum safely)
+        5. Resets the UI to reflect the safe state
+        """
+        logger.info("=" * 60)
+        logger.info("STOP TEST REQUESTED - Executing safe shutdown sequence")
+        logger.info("=" * 60)
+        self.statusBar().showMessage("Stopping test - safe shutdown...")
+        
+        # Stop control thread first
         if self.control_thread and self.control_thread.isRunning():
+            logger.info("Stopping control thread...")
             self.control_thread.stop()
+        
+        # Execute safe shutdown sequence on hardware
+        self._execute_safe_shutdown()
         
         # Reset test status panel
         self.test_status_panel.reset()
         
-        logger.info("Test stopped by user")
+        # Reset control panel buttons to match safe state
+        self.control_panel.set_pump_state(False)
+        self.control_panel.set_valve_state("vacuum_valve", False)
+        self.control_panel.set_valve_state("vent_valve", True)  # Vent open for safety
+        
+        self.statusBar().showMessage("Test stopped - system in safe state", 5000)
+        logger.info("Test stopped by user - system in safe state")
+        logger.info("=" * 60)
+    
+    def _execute_safe_shutdown(self) -> None:
+        """
+        Execute safe hardware shutdown sequence.
+        
+        This ensures the system reaches a safe state regardless of current
+        conditions. The sequence is:
+        1. Turn OFF vacuum pump
+        2. Close vacuum valve (isolate pump from chamber)
+        3. Open vent valve (release chamber to atmosphere)
+        
+        Uses bypass_interlocks=True via RelayStateManager to ensure
+        commands are executed even if they would normally be blocked.
+        """
+        logger.info("Executing safe shutdown sequence...")
+        
+        if self.widgetlords_interface and self.widgetlords_interface.is_connected():
+            try:
+                # Import relay state manager for bypass capability
+                from ..daq.relay_state_manager import relay_state_manager
+                
+                # Step 1: Turn off pump
+                logger.info("  [SAFE STOP] Turning OFF vacuum pump...")
+                relay_state_manager.set_state("relay_module", "vacuum_pump", False, bypass_interlocks=True)
+                self.widgetlords_interface.set_relay("relay_module", "vacuum_pump", False)
+                
+                # Step 2: Close vacuum valve
+                logger.info("  [SAFE STOP] Closing vacuum valve...")
+                relay_state_manager.set_state("relay_module", "vacuum_valve", False, bypass_interlocks=True)
+                self.widgetlords_interface.set_relay("relay_module", "vacuum_valve", False)
+                
+                # Step 3: Open vent valve to release vacuum
+                logger.info("  [SAFE STOP] Opening vent valve...")
+                relay_state_manager.set_state("relay_module", "vent_valve", True, bypass_interlocks=True)
+                self.widgetlords_interface.set_relay("relay_module", "vent_valve", True)
+                
+                logger.info("  [SAFE STOP] Hardware shutdown complete")
+                
+            except Exception as e:
+                logger.error(f"Error during safe shutdown: {e}", exc_info=True)
+                self.statusBar().showMessage(f"Warning: Safe shutdown error - {e}", 5000)
+        else:
+            logger.warning("Hardware interface not connected - safe shutdown skipped")
+            self.statusBar().showMessage("Warning: Hardware not connected for shutdown", 3000)
     
     def on_pump_control(self, state: bool) -> None:
         """
