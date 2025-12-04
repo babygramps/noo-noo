@@ -806,6 +806,12 @@ class WidgetLordsInterface(HardwareInterface):
             logger.info(f"  Analog input modules: {list(self.analog_input_modules.keys())}")
             logger.info(f"  Digital input modules: {list(self.digital_input_modules.keys())}")
             logger.info(f"  Analog output modules: {list(self.analog_output_modules.keys())}")
+            
+            # CRITICAL: Reset all relays to OFF (de-energized) on startup
+            # This ensures a known safe state and propagates state to all listeners
+            if self.initialized:
+                self.reset_all_outputs()
+            
             logger.info("=" * 60)
             return self.initialized
             
@@ -910,6 +916,48 @@ class WidgetLordsInterface(HardwareInterface):
         except Exception as e:
             self.handle_error(e)
             return False
+    
+    def reset_all_outputs(self) -> bool:
+        """
+        Reset all relay outputs to OFF (de-energized) state.
+        
+        This method is called on startup to ensure a known safe state.
+        State changes are propagated to the RelayStateManager and all listeners.
+        
+        Returns:
+            bool: True if all relays reset successfully
+        """
+        logger.info("=" * 40)
+        logger.info("STARTUP: Resetting all relays to de-energized state")
+        
+        success = True
+        
+        for module_name, module in self.relay_modules.items():
+            logger.info(f"  Resetting relay module: {module_name}")
+            
+            # Turn off each relay channel individually to ensure state propagation
+            for ch in module.channels:
+                if ch.enabled:
+                    try:
+                        # Use bypass_interlocks=True since OFF is always safe
+                        # notify=True to propagate state to UI
+                        result = module.write_single(ch.channel, False, bypass_interlocks=True)
+                        if result:
+                            logger.info(f"    {ch.name}: OFF (de-energized)")
+                        else:
+                            logger.warning(f"    {ch.name}: FAILED to reset")
+                            success = False
+                    except Exception as e:
+                        logger.error(f"    {ch.name}: ERROR - {e}")
+                        success = False
+        
+        if success:
+            logger.info("STARTUP: All relays reset to de-energized state")
+        else:
+            logger.warning("STARTUP: Some relays failed to reset - check hardware")
+        
+        logger.info("=" * 40)
+        return success
     
     def read(self) -> Dict[str, Any]:
         """
