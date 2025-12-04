@@ -160,7 +160,7 @@ class ControlPanel(QWidget):
             }
         """)
         self.vacuum_valve_btn.setToolTip("Vacuum valve - connects pump to chamber\nOPEN to draw vacuum")
-        self.vacuum_valve_btn.clicked.connect(lambda: self.on_valve_toggle("vacuum_valve"))
+        self.vacuum_valve_btn.clicked.connect(lambda checked: self.on_valve_toggle("vacuum_valve"))
         layout.addWidget(self.vacuum_valve_btn, 1, 0)
         
         # Vent Valve toggle (row 1, right) - releases vacuum
@@ -186,7 +186,7 @@ class ControlPanel(QWidget):
             }
         """)
         self.vent_valve_btn.setToolTip("Vent valve - releases chamber to atmosphere\nOPEN to release vacuum")
-        self.vent_valve_btn.clicked.connect(lambda: self.on_valve_toggle("vent_valve"))
+        self.vent_valve_btn.clicked.connect(lambda checked: self.on_valve_toggle("vent_valve"))
         layout.addWidget(self.vent_valve_btn, 1, 1)
         
         group.setLayout(layout)
@@ -252,6 +252,8 @@ class ControlPanel(QWidget):
     
     def on_valve_toggle(self, valve_name: str) -> None:
         """Handle valve toggle button click."""
+        logger.info(f"[ControlPanel] on_valve_toggle called for: {valve_name}")
+        
         if valve_name == "vacuum_valve":
             btn = self.vacuum_valve_btn
         elif valve_name == "vent_valve":
@@ -262,17 +264,19 @@ class ControlPanel(QWidget):
         
         state = btn.isChecked()
         self.valve_states[valve_name] = state
+        logger.info(f"[ControlPanel] {valve_name} button checked={state}")
         
         # Update button text
         valve_label = valve_name.replace("_", " ").title()
         if state:
             btn.setText(f"{valve_label}\nOPEN")
-            logger.info(f"{valve_name} OPEN requested")
+            logger.info(f"[ControlPanel] {valve_name} OPEN requested - emitting signal")
         else:
             btn.setText(f"{valve_label}\nCLOSED")
-            logger.info(f"{valve_name} CLOSED requested")
+            logger.info(f"[ControlPanel] {valve_name} CLOSED requested - emitting signal")
         
         self.valve_control_requested.emit(valve_name, state)
+        logger.info(f"[ControlPanel] Signal emitted for {valve_name}={state}")
     
     def on_tare(self) -> None:
         """Handle tare button click."""

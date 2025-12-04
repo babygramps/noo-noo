@@ -1066,10 +1066,16 @@ class WidgetLordsInterface(HardwareInterface):
         channel_name = str(state_or_channel)
         relay_state = bool(state) if state is not None else False
         
-        if module_name in self.relay_modules:
-            return self.relay_modules[module_name].write_by_name(channel_name, relay_state)
+        logger.info(f"[set_relay] module='{module_name}', channel='{channel_name}', state={relay_state}")
+        logger.info(f"[set_relay] Available relay modules: {list(self.relay_modules.keys())}")
         
-        logger.warning(f"Relay module '{module_name}' not found")
+        if module_name in self.relay_modules:
+            logger.info(f"[set_relay] Found module '{module_name}', calling write_by_name")
+            result = self.relay_modules[module_name].write_by_name(channel_name, relay_state)
+            logger.info(f"[set_relay] write_by_name returned: {result}")
+            return result
+        
+        logger.warning(f"[set_relay] Relay module '{module_name}' not found in {list(self.relay_modules.keys())}")
         return False
     
     def read_analog(self, module_name: str, channel_name: str) -> Optional[float]:

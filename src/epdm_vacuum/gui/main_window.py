@@ -772,25 +772,31 @@ class MainWindow(QMainWindow):
             state: True to open valve, False to close
         """
         state_str = "OPEN" if state else "CLOSED"
-        logger.info(f"Setting {valve_name} to {state_str}")
+        logger.info(f"[MainWindow] on_valve_control received: {valve_name} -> {state_str}")
         
         # Control valve via WidgetLords interface
-        if self.widgetlords_interface and self.widgetlords_interface.is_connected():
-            try:
-                success = self.widgetlords_interface.set_relay("relay_module", valve_name, state)
-                
-                if success:
-                    self.statusBar().showMessage(f"{valve_name}: {state_str}", 3000)
-                    logger.info(f"{valve_name} set to {state_str}")
-                else:
-                    self.statusBar().showMessage(f"{valve_name} control failed", 3000)
-                    logger.error(f"Failed to set {valve_name}")
+        if self.widgetlords_interface:
+            logger.info(f"[MainWindow] WidgetLords interface exists, connected={self.widgetlords_interface.is_connected()}")
+            if self.widgetlords_interface.is_connected():
+                try:
+                    logger.info(f"[MainWindow] Calling set_relay('relay_module', '{valve_name}', {state})")
+                    success = self.widgetlords_interface.set_relay("relay_module", valve_name, state)
                     
-            except Exception as e:
-                logger.error(f"Error controlling {valve_name}: {e}")
-                self.statusBar().showMessage(f"Valve error: {e}", 5000)
+                    if success:
+                        self.statusBar().showMessage(f"{valve_name}: {state_str}", 3000)
+                        logger.info(f"[MainWindow] {valve_name} set to {state_str} - SUCCESS")
+                    else:
+                        self.statusBar().showMessage(f"{valve_name} control failed", 3000)
+                        logger.error(f"[MainWindow] Failed to set {valve_name} - set_relay returned False")
+                        
+                except Exception as e:
+                    logger.error(f"[MainWindow] Error controlling {valve_name}: {e}", exc_info=True)
+                    self.statusBar().showMessage(f"Valve error: {e}", 5000)
+            else:
+                logger.warning(f"[MainWindow] WidgetLords interface not connected")
+                self.statusBar().showMessage("Hardware not connected - valve control unavailable", 3000)
         else:
-            logger.warning(f"WidgetLords interface not available - {valve_name} control disabled")
+            logger.warning(f"[MainWindow] WidgetLords interface is None - {valve_name} control disabled")
             self.statusBar().showMessage("Hardware not connected - valve control unavailable", 3000)
     
     def _register_relay_state_listener(self) -> None:
