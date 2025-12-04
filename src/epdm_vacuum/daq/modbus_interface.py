@@ -810,10 +810,14 @@ class ModbusInterface(HardwareInterface):
         Execute Software Tare on individual load cell channels.
         
         Captures current kg values as tare offsets for each channel.
-        Also sends hardware tare command to TLB4 for gross/net weight.
+        Also attempts to send hardware tare command to TLB4 for gross/net weight.
+        
+        The software tare (storing offsets) is the critical part - it always works.
+        The hardware tare command may fail due to timing issues but usually executes
+        on the TLB4 even if we get a garbled response.
         
         Returns:
-            bool: True if tare successful
+            bool: True if software tare successful (hardware tare is best-effort)
         """
         try:
             logger.info("Executing Software Tare on load cells...")
@@ -828,6 +832,7 @@ class ModbusInterface(HardwareInterface):
                     cfg.reg_channel_4
                 ]
                 
+                # Step 1: Software tare - capture current values as offsets
                 for i, (reg, ch_cfg) in enumerate(zip(channel_regs, cfg.channels)):
                     try:
                         if ch_cfg.enabled:
@@ -848,16 +853,29 @@ class ModbusInterface(HardwareInterface):
                 
                 logger.info(f"Software tare offsets: {[f'{x:.3f}' for x in self._channel_tare_offsets]}")
                 
-                # Flush serial buffers before writing to prevent checksum errors
-                # from leftover read data in the buffer
+                # Step 2: Hardware tare - send command to TLB4 (best-effort)
+                # The command usually works even if we get a garbled response
+                try:
+                    # Flush serial buffers
+                    if hasattr(self.instrument, 'serial') and self.instrument.serial:
+                        self.instrument.serial.reset_input_buffer()
+                        self.instrument.serial.reset_output_buffer()
+                    
+                    time.sleep(0.1)  # Longer delay for TLB4 to settle
+                    
+                    # Send hardware tare command
+                    self.instrument.write_registers(self.TLB4_COMMAND_REGISTER, [self.CMD_TARE])
+                    logger.info("Hardware tare command sent successfully")
+                    
+                except Exception as hw_error:
+                    # Hardware tare failed, but software tare succeeded
+                    # The TLB4 often executes the command even with a garbled response
+                    logger.warning(f"Hardware tare response error (command may have worked): {hw_error}")
+                
+                # Flush any residual data from TLB4's response
+                time.sleep(0.1)
                 if hasattr(self.instrument, 'serial') and self.instrument.serial:
                     self.instrument.serial.reset_input_buffer()
-                    self.instrument.serial.reset_output_buffer()
-                
-                time.sleep(0.05)
-                
-                # Send hardware tare to TLB4
-                self.instrument.write_registers(self.TLB4_COMMAND_REGISTER, [self.CMD_TARE])
                 
             logger.info("Tare complete")
             return True
