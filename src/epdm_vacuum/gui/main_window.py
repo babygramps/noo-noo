@@ -736,7 +736,11 @@ class MainWindow(QMainWindow):
     
     def on_pump_control(self, state: bool) -> None:
         """
-        Handle pump control request.
+        Handle pump control request with interlock checking.
+        
+        INTERLOCK SAFETY: The RelayStateManager checks safety interlocks before
+        allowing state changes. For example, the pump cannot be turned on if
+        the vent valve is open (would pump to atmosphere).
         
         Args:
             state: True to turn pump on, False to turn off
@@ -746,7 +750,7 @@ class MainWindow(QMainWindow):
         # Control pump via WidgetLords interface
         if self.widgetlords_interface and self.widgetlords_interface.is_connected():
             try:
-                # Try to set relay by name first (new API)
+                # Try to set relay by name first (new API with interlock checking)
                 success = self.widgetlords_interface.set_relay("relay_module", "vacuum_pump", state)
                 
                 if not success:
@@ -757,8 +761,8 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(f"Pump {'ON' if state else 'OFF'}", 3000)
                     logger.info(f"Pump relay set to {'ON' if state else 'OFF'}")
                 else:
-                    self.statusBar().showMessage("Pump control failed", 3000)
-                    logger.error("Failed to set pump relay")
+                    # Check if blocked by interlock
+                    self._handle_pump_interlock_failure(state)
                     
             except Exception as e:
                 logger.error(f"Error controlling pump: {e}")
@@ -767,9 +771,55 @@ class MainWindow(QMainWindow):
             logger.warning("WidgetLords interface not available - pump control disabled")
             self.statusBar().showMessage("Hardware not connected - pump control unavailable", 3000)
     
+    def _handle_pump_interlock_failure(self, requested_state: bool) -> None:
+        """
+        Handle pump control failure, checking for interlock reason.
+        
+        Args:
+            requested_state: The state that was requested
+        """
+        state_str = "ON" if requested_state else "OFF"
+        
+        # Get interlock status to provide meaningful feedback
+        try:
+            from ..daq.relay_state_manager import relay_state_manager
+            interlock_status = relay_state_manager.get_interlock_status()
+            
+            # Find any violated rules
+            violated_rules = [s for s in interlock_status if s.get("violated") and s.get("action") == "block"]
+            
+            if violated_rules:
+                # Show interlock message to user
+                rule = violated_rules[0]
+                message = rule.get("message", "Safety interlock prevented this action")
+                self.statusBar().showMessage(f"BLOCKED: {message}", 5000)
+                logger.warning(f"[MainWindow] Pump blocked by interlock: {message}")
+                
+                # Revert button state since action was blocked
+                self.control_panel.set_pump_state(not requested_state)
+                
+                # Show message box for important safety blocks
+                QMessageBox.warning(
+                    self,
+                    "Safety Interlock",
+                    f"Cannot turn pump {state_str}:\n\n{message}\n\n"
+                    f"Please resolve the conflict first."
+                )
+            else:
+                self.statusBar().showMessage("Pump control failed", 3000)
+                logger.error("[MainWindow] Failed to set pump - unknown reason")
+                
+        except Exception as e:
+            logger.error(f"Error checking interlock status: {e}")
+            self.statusBar().showMessage("Pump control failed", 3000)
+    
     def on_valve_control(self, valve_name: str, state: bool) -> None:
         """
-        Handle valve control request.
+        Handle valve control request with interlock checking.
+        
+        INTERLOCK SAFETY: The RelayStateManager checks safety interlocks before
+        allowing state changes. If a change would create a dangerous condition
+        (e.g., pump running with vent open), it is blocked and the user is notified.
         
         Args:
             valve_name: Name of the valve (e.g., "vacuum_valve", "vent_valve")
@@ -790,8 +840,8 @@ class MainWindow(QMainWindow):
                         self.statusBar().showMessage(f"{valve_name}: {state_str}", 3000)
                         logger.info(f"[MainWindow] {valve_name} set to {state_str} - SUCCESS")
                     else:
-                        self.statusBar().showMessage(f"{valve_name} control failed", 3000)
-                        logger.error(f"[MainWindow] Failed to set {valve_name} - set_relay returned False")
+                        # Check if blocked by interlock
+                        self._handle_valve_interlock_failure(valve_name, state)
                         
                 except Exception as e:
                     logger.error(f"[MainWindow] Error controlling {valve_name}: {e}", exc_info=True)
@@ -802,6 +852,49 @@ class MainWindow(QMainWindow):
         else:
             logger.warning(f"[MainWindow] WidgetLords interface is None - {valve_name} control disabled")
             self.statusBar().showMessage("Hardware not connected - valve control unavailable", 3000)
+    
+    def _handle_valve_interlock_failure(self, valve_name: str, requested_state: bool) -> None:
+        """
+        Handle valve control failure, checking for interlock reason.
+        
+        Args:
+            valve_name: Name of the valve that failed to change
+            requested_state: The state that was requested
+        """
+        state_str = "OPEN" if requested_state else "CLOSED"
+        
+        # Get interlock status to provide meaningful feedback
+        try:
+            from ..daq.relay_state_manager import relay_state_manager
+            interlock_status = relay_state_manager.get_interlock_status()
+            
+            # Find any violated rules
+            violated_rules = [s for s in interlock_status if s.get("violated") and s.get("action") == "block"]
+            
+            if violated_rules:
+                # Show interlock message to user
+                rule = violated_rules[0]
+                message = rule.get("message", "Safety interlock prevented this action")
+                self.statusBar().showMessage(f"BLOCKED: {message}", 5000)
+                logger.warning(f"[MainWindow] {valve_name} blocked by interlock: {message}")
+                
+                # Revert button state since action was blocked
+                self.control_panel.set_valve_state(valve_name, not requested_state)
+                
+                # Show message box for important safety blocks
+                QMessageBox.warning(
+                    self,
+                    "Safety Interlock",
+                    f"Cannot set {valve_name} to {state_str}:\n\n{message}\n\n"
+                    f"Please resolve the conflict first."
+                )
+            else:
+                self.statusBar().showMessage(f"{valve_name} control failed", 3000)
+                logger.error(f"[MainWindow] Failed to set {valve_name} - unknown reason")
+                
+        except Exception as e:
+            logger.error(f"Error checking interlock status: {e}")
+            self.statusBar().showMessage(f"{valve_name} control failed", 3000)
     
     def _register_relay_state_listener(self) -> None:
         """Register control panel as listener for global relay state changes."""

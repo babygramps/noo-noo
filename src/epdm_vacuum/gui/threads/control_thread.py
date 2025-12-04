@@ -48,8 +48,9 @@ class ControlThread(QThread):
         self.running = False
         self.current_test = None
         
-        # Track IO device states
-        self.io_device_states: Dict[str, bool] = {}
+        # NOTE: IO device states are managed by RelayStateManager (single source of truth)
+        # This thread receives state changes via callbacks and forwards them via signals
+        # to the GUI components. The actual state storage is in RelayStateManager.
         
         logger.info("Control thread initialized")
     
@@ -289,11 +290,16 @@ class ControlThread(QThread):
         """
         Handle IO device state change from test controller.
         
+        NOTE: State is managed by RelayStateManager (single source of truth).
+        This callback just forwards the notification to GUI components via signal.
+        The IOStatusWidget also subscribes directly to RelayStateManager for
+        immediate updates from all sources (manual control, test execution, etc.).
+        
         Args:
             device_name: Name of the IO device
             state: True for OPEN/ON, False for CLOSED/OFF
         """
-        self.io_device_states[device_name] = state
+        # Forward to GUI via signal (IOStatusWidget also listens to RelayStateManager directly)
         self.io_state_changed.emit(device_name, state)
         logger.debug(f"IO state changed: {device_name} -> {'OPEN' if state else 'CLOSED'}")
     

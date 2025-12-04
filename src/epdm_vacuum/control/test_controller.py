@@ -84,8 +84,10 @@ class TestController:
         self.csv_writer = None
         self.csv_header_written = False
         
-        # Track IO device states for logging
-        self.io_device_states: Dict[str, bool] = {}
+        # NOTE: IO device states are now managed by RelayStateManager (single source of truth)
+        # We query RelayStateManager when we need state for logging, rather than maintaining
+        # our own cache which could get out of sync.
+        # See: _get_io_device_states_for_logging()
         
         # Callbacks for status updates
         self.status_callback: Optional[Callable[[str], None]] = None
@@ -474,9 +476,10 @@ class TestController:
                     "test_state": self.state.value,
                 }
                 
-                # Add IO device states (valve positions, etc.)
-                for device_name, state in self.io_device_states.items():
-                    # Create column name like "valve_vent_valve" or "io_pump_relay"
+                # Add IO device states from RelayStateManager (single source of truth)
+                io_states = self._get_io_device_states_for_logging()
+                for device_name, state in io_states.items():
+                    # Create column name like "io_vent_valve" or "io_vacuum_pump"
                     column_name = f"io_{device_name}"
                     data_point[column_name] = "OPEN" if state else "CLOSED"
                 
@@ -649,6 +652,10 @@ class TestController:
         """
         Execute a single I/O action.
         
+        STATE MANAGEMENT: The _set_digital_output method updates the global
+        RelayStateManager, which is the single source of truth for all relay states.
+        The IO callback is then fired to notify listeners (GUI, etc.).
+        
         Args:
             action: IOAction to execute
         """
@@ -663,10 +670,10 @@ class TestController:
                 state = bool(action.value)
                 self._set_digital_output(action.device_name, state)
                 
-                # Track IO state
-                self.io_device_states[action.device_name] = state
+                # NOTE: State is now tracked by RelayStateManager (SSOT)
+                # The _set_digital_output method updates RelayStateManager
                 
-                # Notify IO callback
+                # Notify IO callback (GUI thread listening)
                 if self.io_callback:
                     self.io_callback(action.device_name, state)
             
@@ -676,7 +683,6 @@ class TestController:
             elif action.action_type == IOActionType.PULSE:
                 # Turn on
                 self._set_digital_output(action.device_name, True)
-                self.io_device_states[action.device_name] = True
                 if self.io_callback:
                     self.io_callback(action.device_name, True)
                 
@@ -686,7 +692,6 @@ class TestController:
                 
                 # Turn off
                 self._set_digital_output(action.device_name, False)
-                self.io_device_states[action.device_name] = False
                 if self.io_callback:
                     self.io_callback(action.device_name, False)
             
@@ -694,37 +699,89 @@ class TestController:
             logger.error(f"Error executing I/O action {action}: {e}", exc_info=True)
             # Don't fail the stage on I/O errors, just log them
     
-    def _set_digital_output(self, device_name: str, state: bool) -> None:
+    def _set_digital_output(self, device_name: str, state: bool, bypass_interlocks: bool = False) -> bool:
         """
-        Set a digital output (relay/valve) to ON or OFF.
+        Set a digital output (relay/valve) to ON or OFF with interlock checking.
+        
+        INTERLOCK SAFETY: State changes are checked against safety interlocks
+        (e.g., pump cannot run with vent valve open). If blocked, this method
+        returns False and the state is not changed.
+        
+        SINGLE SOURCE OF TRUTH: The RelayStateManager owns all relay state.
+        This method updates the manager, which then notifies all listeners.
         
         Args:
             device_name: Name of the device
             state: True for ON, False for OFF
+            bypass_interlocks: If True, skip safety checks (emergency stop)
+        
+        Returns:
+            bool: True if state was set, False if blocked by interlock
         """
         logger.debug(f"      → {device_name}: {'OPEN/ON' if state else 'CLOSED/OFF'}")
         
-        # Update global relay state manager (for cross-component sync)
+        # Check and update global relay state manager (SINGLE SOURCE OF TRUTH)
         try:
             from ..daq.relay_state_manager import relay_state_manager
             # Use "relay_module" as default module name (matches hardware_config.yaml)
-            relay_state_manager.set_state("relay_module", device_name, state)
+            success, error_msg = relay_state_manager.set_state(
+                "relay_module", device_name, state,
+                bypass_interlocks=bypass_interlocks
+            )
+            
+            if not success:
+                logger.warning(f"INTERLOCK: {error_msg}")
+                self._update_status(f"Blocked: {error_msg}")
+                return False
+                
         except Exception as e:
             logger.warning(f"Could not update relay state manager: {e}")
         
-        # Actually control the hardware via WidgetLords interface
+        # Interlock passed - control the hardware via WidgetLords interface
         if self.widgetlords:
             try:
-                # Try new-style call: set_relay(module_name, channel_name, state)
+                # The hardware interface will also check interlocks, but state manager
+                # already approved, so this should succeed
                 success = self.widgetlords.set_relay("relay_module", device_name, state)
                 if not success:
                     logger.warning(f"Failed to set {device_name} via WidgetLords interface")
+                    return False
                 else:
                     logger.debug(f"Hardware: {device_name} set to {'ON' if state else 'OFF'}")
             except Exception as e:
                 logger.error(f"Error setting digital output {device_name}: {e}")
+                return False
         else:
             logger.debug(f"No hardware interface - simulated: {device_name} = {'ON' if state else 'OFF'}")
+        
+        return True
+    
+    def _get_io_device_states_for_logging(self) -> Dict[str, bool]:
+        """
+        Get current IO device states from RelayStateManager for data logging.
+        
+        SINGLE SOURCE OF TRUTH: All relay/valve states are owned by RelayStateManager.
+        This method queries the manager to get current states for CSV logging.
+        
+        Returns:
+            Dict mapping device names to current states (True=ON/OPEN, False=OFF/CLOSED)
+        """
+        try:
+            from ..daq.relay_state_manager import relay_state_manager
+            
+            all_states = relay_state_manager.get_all_states()
+            
+            # Flatten the nested dict structure to {device_name: state}
+            io_states = {}
+            for module_name, channels in all_states.items():
+                for device_name, state in channels.items():
+                    io_states[device_name] = state
+            
+            return io_states
+            
+        except Exception as e:
+            logger.warning(f"Could not get IO states from RelayStateManager: {e}")
+            return {}
     
     def _set_analog_output(self, device_name: str, value: float) -> None:
         """
@@ -747,19 +804,38 @@ class TestController:
         logger.debug(f"Analog output {device_name}: {value}")
     
     def _execute_io_emergency_stop(self) -> None:
-        """Execute emergency I/O actions (vent valves, etc.)."""
-        logger.warning("Executing emergency I/O stop procedures")
+        """
+        Execute emergency I/O actions (vent valves, etc.).
         
-        # TODO: Implement emergency I/O actions
-        # - Open vent valve
-        # - Close inlet valve
-        # - Activate safety valve
-        # Example:
-        # self._set_digital_output("vent_valve", True)
-        # self._set_digital_output("inlet_valve", False)
-        # self._set_digital_output("safety_valve", True)
+        EMERGENCY STOP SAFETY: This method bypasses all interlocks to ensure
+        the system reaches a safe state regardless of current conditions.
+        The vent valve is opened and pump is stopped to release vacuum.
+        """
+        logger.warning("=" * 60)
+        logger.warning("EMERGENCY I/O STOP PROCEDURES")
+        logger.warning("=" * 60)
         
-        logger.debug("Emergency I/O actions completed")
+        # BYPASS INTERLOCKS for emergency stop - safety is paramount
+        # Stop the pump first
+        logger.warning("  E-STOP: Stopping vacuum pump...")
+        self._set_digital_output("vacuum_pump", False, bypass_interlocks=True)
+        
+        # Close vacuum valve to isolate pump
+        logger.warning("  E-STOP: Closing vacuum valve...")
+        self._set_digital_output("vacuum_valve", False, bypass_interlocks=True)
+        
+        # Open vent valve to release chamber pressure
+        logger.warning("  E-STOP: Opening vent valve...")
+        self._set_digital_output("vent_valve", True, bypass_interlocks=True)
+        
+        # Notify callbacks that IO states have changed
+        if self.io_callback:
+            self.io_callback("vacuum_pump", False)
+            self.io_callback("vacuum_valve", False)
+            self.io_callback("vent_valve", True)
+        
+        logger.warning("  E-STOP: Emergency I/O actions completed")
+        logger.warning("=" * 60)
     
     def _update_status(self, message: str) -> None:
         """

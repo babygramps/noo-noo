@@ -165,62 +165,95 @@ class RelayModule(SPIModule):
             logger.error(f"Failed to initialize relay module '{self.name}': {e}", exc_info=True)
             return False
     
-    def write_all(self, states: int) -> bool:
+    def write_all(self, states: int, bypass_interlocks: bool = False) -> bool:
         """
-        Write all relay states as a bitmask.
+        Write all relay states as a bitmask with interlock checking.
+        
+        WARNING: This method attempts to write all states at once. If any
+        individual state change would be blocked by interlocks, that specific
+        relay is skipped but others are still written.
+        
+        For strict interlock compliance, use write_single() for each relay.
         
         Args:
             states: Bitmask of relay states (0x0F = all on)
+            bypass_interlocks: If True, skip safety checks (emergency stop, etc.)
         
         Returns:
-            bool: True if successful
+            bool: True if all writes successful (may be partial if interlocks block)
         """
         try:
-            if self._hardware:
-                self._hardware.write(states)
+            all_success = True
             
-            # Update internal state tracking and global state manager
+            # Check and update each relay individually for interlock compliance
             for i in range(4):
                 new_state = bool(states & (1 << i))
-                self._relay_states[i] = new_state
-                
-                # Update global state manager
                 channel_name = self._get_channel_name(i)
-                if channel_name:
-                    self._state_manager.set_state(self.name, channel_name, new_state)
+                
+                # Check interlock via state manager
+                if channel_name and not bypass_interlocks:
+                    success, error_msg = self._state_manager.set_state(
+                        self.name, channel_name, new_state,
+                        bypass_interlocks=bypass_interlocks
+                    )
+                    if not success:
+                        logger.warning(f"Relay {i} blocked by interlock: {error_msg}")
+                        all_success = False
+                        continue  # Skip this relay, try others
+                
+                # Write to hardware
+                if self._hardware:
+                    self._hardware.write_single(i, 1 if new_state else 0)
+                
+                self._relay_states[i] = new_state
             
             logger.debug(f"Relay module '{self.name}': wrote 0x{states:02X}")
-            return True
+            return all_success
             
         except Exception as e:
             logger.error(f"Failed to write relay states: {e}")
             return False
     
-    def write_single(self, relay: int, state: bool) -> bool:
+    def write_single(self, relay: int, state: bool, bypass_interlocks: bool = False) -> bool:
         """
-        Write a single relay state.
+        Write a single relay state with interlock checking.
+        
+        INTERLOCK SAFETY: Before changing state, the global RelayStateManager
+        checks safety interlocks. If the proposed state would create a dangerous
+        condition, the change is blocked and this method returns False.
         
         Args:
             relay: Relay number (0-3)
             state: True for ON, False for OFF
+            bypass_interlocks: If True, skip safety checks (emergency stop, etc.)
         
         Returns:
-            bool: True if successful
+            bool: True if successful, False if blocked by interlock or error
         """
         if not 0 <= relay <= 3:
             logger.error(f"Invalid relay number: {relay}")
             return False
         
         try:
+            # Get channel name for interlock checking
+            channel_name = self._get_channel_name(relay)
+            
+            # Check interlocks via state manager BEFORE writing to hardware
+            if channel_name:
+                success, error_msg = self._state_manager.set_state(
+                    self.name, channel_name, state, 
+                    bypass_interlocks=bypass_interlocks
+                )
+                if not success:
+                    logger.warning(f"Relay write blocked by interlock: {error_msg}")
+                    return False
+            
+            # Interlock passed (or no channel name) - write to hardware
             if self._hardware:
                 self._hardware.write_single(relay, 1 if state else 0)
             
+            # Update local cache
             self._relay_states[relay] = state
-            
-            # Update global state manager with channel name
-            channel_name = self._get_channel_name(relay)
-            if channel_name:
-                self._state_manager.set_state(self.name, channel_name, state)
             
             logger.debug(f"Relay module '{self.name}': K{relay+1} = {'ON' if state else 'OFF'}")
             return True

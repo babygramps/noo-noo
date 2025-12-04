@@ -1,8 +1,14 @@
 """
 Relay State Manager - Global Relay State Tracking
 
-Provides a singleton manager for tracking relay/valve states across the application.
-This ensures all components have a consistent view of hardware state.
+SINGLE SOURCE OF TRUTH for all relay/valve states across the application.
+All components that need relay state should query or subscribe to this manager.
+
+Features:
+- Thread-safe state storage with locks
+- Change notification via listener callbacks
+- Safety interlocks to prevent dangerous state combinations
+- PyQt signal support for GUI updates
 
 Usage:
     from epdm_vacuum.daq.relay_state_manager import relay_state_manager
@@ -18,9 +24,14 @@ Usage:
     
     # Listen for changes
     relay_state_manager.add_listener(my_callback)
+
+SAFETY INTERLOCKS:
+- Pump cannot run with vent valve open (would pump to atmosphere)
+- Both valves open simultaneously is prevented
+- Configurable via set_interlocks_enabled()
 """
 
-from typing import Dict, Optional, Callable, List, Any
+from typing import Dict, Optional, Callable, List, Any, Tuple
 import logging
 from threading import Lock
 
@@ -63,29 +74,103 @@ class RelayStateManager:
         # PyQt signals support (set by GUI components)
         self._qt_signal = None
         
-        logger.info("RelayStateManager initialized")
+        # Safety interlocks configuration
+        # These define forbidden state combinations for safety
+        self._interlocks_enabled = True
+        self._interlock_rules = self._create_default_interlock_rules()
+        
+        logger.info("RelayStateManager initialized with safety interlocks")
+    
+    def _create_default_interlock_rules(self) -> List[Dict[str, Any]]:
+        """
+        Create default safety interlock rules.
+        
+        These rules define forbidden state combinations to prevent equipment damage
+        or unsafe conditions. Based on common PLC safety patterns.
+        
+        Returns:
+            List of interlock rule dictionaries
+        """
+        return [
+            {
+                "name": "pump_vent_interlock",
+                "description": "Pump cannot run with vent valve open (would pump to atmosphere)",
+                "condition": lambda states: (
+                    states.get("vacuum_pump", False) and 
+                    states.get("vent_valve", False)
+                ),
+                "action": "block",  # Prevent the state change
+                "message": "Cannot run pump with vent valve open - close vent valve first"
+            },
+            {
+                "name": "dual_valve_interlock", 
+                "description": "Vacuum and vent valves cannot both be open simultaneously",
+                "condition": lambda states: (
+                    states.get("vacuum_valve", False) and 
+                    states.get("vent_valve", False)
+                ),
+                "action": "block",
+                "message": "Cannot open both valves simultaneously - close one first"
+            },
+            {
+                "name": "pump_vacuum_valve_warning",
+                "description": "Pump running without vacuum valve open is ineffective",
+                "condition": lambda states: (
+                    states.get("vacuum_pump", False) and 
+                    not states.get("vacuum_valve", False) and
+                    not states.get("vent_valve", False)
+                ),
+                "action": "warn",  # Log warning but allow
+                "message": "Warning: Pump running but vacuum valve is closed"
+            },
+        ]
     
     def set_state(
         self, 
         module_name: str, 
         channel_name: str, 
         state: bool,
-        notify: bool = True
-    ) -> None:
+        notify: bool = True,
+        bypass_interlocks: bool = False
+    ) -> Tuple[bool, Optional[str]]:
         """
-        Set the state of a relay channel.
+        Set the state of a relay channel with safety interlock checking.
+        
+        INTERLOCK SAFETY: Before allowing a state change, this method checks
+        all configured interlock rules. If the proposed state would violate
+        a safety rule, the change is blocked and an error message is returned.
         
         Args:
             module_name: Name of the relay module
             channel_name: Name of the channel
             state: True for ON/OPEN, False for OFF/CLOSED
             notify: Whether to notify listeners (default True)
+            bypass_interlocks: If True, skip interlock checks (for emergency stop, etc.)
+        
+        Returns:
+            Tuple of (success: bool, error_message: Optional[str])
+            - (True, None) if state was set successfully
+            - (False, "error message") if interlock prevented the change
         """
         with self._state_lock:
             if module_name not in self._states:
                 self._states[module_name] = {}
             
             old_state = self._states[module_name].get(channel_name)
+            
+            # Skip interlock check if disabled, bypassed, or turning OFF (always allow off)
+            if not bypass_interlocks and self._interlocks_enabled and state:
+                # Build proposed state snapshot
+                proposed_states = self._get_flat_states_locked()
+                proposed_states[channel_name] = state
+                
+                # Check interlocks
+                blocked, message = self._check_interlocks(proposed_states, channel_name, state)
+                if blocked:
+                    logger.warning(f"INTERLOCK BLOCKED: {message}")
+                    return (False, message)
+            
+            # Apply the state change
             self._states[module_name][channel_name] = state
             
             # Only notify if state actually changed
@@ -93,6 +178,44 @@ class RelayStateManager:
                 self._notify_listeners(module_name, channel_name, state)
         
         logger.debug(f"Relay state set: {module_name}:{channel_name} = {'ON' if state else 'OFF'}")
+        return (True, None)
+    
+    def _get_flat_states_locked(self) -> Dict[str, bool]:
+        """Get flattened state dict (must be called with lock held)."""
+        flat = {}
+        for module_name, channels in self._states.items():
+            for channel_name, state in channels.items():
+                flat[channel_name] = state
+        return flat
+    
+    def _check_interlocks(
+        self, 
+        proposed_states: Dict[str, bool],
+        changing_channel: str,
+        new_state: bool
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Check if proposed state violates any interlock rules.
+        
+        Args:
+            proposed_states: Flat dict of proposed states including the change
+            changing_channel: Name of channel being changed
+            new_state: Proposed new state
+        
+        Returns:
+            Tuple of (is_blocked: bool, message: Optional[str])
+        """
+        for rule in self._interlock_rules:
+            try:
+                if rule["condition"](proposed_states):
+                    if rule["action"] == "block":
+                        return (True, rule["message"])
+                    elif rule["action"] == "warn":
+                        logger.warning(f"[INTERLOCK] {rule['message']}")
+            except Exception as e:
+                logger.error(f"Error evaluating interlock rule '{rule.get('name')}': {e}")
+        
+        return (False, None)
     
     def get_state(self, module_name: str, channel_name: str) -> bool:
         """
@@ -246,6 +369,98 @@ class RelayStateManager:
         with self._state_lock:
             self._states.clear()
         logger.debug("Relay state manager cleared")
+    
+    # ========== Interlock Management ==========
+    
+    def set_interlocks_enabled(self, enabled: bool) -> None:
+        """
+        Enable or disable safety interlocks.
+        
+        WARNING: Disabling interlocks removes safety protections!
+        Only disable for maintenance/testing with proper precautions.
+        
+        Args:
+            enabled: True to enable interlock checking
+        """
+        self._interlocks_enabled = enabled
+        logger.warning(f"Safety interlocks {'ENABLED' if enabled else 'DISABLED'}")
+    
+    def are_interlocks_enabled(self) -> bool:
+        """Check if interlocks are currently enabled."""
+        return self._interlocks_enabled
+    
+    def get_interlock_status(self) -> List[Dict[str, Any]]:
+        """
+        Get status of all interlock rules against current state.
+        
+        Returns:
+            List of dicts with rule name, description, and current violation status
+        """
+        with self._state_lock:
+            current_states = self._get_flat_states_locked()
+        
+        status = []
+        for rule in self._interlock_rules:
+            try:
+                is_violated = rule["condition"](current_states)
+                status.append({
+                    "name": rule["name"],
+                    "description": rule["description"],
+                    "action": rule["action"],
+                    "violated": is_violated,
+                    "message": rule["message"] if is_violated else None
+                })
+            except Exception as e:
+                status.append({
+                    "name": rule.get("name", "unknown"),
+                    "error": str(e)
+                })
+        
+        return status
+    
+    def add_interlock_rule(
+        self,
+        name: str,
+        description: str,
+        condition: Callable[[Dict[str, bool]], bool],
+        action: str = "block",
+        message: str = ""
+    ) -> None:
+        """
+        Add a custom interlock rule.
+        
+        Args:
+            name: Unique name for the rule
+            description: Human-readable description
+            condition: Function that takes flat state dict and returns True if violated
+            action: "block" to prevent state change, "warn" to just log
+            message: Message to display/return when rule is violated
+        """
+        self._interlock_rules.append({
+            "name": name,
+            "description": description,
+            "condition": condition,
+            "action": action,
+            "message": message
+        })
+        logger.info(f"Added interlock rule: {name}")
+    
+    def remove_interlock_rule(self, name: str) -> bool:
+        """
+        Remove an interlock rule by name.
+        
+        Args:
+            name: Name of the rule to remove
+        
+        Returns:
+            True if rule was found and removed
+        """
+        for i, rule in enumerate(self._interlock_rules):
+            if rule["name"] == name:
+                del self._interlock_rules[i]
+                logger.info(f"Removed interlock rule: {name}")
+                return True
+        return False
 
 
 # Global singleton instance

@@ -7,6 +7,11 @@ Shows the current state of all IO devices configured in hardware_config.yaml:
 - Analog outputs (if applicable)
 - Real-time state updates with color-coded indicators
 - Grouped by device type
+
+STATE MANAGEMENT:
+- This widget subscribes to RelayStateManager for relay/valve states
+- This ensures consistent state display for both manual control and test execution
+- Single source of truth pattern: RelayStateManager owns all relay state
 """
 
 from typing import Optional, Dict, Any, Union
@@ -23,7 +28,7 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QProgressBar,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 
 logger = logging.getLogger(__name__)
@@ -52,7 +57,83 @@ class IOStatusWidget(QWidget):
         self.init_ui()
         self.load_io_devices()
         
-        logger.info("IOStatusWidget initialized")
+        # Subscribe to RelayStateManager for real-time state updates
+        # This ensures we receive updates from both manual control and test execution
+        self._subscribe_to_relay_state_manager()
+        
+        logger.info("IOStatusWidget initialized and subscribed to RelayStateManager")
+    
+    def _subscribe_to_relay_state_manager(self) -> None:
+        """
+        Subscribe to the global RelayStateManager for state updates.
+        
+        This ensures the widget receives state changes from:
+        - Manual control via ControlPanel buttons
+        - Test sequence I/O actions via TestController
+        - Direct hardware interface calls
+        
+        SINGLE SOURCE OF TRUTH: RelayStateManager owns all relay state.
+        """
+        try:
+            from ...daq.relay_state_manager import relay_state_manager
+            
+            # Register our callback for state changes
+            relay_state_manager.add_listener(self._on_relay_state_changed)
+            
+            # Sync current state from manager (in case relays were already set)
+            self._sync_from_relay_manager()
+            
+            logger.info("IOStatusWidget subscribed to RelayStateManager")
+        except Exception as e:
+            logger.warning(f"Could not subscribe to RelayStateManager: {e}")
+    
+    def _on_relay_state_changed(self, module_name: str, channel_name: str, state: bool) -> None:
+        """
+        Handle relay state change from RelayStateManager.
+        
+        This is called whenever any relay state changes, regardless of source
+        (manual control, test sequence, or direct hardware calls).
+        
+        Args:
+            module_name: Name of the relay module (e.g., "relay_module")
+            channel_name: Name of the channel/device (e.g., "vacuum_valve")
+            state: New state (True = ON/OPEN, False = OFF/CLOSED)
+        """
+        # Use QTimer to ensure we update from the main thread (thread-safe)
+        QTimer.singleShot(0, lambda: self._update_device_state_from_manager(channel_name, state))
+    
+    def _update_device_state_from_manager(self, device_name: str, state: bool) -> None:
+        """
+        Update device state display from RelayStateManager notification.
+        
+        This is called on the main GUI thread via QTimer.singleShot.
+        
+        Args:
+            device_name: Name of the device
+            state: New state
+        """
+        if device_name in self.device_widgets:
+            self.set_device_state(device_name, state)
+            logger.debug(f"IOStatusWidget updated from RelayStateManager: {device_name} -> {'OPEN' if state else 'CLOSED'}")
+    
+    def _sync_from_relay_manager(self) -> None:
+        """
+        Synchronize current state from RelayStateManager.
+        
+        Called on initialization to ensure widget shows current hardware state.
+        """
+        try:
+            from ...daq.relay_state_manager import relay_state_manager
+            
+            all_states = relay_state_manager.get_all_states()
+            for module_name, channels in all_states.items():
+                for channel_name, state in channels.items():
+                    if channel_name in self.device_widgets:
+                        self.set_device_state(channel_name, state)
+            
+            logger.debug(f"IOStatusWidget synced from RelayStateManager: {all_states}")
+        except Exception as e:
+            logger.warning(f"Could not sync from RelayStateManager: {e}")
     
     def init_ui(self) -> None:
         """Initialize the user interface."""
@@ -73,56 +154,67 @@ class IOStatusWidget(QWidget):
         layout.addStretch()
     
     def load_io_devices(self) -> None:
-        """Load IO device configurations from hardware_config.yaml."""
+        """
+        Load IO device configurations from hardware_config.yaml.
+        
+        SINGLE SOURCE OF TRUTH: All IO devices are now derived from the
+        spi_modules configuration in hardware_config.yaml. The io_devices
+        section is used only as a fallback for additional metadata (device_role).
+        
+        This eliminates the duplicate configuration problem where the same
+        devices were defined in both spi_modules and io_devices.
+        """
         try:
             from ...config.settings import get_settings
             
             config_file = Path(__file__).parent.parent.parent / "config" / "hardware_config.yaml"
             settings = get_settings(str(config_file))
             
-            # Load digital outputs from io_devices section
+            # Load device roles from io_devices section (for metadata only)
+            device_roles = {}
             digital_outputs = settings.get("io_devices", "digital_outputs", default=[])
             if isinstance(digital_outputs, list):
                 for device in digital_outputs:
                     if isinstance(device, dict) and "name" in device:
-                        device_name = device["name"]
-                        self.io_devices[device_name] = {
-                            "type": "Digital",
+                        device_roles[device["name"]] = {
+                            "device_role": device.get("device_role", "generic"),
                             "description": device.get("description", ""),
-                            "channel": device.get("channel", 0),
                             "default_state": device.get("default_state", False)
                         }
-                        # Initialize state as NOT SET
-                        self.device_states[device_name] = None
             
-            # Load analog outputs from io_devices section (if any)
-            analog_outputs = settings.get("io_devices", "analog_outputs", default=[])
-            if isinstance(analog_outputs, list):
-                for device in analog_outputs:
-                    if isinstance(device, dict) and "name" in device:
-                        device_name = device["name"]
-                        self.io_devices[device_name] = {
-                            "type": "AnalogOutput",
-                            "description": device.get("description", ""),
-                            "channel": device.get("channel", 0),
-                            "min_value": device.get("min_value", 0.0),
-                            "max_value": device.get("max_value", 10.0)
-                        }
-                        # Analog devices don't have boolean state
-                        self.device_states[device_name] = None
-            
-            # Load SPI analog inputs from hardware.widgetlords.spi_modules
-            # These are sensors like pressure transmitters
+            # PRIMARY: Load all devices from spi_modules configuration
+            # This is the single source of truth for hardware configuration
             spi_modules = settings.get("hardware", "widgetlords", "spi_modules", default=[])
             if isinstance(spi_modules, list):
                 for module in spi_modules:
                     if isinstance(module, dict):
                         module_type = module.get("module_type", "")
                         module_name = module.get("name", "")
+                        channels = module.get("channels", [])
                         
-                        # Only process analog input modules (8AI)
-                        if module_type == "PI-SPI-DIN-8AI":
-                            channels = module.get("channels", [])
+                        # Process relay output modules (4KO) - DIGITAL OUTPUTS
+                        if module_type == "PI-SPI-DIN-4KO":
+                            for ch in channels:
+                                if isinstance(ch, dict) and ch.get("enabled", False):
+                                    ch_name = ch.get("name", f"relay_{ch.get('channel', 0)}")
+                                    
+                                    # Get additional metadata from device_roles if available
+                                    role_info = device_roles.get(ch_name, {})
+                                    
+                                    self.io_devices[ch_name] = {
+                                        "type": "Digital",
+                                        "module_name": module_name,
+                                        "description": ch.get("description", role_info.get("description", "")),
+                                        "channel": ch.get("channel", 0),
+                                        "device_role": role_info.get("device_role", "generic"),
+                                        "default_state": role_info.get("default_state", False)
+                                    }
+                                    # Initialize state as NOT SET
+                                    self.device_states[ch_name] = None
+                                    logger.info(f"Loaded SPI relay output: {ch_name} ({ch.get('description', '')})")
+                        
+                        # Process analog input modules (8AI) - SENSORS
+                        elif module_type == "PI-SPI-DIN-8AI":
                             for ch in channels:
                                 if isinstance(ch, dict) and ch.get("enabled", False):
                                     ch_name = ch.get("name", f"ch{ch.get('channel', 0)}")
@@ -139,8 +231,39 @@ class IOStatusWidget(QWidget):
                                     # Initialize value as None
                                     self.analog_input_values[ch_name] = None
                                     logger.info(f"Loaded SPI analog input: {ch_name} ({ch.get('description', '')})")
+                        
+                        # Process digital input modules (8DI)
+                        elif module_type == "PI-SPI-DIN-8DI":
+                            for ch in channels:
+                                if isinstance(ch, dict) and ch.get("enabled", False):
+                                    ch_name = ch.get("name", f"di_{ch.get('channel', 0)}")
+                                    self.io_devices[ch_name] = {
+                                        "type": "DigitalInput",
+                                        "module_name": module_name,
+                                        "description": ch.get("description", ""),
+                                        "channel": ch.get("channel", 0),
+                                        "inverted": ch.get("inverted", False)
+                                    }
+                                    self.device_states[ch_name] = None
+                                    logger.info(f"Loaded SPI digital input: {ch_name}")
+                        
+                        # Process analog output modules (4AO)
+                        elif module_type == "PI-SPI-DIN-4AO":
+                            for ch in channels:
+                                if isinstance(ch, dict) and ch.get("enabled", False):
+                                    ch_name = ch.get("name", f"ao_{ch.get('channel', 0)}")
+                                    self.io_devices[ch_name] = {
+                                        "type": "AnalogOutput",
+                                        "module_name": module_name,
+                                        "description": ch.get("description", ""),
+                                        "channel": ch.get("channel", 0),
+                                        "min_value": ch.get("min_value", 0.0),
+                                        "max_value": ch.get("max_value", 10.0)
+                                    }
+                                    self.device_states[ch_name] = None
+                                    logger.info(f"Loaded SPI analog output: {ch_name}")
             
-            logger.info(f"Loaded {len(self.io_devices)} IO devices from config")
+            logger.info(f"Loaded {len(self.io_devices)} IO devices from spi_modules config (SSOT)")
             
             # Create UI for loaded devices
             self._create_device_ui()
