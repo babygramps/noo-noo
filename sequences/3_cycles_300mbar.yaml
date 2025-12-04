@@ -1,0 +1,107 @@
+name: 3 Cycles of 300 mbar
+description: Pull vacuum to 300 mbar, isolate chamber, hold for 3 minutes, then release. Repeat 3 times.
+cycles: 3
+created_date: '2024-12-04T00:00:00'
+modified_date: '2024-12-04T00:00:00'
+author: User
+stages:
+  # Stage 1: Pull vacuum to 300 mbar
+  - name: Pull Vacuum (300 mbar)
+    target_vacuum_bar: 0.3
+    max_time_seconds: 120.0
+    min_time_seconds: 5.0
+    pump_mode: maintain
+    vacuum_tolerance_bar: 0.02
+    collect_data: true
+    io_actions:
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: true
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Open vacuum valve to connect pump to chamber
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Close vent valve to seal chamber
+  
+  # Stage 2: Isolate chamber (close vacuum valve, pump off)
+  - name: Isolate Chamber
+    target_vacuum_bar: null
+    max_time_seconds: 5.0
+    min_time_seconds: 2.0
+    pump_mode: off
+    vacuum_tolerance_bar: 0.05
+    collect_data: true
+    io_actions:
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Close vacuum valve to isolate chamber from pump
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Keep vent valve closed
+  
+  # Stage 3: Hold for 3 minutes with all valves closed
+  - name: Hold (3 min)
+    target_vacuum_bar: null
+    max_time_seconds: 180.0
+    min_time_seconds: 180.0
+    pump_mode: off
+    vacuum_tolerance_bar: 0.05
+    collect_data: true
+    io_actions:
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Keep vacuum valve closed
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Keep vent valve closed (sealed)
+  
+  # Stage 4: Release vacuum
+  - name: Release
+    target_vacuum_bar: null
+    max_time_seconds: 30.0
+    min_time_seconds: 10.0
+    pump_mode: off
+    vacuum_tolerance_bar: 0.05
+    collect_data: true
+    io_actions:
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Keep vacuum valve closed
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: true
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Open vent valve to release vacuum
+
