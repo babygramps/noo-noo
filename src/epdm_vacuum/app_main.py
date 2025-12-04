@@ -30,6 +30,10 @@ logging.basicConfig(
     ],
 )
 
+# Temporarily suppress noisy Modbus logging (set to WARNING to hide INFO/DEBUG)
+logging.getLogger("epdm_vacuum.daq.modbus_interface").setLevel(logging.WARNING)
+logging.getLogger("minimalmodbus").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 

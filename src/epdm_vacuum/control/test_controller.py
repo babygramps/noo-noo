@@ -659,23 +659,30 @@ class TestController:
         Args:
             action: IOAction to execute
         """
+        logger.info(f"[IO_ACTION] Executing: {action.device_name} = {action.value} (type={action.action_type.value})")
+        
         try:
             # Apply delay if specified
             if action.delay_seconds > 0:
-                logger.debug(f"Delaying {action.delay_seconds}s before I/O action")
+                logger.info(f"[IO_ACTION] Delaying {action.delay_seconds}s before I/O action")
                 time.sleep(action.delay_seconds)
             
             # Execute based on action type
             if action.action_type == IOActionType.DIGITAL_OUTPUT:
                 state = bool(action.value)
-                self._set_digital_output(action.device_name, state)
+                logger.info(f"[IO_ACTION] Calling _set_digital_output('{action.device_name}', {state})")
+                success = self._set_digital_output(action.device_name, state)
+                logger.info(f"[IO_ACTION] _set_digital_output returned: {success}")
                 
                 # NOTE: State is now tracked by RelayStateManager (SSOT)
                 # The _set_digital_output method updates RelayStateManager
                 
                 # Notify IO callback (GUI thread listening)
                 if self.io_callback:
+                    logger.info(f"[IO_ACTION] Notifying IO callback: {action.device_name} = {state}")
                     self.io_callback(action.device_name, state)
+                else:
+                    logger.warning(f"[IO_ACTION] No IO callback registered!")
             
             elif action.action_type == IOActionType.ANALOG_OUTPUT:
                 self._set_analog_output(action.device_name, float(action.value))
@@ -718,41 +725,45 @@ class TestController:
         Returns:
             bool: True if state was set, False if blocked by interlock
         """
-        logger.debug(f"      → {device_name}: {'OPEN/ON' if state else 'CLOSED/OFF'}")
+        logger.info(f"[SET_DO] {device_name} -> {'OPEN/ON' if state else 'CLOSED/OFF'} (bypass={bypass_interlocks})")
         
         # Check and update global relay state manager (SINGLE SOURCE OF TRUTH)
         try:
             from ..daq.relay_state_manager import relay_state_manager
             # Use "relay_module" as default module name (matches hardware_config.yaml)
+            logger.info(f"[SET_DO] Checking interlock via RelayStateManager...")
             success, error_msg = relay_state_manager.set_state(
                 "relay_module", device_name, state,
                 bypass_interlocks=bypass_interlocks
             )
             
             if not success:
-                logger.warning(f"INTERLOCK: {error_msg}")
+                logger.warning(f"[SET_DO] INTERLOCK BLOCKED: {error_msg}")
                 self._update_status(f"Blocked: {error_msg}")
                 return False
+            
+            logger.info(f"[SET_DO] RelayStateManager accepted state change")
                 
         except Exception as e:
-            logger.warning(f"Could not update relay state manager: {e}")
+            logger.warning(f"[SET_DO] Could not update relay state manager: {e}")
         
         # Interlock passed - control the hardware via WidgetLords interface
         if self.widgetlords:
+            logger.info(f"[SET_DO] Calling widgetlords.set_relay('relay_module', '{device_name}', {state})")
             try:
                 # The hardware interface will also check interlocks, but state manager
                 # already approved, so this should succeed
                 success = self.widgetlords.set_relay("relay_module", device_name, state)
                 if not success:
-                    logger.warning(f"Failed to set {device_name} via WidgetLords interface")
+                    logger.warning(f"[SET_DO] FAILED: widgetlords.set_relay returned False for {device_name}")
                     return False
                 else:
-                    logger.debug(f"Hardware: {device_name} set to {'ON' if state else 'OFF'}")
+                    logger.info(f"[SET_DO] SUCCESS: Hardware {device_name} set to {'ON' if state else 'OFF'}")
             except Exception as e:
-                logger.error(f"Error setting digital output {device_name}: {e}")
+                logger.error(f"[SET_DO] EXCEPTION setting digital output {device_name}: {e}", exc_info=True)
                 return False
         else:
-            logger.debug(f"No hardware interface - simulated: {device_name} = {'ON' if state else 'OFF'}")
+            logger.warning(f"[SET_DO] NO HARDWARE INTERFACE - simulated: {device_name} = {'ON' if state else 'OFF'}")
         
         return True
     
