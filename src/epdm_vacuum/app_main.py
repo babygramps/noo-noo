@@ -30,9 +30,10 @@ logging.basicConfig(
     ],
 )
 
-# Temporarily suppress noisy Modbus logging (set to WARNING to hide INFO/DEBUG)
-logging.getLogger("epdm_vacuum.daq.modbus_interface").setLevel(logging.WARNING)
-logging.getLogger("minimalmodbus").setLevel(logging.WARNING)
+# Temporarily suppress ALL Modbus logging (known hardware issue with current reversal)
+# TODO: Re-enable after fixing Modbus/relay interference issue
+logging.getLogger("epdm_vacuum.daq.modbus_interface").setLevel(logging.CRITICAL)
+logging.getLogger("minimalmodbus").setLevel(logging.CRITICAL)
 
 logger = logging.getLogger(__name__)
 
