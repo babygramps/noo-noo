@@ -23,6 +23,14 @@ class IOActionTiming(Enum):
     DURING_STAGE = "during_stage"
     END_OF_STAGE = "end_of_stage"
     AFTER_STAGE = "after_stage"
+    
+    @classmethod
+    def from_string(cls, value: str) -> "IOActionTiming":
+        """Convert string value to IOActionTiming enum."""
+        for member in cls:
+            if member.value == value:
+                return member
+        raise ValueError(f"Unknown IOActionTiming: {value}")
 
 
 class IOActionType(Enum):
@@ -30,6 +38,14 @@ class IOActionType(Enum):
     DIGITAL_OUTPUT = "digital_output"  # Set relay/valve on/off
     ANALOG_OUTPUT = "analog_output"    # Set analog output value
     PULSE = "pulse"                     # Pulse output for duration
+    
+    @classmethod
+    def from_string(cls, value: str) -> "IOActionType":
+        """Convert string value to IOActionType enum."""
+        for member in cls:
+            if member.value == value:
+                return member
+        raise ValueError(f"Unknown IOActionType: {value}")
 
 
 class PumpMode(Enum):
@@ -37,6 +53,14 @@ class PumpMode(Enum):
     CONTINUOUS = "continuous"         # Pump ON entire stage
     MAINTAIN_VACUUM = "maintain"     # Cycle pump to maintain vacuum at setpoint
     OFF = "off"                       # Pump stays OFF (for venting stages, etc.)
+    
+    @classmethod
+    def from_string(cls, value: str) -> "PumpMode":
+        """Convert string value to PumpMode enum."""
+        for member in cls:
+            if member.value == value:
+                return member
+        raise ValueError(f"Unknown PumpMode: {value}")
 
 
 @dataclass
@@ -111,9 +135,9 @@ class IOAction:
         """Create IOAction from dictionary."""
         # Convert string enums back to enum types
         if isinstance(data.get("action_type"), str):
-            data["action_type"] = IOActionType(data["action_type"])
+            data["action_type"] = IOActionType.from_string(data["action_type"])
         if isinstance(data.get("timing"), str):
-            data["timing"] = IOActionTiming(data["timing"])
+            data["timing"] = IOActionTiming.from_string(data["timing"])
         
         return cls(**data)
     
@@ -371,7 +395,7 @@ class TestStage:
         
         # Convert pump_mode if it's a string
         if "pump_mode" in data and isinstance(data["pump_mode"], str):
-            data["pump_mode"] = PumpMode(data["pump_mode"])
+            data["pump_mode"] = PumpMode.from_string(data["pump_mode"])
         
         # Handle legacy fields (for backward compatibility)
         legacy_mappings = {
@@ -438,7 +462,7 @@ class TestSequence:
         # Ensure pump_mode is PumpMode enum in all stages
         for stage in self.stages:
             if isinstance(stage.pump_mode, str):
-                stage.pump_mode = PumpMode(stage.pump_mode)
+                stage.pump_mode = PumpMode.from_string(stage.pump_mode)
     
     def add_stage(self, stage: TestStage, index: Optional[int] = None) -> None:
         """
