@@ -190,9 +190,9 @@ hardware:
       # Software taring is available via the GUI (tare offsets stored separately).
       #
       channel_scaling:
-        # Divisions per kg - ADJUST THIS ONE VALUE to calibrate all channels
-        # Start with 5000, then adjust based on actual readings
-        kg_per_division: 5000.0
+        # Divisions per kg - Calibrated from 500g test weight
+        # 36024 raw divisions / 0.5 kg = 72048
+        kg_per_division: 72000.0
         
         # Per-channel enable/disable
         channel_1:
