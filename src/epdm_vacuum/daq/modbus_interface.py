@@ -403,10 +403,18 @@ class ModbusInterface(HardwareInterface):
             cfg.reg_channel_4
         ]
         
+        # Periodic diagnostic logging (every 50 reads = ~5 seconds at 10Hz)
+        diagnostic_log = (self._read_count % 50 == 1)
+        
         if debug_this_read:
             logger.info(f"[TLB4 Read #{self._read_count}] Channel registers: {channel_regs}")
             logger.info(f"  Channel configs: " + 
                 ", ".join(f"CH{i+1}:{ch.enabled}" for i, ch in enumerate(cfg.channels)))
+        
+        if diagnostic_log:
+            logger.info("=" * 70)
+            logger.info(f"[MODBUS DIAGNOSTIC] Read #{self._read_count} | kg_per_division={cfg.kg_per_division}")
+            logger.info(f"  Tare offsets (kg): {[f'{x:.4f}' for x in self._channel_tare_offsets]}")
         
         for i, (reg, ch_cfg) in enumerate(zip(channel_regs, cfg.channels), start=1):
             try:
@@ -416,28 +424,48 @@ class ModbusInterface(HardwareInterface):
                     
                     # Add to moving average buffer for smoothing
                     self._channel_buffers[i - 1].append(raw_value)
+                    buffer_len = len(self._channel_buffers[i - 1])
                     
                     # Use averaged raw value for stable readings
-                    avg_raw = sum(self._channel_buffers[i - 1]) / len(self._channel_buffers[i - 1])
+                    avg_raw = sum(self._channel_buffers[i - 1]) / buffer_len
+                    
+                    # Get min/max from buffer to see fluctuation range
+                    raw_min = min(self._channel_buffers[i - 1])
+                    raw_max = max(self._channel_buffers[i - 1])
+                    raw_spread = raw_max - raw_min
                     
                     # Simple conversion: kg = avg_raw / kg_per_division
-                    kg_value = ch_cfg.raw_to_kg(avg_raw, cfg.kg_per_division)
+                    kg_before_tare = ch_cfg.raw_to_kg(avg_raw, cfg.kg_per_division)
                     
                     # Apply software tare offset
-                    kg_value -= self._channel_tare_offsets[i - 1]
+                    tare_offset = self._channel_tare_offsets[i - 1]
+                    kg_value = kg_before_tare - tare_offset
                     result[f"load_cell_{i}_kg"] = kg_value
                     
                     if debug_this_read:
                         logger.info(f"  CH{i} @ reg {reg}: raw={raw_value}, avg={avg_raw:.0f}, kg={kg_value:.3f}")
+                    
+                    if diagnostic_log:
+                        logger.info(f"  CH{i}: raw={raw_value:>8} | avg={avg_raw:>10.1f} | "
+                                   f"spread={raw_spread:>6} (min={raw_min}, max={raw_max}) | "
+                                   f"kg_raw={kg_before_tare:>8.4f} - tare={tare_offset:>8.4f} = {kg_value:>8.4f} kg")
                 else:
                     result[f"load_cell_{i}_raw"] = 0
                     result[f"load_cell_{i}_kg"] = 0.0
                     if debug_this_read:
                         logger.info(f"  CH{i} @ reg {reg}: DISABLED")
+                    if diagnostic_log:
+                        logger.info(f"  CH{i}: DISABLED")
             except Exception as e:
                 logger.warning(f"Failed to read channel {i} @ register {reg}: {e}")
                 result[f"load_cell_{i}_raw"] = 0
                 result[f"load_cell_{i}_kg"] = 0.0
+        
+        if diagnostic_log:
+            # Calculate what 500g should read as
+            expected_raw_per_500g = cfg.kg_per_division * 0.5
+            logger.info(f"  [INFO] For 500g weight: expected raw increase = {expected_raw_per_500g:.0f}")
+            logger.info("=" * 70)
         
         # Read status register
         try:
@@ -1554,6 +1582,61 @@ class ModbusInterface(HardwareInterface):
         
         self.tlb4_config.kg_per_division = value
         logger.info(f"kg_per_division set to {value}")
+    
+    def print_diagnostic(self) -> None:
+        """
+        Print a detailed diagnostic of current readings and configuration.
+        
+        Call this to debug scaling issues. Shows:
+        - Current raw values and averages
+        - Scaling calculation breakdown
+        - What different weights should read as
+        """
+        cfg = self.tlb4_config
+        
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("MODBUS DIAGNOSTIC DUMP")
+        logger.info("=" * 80)
+        logger.info(f"kg_per_division = {cfg.kg_per_division}")
+        logger.info(f"  -> 1 kg = {cfg.kg_per_division:.0f} raw divisions")
+        logger.info(f"  -> 500g = {cfg.kg_per_division * 0.5:.0f} raw divisions")
+        logger.info(f"  -> 100g = {cfg.kg_per_division * 0.1:.0f} raw divisions")
+        logger.info("")
+        logger.info("Software Tare Offsets:")
+        for i, offset in enumerate(self._channel_tare_offsets, 1):
+            logger.info(f"  CH{i}: {offset:.4f} kg")
+        logger.info("")
+        logger.info("Current Buffer Contents:")
+        
+        for i in range(4):
+            ch_cfg = cfg.channels[i]
+            if ch_cfg.enabled and len(self._channel_buffers[i]) > 0:
+                buf = list(self._channel_buffers[i])
+                avg = sum(buf) / len(buf)
+                min_v = min(buf)
+                max_v = max(buf)
+                spread = max_v - min_v
+                
+                kg_before_tare = avg / cfg.kg_per_division
+                kg_after_tare = kg_before_tare - self._channel_tare_offsets[i]
+                
+                logger.info(f"  CH{i+1}:")
+                logger.info(f"    Raw buffer ({len(buf)} samples): {buf}")
+                logger.info(f"    Min={min_v}, Max={max_v}, Spread={spread}, Avg={avg:.1f}")
+                logger.info(f"    Calculation: {avg:.1f} / {cfg.kg_per_division} = {kg_before_tare:.4f} kg (before tare)")
+                logger.info(f"    After tare:  {kg_before_tare:.4f} - {self._channel_tare_offsets[i]:.4f} = {kg_after_tare:.4f} kg")
+            elif not ch_cfg.enabled:
+                logger.info(f"  CH{i+1}: DISABLED")
+            else:
+                logger.info(f"  CH{i+1}: Buffer empty")
+        
+        logger.info("")
+        logger.info("If 500g reads incorrectly, adjust kg_per_division:")
+        logger.info("  New value = (current_raw_increase) / 0.5")
+        logger.info("  Example: if raw goes up by 2500 for 500g, kg_per_division should be 5000")
+        logger.info("=" * 80)
+        logger.info("")
     
     def get_channel_raw_value(self, channel: int) -> Tuple[bool, int, str]:
         """
