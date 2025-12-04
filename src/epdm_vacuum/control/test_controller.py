@@ -175,7 +175,18 @@ class TestController:
             bool: True if test completed successfully
         """
         try:
-            logger.info("Starting test sequence")
+            logger.info("=" * 70)
+            logger.info("[RUN_TEST] ========== TEST STARTING ==========")
+            logger.info(f"[RUN_TEST] current_sequence: {self.current_sequence}")
+            logger.info(f"[RUN_TEST] sequence name: {self.current_sequence.name if self.current_sequence else 'N/A'}")
+            logger.info(f"[RUN_TEST] num stages: {len(self.current_sequence.stages) if self.current_sequence else 0}")
+            logger.info(f"[RUN_TEST] widgetlords: {self.widgetlords}")
+            logger.info(f"[RUN_TEST] widgetlords type: {type(self.widgetlords)}")
+            if self.widgetlords:
+                logger.info(f"[RUN_TEST] widgetlords.is_connected(): {self.widgetlords.is_connected()}")
+                logger.info(f"[RUN_TEST] widgetlords.relay_modules: {list(self.widgetlords.relay_modules.keys()) if hasattr(self.widgetlords, 'relay_modules') else 'N/A'}")
+            logger.info("=" * 70)
+            
             self.state = TestState.INITIALIZING
             self.test_start_time = time.time()
             self.test_data = []
@@ -196,6 +207,7 @@ class TestController:
             self.state = TestState.RUNNING
             
             # Execute sequence or single test
+            logger.info(f"[RUN_TEST] About to execute - current_sequence is {'SET' if self.current_sequence else 'NONE'}")
             if self.current_sequence:
                 success = self._run_sequence()
             else:
@@ -315,6 +327,20 @@ class TestController:
             stage_start_time = time.time()
             stage_data = []
             
+            # DEBUG: Log stage execution start
+            logger.info("=" * 60)
+            logger.info(f"[STAGE_EXEC] Starting stage: {stage.name}")
+            logger.info(f"[STAGE_EXEC] pump_mode = {stage.pump_mode} (type: {type(stage.pump_mode)})")
+            logger.info(f"[STAGE_EXEC] PumpMode.CONTINUOUS = {PumpMode.CONTINUOUS}")
+            logger.info(f"[STAGE_EXEC] PumpMode.MAINTAIN_VACUUM = {PumpMode.MAINTAIN_VACUUM}")
+            logger.info(f"[STAGE_EXEC] PumpMode.OFF = {PumpMode.OFF}")
+            logger.info(f"[STAGE_EXEC] widgetlords interface: {self.widgetlords}")
+            logger.info(f"[STAGE_EXEC] widgetlords connected: {self.widgetlords.is_connected() if self.widgetlords else 'N/A'}")
+            logger.info(f"[STAGE_EXEC] IO actions count: {len(stage.io_actions)}")
+            for i, action in enumerate(stage.io_actions):
+                logger.info(f"[STAGE_EXEC]   IO[{i}]: {action.device_name} = {action.value} @ {action.timing}")
+            logger.info("=" * 60)
+            
             # Execute I/O actions: BEFORE_STAGE
             self._execute_io_actions(stage, IOActionTiming.BEFORE_STAGE)
             
@@ -322,15 +348,21 @@ class TestController:
             self._execute_io_actions(stage, IOActionTiming.START_OF_STAGE)
             
             # Control pump based on mode
+            logger.info(f"[STAGE_EXEC] Checking pump_mode...")
             if stage.pump_mode == PumpMode.CONTINUOUS:
+                logger.info(f"[STAGE_EXEC] MATCH: pump_mode == CONTINUOUS -> calling _control_pump(True)")
                 self._update_status("Starting vacuum pump (continuous mode)...")
                 self._control_pump(True)
             elif stage.pump_mode == PumpMode.MAINTAIN_VACUUM:
+                logger.info(f"[STAGE_EXEC] MATCH: pump_mode == MAINTAIN_VACUUM -> calling _control_pump(True)")
                 self._update_status("Starting vacuum pump (maintain mode)...")
                 self._control_pump(True)
             elif stage.pump_mode == PumpMode.OFF:
+                logger.info(f"[STAGE_EXEC] MATCH: pump_mode == OFF -> calling _control_pump(False)")
                 self._update_status("Pump OFF mode...")
                 self._control_pump(False)
+            else:
+                logger.warning(f"[STAGE_EXEC] NO MATCH: pump_mode={stage.pump_mode} didn't match any PumpMode!")
             
             # Execute I/O actions: DURING_STAGE
             self._execute_io_actions(stage, IOActionTiming.DURING_STAGE)
