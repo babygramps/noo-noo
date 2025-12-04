@@ -300,8 +300,8 @@ def create_tlb4_config_from_settings(settings: Optional[Settings] = None) -> "TL
     """
     Create TLB4Config from application settings.
     
-    This loads the TLB4 configuration from hardware_config.yaml and
-    creates a properly configured TLB4Config object for the ModbusInterface.
+    Simplified configuration for factory-calibrated 0-20kg load cells.
+    Only requires one scaling value (kg_per_division) for all channels.
     
     Args:
         settings: Settings instance (uses global if None)
@@ -321,7 +321,7 @@ def create_tlb4_config_from_settings(settings: Optional[Settings] = None) -> "TL
     registers = tlb4_settings.get("registers", {})
     
     # Parse data format
-    data_format_str = tlb4_settings.get("data_format", "int16").lower()
+    data_format_str = tlb4_settings.get("data_format", "int32").lower()
     data_format_map = {
         "int16": DataFormat.INT16,
         "uint16": DataFormat.UINT16,
@@ -329,55 +329,42 @@ def create_tlb4_config_from_settings(settings: Optional[Settings] = None) -> "TL
         "uint32": DataFormat.UINT32,
         "float32": DataFormat.FLOAT32,
     }
-    data_format = data_format_map.get(data_format_str, DataFormat.INT16)
+    data_format = data_format_map.get(data_format_str, DataFormat.INT32)
     
-    # Parse channel scaling
+    # Parse channel scaling - simplified for factory-calibrated load cells
     channel_scaling = tlb4_settings.get("channel_scaling", {})
-    default_fs = channel_scaling.get("full_scale_divisions", 10000.0)
-    default_cap = channel_scaling.get("load_cell_capacity_kg", 250.0)
+    kg_per_division = channel_scaling.get("kg_per_division", 5000.0)
     
-    # Create channel configurations
+    # Create channel configurations (simplified - just enabled/disabled)
     channels = []
     for i in range(1, 5):
         ch_key = f"channel_{i}"
         ch_settings = channel_scaling.get(ch_key, {})
         
-        # Get calibration factor (new field for software calibration)
-        cal_factor = ch_settings.get("calibration_factor", 1.0)
-        is_calibrated = ch_settings.get("is_calibrated", False)
-        
-        # Auto-detect if calibration was done (factor != 1.0 means it was calibrated)
-        if cal_factor != 1.0 and cal_factor > 0:
-            is_calibrated = True
-        
         channels.append(TLB4ChannelConfig(
-            register_address=registers.get(ch_key, 8 + (i - 1) * 2),
-            full_scale_divisions=ch_settings.get("full_scale_divisions", default_fs),
-            load_cell_capacity_kg=ch_settings.get("capacity_kg", default_cap),
+            register_address=registers.get(ch_key, 50 + (i - 1) * 2),
             data_format=data_format,
-            zero_offset=ch_settings.get("zero_offset", 0.0),
-            calibration_factor=cal_factor,
-            is_calibrated=is_calibrated,
             enabled=ch_settings.get("enabled", True),
         ))
     
     # Create TLB4Config
     config = TLB4Config(
-        reg_gross_weight=registers.get("gross_weight", 0),
-        reg_net_weight=registers.get("net_weight", 2),
-        reg_tare_weight=registers.get("tare_weight", 4),
+        reg_gross_weight=registers.get("gross_weight", 7),
+        reg_net_weight=registers.get("net_weight", 9),
+        reg_tare_weight=registers.get("tare_weight", 11),
         reg_status=registers.get("status", 6),
-        reg_channel_1=registers.get("channel_1", 8),
-        reg_channel_2=registers.get("channel_2", 10),
-        reg_channel_3=registers.get("channel_3", 12),
-        reg_channel_4=registers.get("channel_4", 14),
+        reg_channel_1=registers.get("channel_1", 50),
+        reg_channel_2=registers.get("channel_2", 52),
+        reg_channel_3=registers.get("channel_3", 54),
+        reg_channel_4=registers.get("channel_4", 56),
         channels=channels,
         gross_weight_format=data_format,
-        decimal_places=tlb4_settings.get("decimal_places", 2),
-        use_decimal_scaling=True,
+        decimal_places=tlb4_settings.get("decimal_places", 0),
+        use_decimal_scaling=False,
+        kg_per_division=kg_per_division,
     )
     
-    logger.info("TLB4 configuration loaded from settings")
+    logger.info(f"TLB4 configuration loaded: kg_per_division={kg_per_division}")
     return config
 
 

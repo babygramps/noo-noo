@@ -173,47 +173,36 @@ hardware:
       data_format: int32     # int32 for HiRes channel data
       decimal_places: 0      # Raw divisions have no decimal places
       
-      # Channel scaling configuration
+      # =========================================================================
+      # LOAD CELL SCALING (Factory calibrated 0-20kg load cells, 1.5mV/V)
+      # =========================================================================
       # 
-      # HiRes mode (Command 25) outputs RAW DIVISIONS (ADC counts), not kg!
-      # You must calibrate to convert divisions to kg:
+      # Formula: kg = raw_value / kg_per_division
+      # 
+      # The kg_per_division value depends on TLB4 configuration. To find it:
+      #   1. Put a known weight on one load cell
+      #   2. Check the raw value in the terminal logs
+      #   3. Calculate: kg_per_division = raw_value / known_weight_kg
       #
-      # CALIBRATION PROCEDURE:
-      #   1. Zero the scale, note raw value (e.g., zero_offset = 500)
-      #   2. Apply known weight (e.g., 10kg), note new value (e.g., 20500)
-      #   3. Calculate: full_scale_divisions = (20500 - 500) / 10 = 2000 div/kg
-      #   4. Set capacity_kg = 1.0 (we're using divisions per kg)
+      # Example: If 10kg shows raw=50000, then kg_per_division = 50000/10 = 5000
       #
-      # Formula: kg = (raw_value - zero_offset) / full_scale_divisions * capacity_kg
+      # All 4 load cells are identical, so they share the same scaling.
+      # Software taring is available via the GUI (tare offsets stored separately).
       #
       channel_scaling:
-        # Default calibration values (ADJUST AFTER CALIBRATION!)
-        # These are placeholder values - run calibration to get accurate numbers
-        full_scale_divisions: 2000.0  # Divisions per kg (calibrate this!)
-        load_cell_capacity_kg: 1.0    # Multiplier (usually 1.0)
+        # Divisions per kg - ADJUST THIS ONE VALUE to calibrate all channels
+        # Start with 5000, then adjust based on actual readings
+        kg_per_division: 5000.0
         
-        # Per-channel configuration
-        # Enable channels that have load cells connected
+        # Per-channel enable/disable
         channel_1:
-          enabled: true               # Load cell 1 - CONNECTED
-          full_scale_divisions: 2000.0  # Calibrate: divisions when 1kg applied
-          capacity_kg: 1.0
-          zero_offset: 0.0            # Raw divisions at zero load
+          enabled: true
         channel_2:
-          enabled: true               # Load cell 2 - CONNECTED
-          full_scale_divisions: 2000.0  # Calibrate: divisions when 1kg applied
-          capacity_kg: 1.0
-          zero_offset: 0.0            # Raw divisions at zero load
+          enabled: true
         channel_3:
-          enabled: false              # Load cell 3 - Not connected
-          full_scale_divisions: 2000.0
-          capacity_kg: 1.0
-          zero_offset: 0.0
+          enabled: true
         channel_4:
-          enabled: false              # Load cell 4 - Not connected
-          full_scale_divisions: 2000.0
-          capacity_kg: 1.0
-          zero_offset: 0.0
+          enabled: true
 
 # Pressure Sensor Configuration (SPT25-20-V30D)
 pressure_sensor:
