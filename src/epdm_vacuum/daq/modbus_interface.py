@@ -259,6 +259,9 @@ class ModbusInterface(HardwareInterface):
                 debug=self.debug
             )
             
+            # Critical for reliable communication - clears serial buffers before each transaction
+            self.instrument.clear_buffers_before_each_transaction = True
+            
             # Configure serial port
             self.instrument.serial.baudrate = self.baudrate
             self.instrument.serial.bytesize = self.databits
