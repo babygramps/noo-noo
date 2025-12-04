@@ -297,15 +297,43 @@ class SequenceEditorDialog(QDialog):
         
         self.pump_continuous_radio = QRadioButton("Continuous ON - Pump runs continuously during stage")
         self.pump_continuous_radio.toggled.connect(self.on_stage_config_changed)
+        self.pump_continuous_radio.toggled.connect(self._update_tolerance_enabled)
         pump_layout.addWidget(self.pump_continuous_radio)
         
         self.pump_maintain_radio = QRadioButton("Maintain Vacuum - Pump cycles to maintain setpoint")
         self.pump_maintain_radio.setChecked(True)
         self.pump_maintain_radio.toggled.connect(self.on_stage_config_changed)
+        self.pump_maintain_radio.toggled.connect(self._update_tolerance_enabled)
         pump_layout.addWidget(self.pump_maintain_radio)
+        
+        # Tolerance setting (only enabled when maintain mode selected)
+        tolerance_layout = QHBoxLayout()
+        tolerance_layout.setContentsMargins(25, 0, 0, 0)  # Indent under maintain radio
+        tolerance_label = QLabel("Tolerance:")
+        tolerance_label.setStyleSheet("color: #666;")
+        tolerance_layout.addWidget(tolerance_label)
+        
+        self.tolerance_spinbox = QDoubleSpinBox()
+        self.tolerance_spinbox.setRange(0.001, 0.5)
+        self.tolerance_spinbox.setDecimals(3)
+        self.tolerance_spinbox.setSingleStep(0.01)
+        self.tolerance_spinbox.setValue(0.05)
+        self.tolerance_spinbox.setSuffix(" bar")
+        self.tolerance_spinbox.setToolTip("Pump cycles ON when vacuum drops below (target - tolerance)\n"
+                                          "Pump cycles OFF when vacuum exceeds (target + tolerance)")
+        self.tolerance_spinbox.valueChanged.connect(self.on_stage_config_changed)
+        tolerance_layout.addWidget(self.tolerance_spinbox)
+        
+        tolerance_hint = QLabel("(pump cycles within ±tolerance of target)")
+        tolerance_hint.setStyleSheet("color: #888; font-size: 9pt;")
+        tolerance_layout.addWidget(tolerance_hint)
+        tolerance_layout.addStretch()
+        
+        pump_layout.addLayout(tolerance_layout)
         
         self.pump_off_radio = QRadioButton("OFF - Pump stays off (for venting/manual stages)")
         self.pump_off_radio.toggled.connect(self.on_stage_config_changed)
+        self.pump_off_radio.toggled.connect(self._update_tolerance_enabled)
         pump_layout.addWidget(self.pump_off_radio)
         
         pump_group.setLayout(pump_layout)
@@ -612,11 +640,12 @@ class SequenceEditorDialog(QDialog):
         else:
             stage.min_time_seconds = 0.0
         
-        # Update pump mode
+        # Update pump mode and tolerance
         if self.pump_continuous_radio.isChecked():
             stage.pump_mode = PumpMode.CONTINUOUS
         elif self.pump_maintain_radio.isChecked():
             stage.pump_mode = PumpMode.MAINTAIN_VACUUM
+            stage.vacuum_tolerance_bar = self.tolerance_spinbox.value()
         elif self.pump_off_radio.isChecked():
             stage.pump_mode = PumpMode.OFF
         
@@ -678,13 +707,19 @@ class SequenceEditorDialog(QDialog):
             self.min_time_enabled.setChecked(False)
             self.min_time_spinbox.setEnabled(False)
         
-        # Pump mode
+        # Pump mode and tolerance
+        self.tolerance_spinbox.blockSignals(True)
         if stage.pump_mode == PumpMode.CONTINUOUS:
             self.pump_continuous_radio.setChecked(True)
         elif stage.pump_mode == PumpMode.MAINTAIN_VACUUM:
             self.pump_maintain_radio.setChecked(True)
         elif stage.pump_mode == PumpMode.OFF:
             self.pump_off_radio.setChecked(True)
+        
+        # Set tolerance value and enable/disable based on pump mode
+        self.tolerance_spinbox.setValue(stage.vacuum_tolerance_bar)
+        self._update_tolerance_enabled()
+        self.tolerance_spinbox.blockSignals(False)
         
         # Re-enable signals
         self.stage_name_edit.blockSignals(False)
@@ -696,6 +731,17 @@ class SequenceEditorDialog(QDialog):
         self.min_time_spinbox.blockSignals(False)
         
         logger.debug(f"Refreshed stage config panel for stage {row + 1}")
+    
+    def _update_tolerance_enabled(self) -> None:
+        """Enable/disable tolerance spinbox based on pump mode selection."""
+        is_maintain = self.pump_maintain_radio.isChecked()
+        self.tolerance_spinbox.setEnabled(is_maintain)
+        
+        # Visual feedback - gray out when disabled
+        if is_maintain:
+            self.tolerance_spinbox.setStyleSheet("")
+        else:
+            self.tolerance_spinbox.setStyleSheet("color: #999;")
     
     def validate_sequence(self) -> bool:
         """
