@@ -355,8 +355,12 @@ class TestController:
                 self._control_pump(True)
             elif stage.pump_mode == PumpMode.MAINTAIN_VACUUM:
                 logger.info(f"[STAGE_EXEC] MATCH: pump_mode == MAINTAIN_VACUUM -> calling _control_pump(True)")
+                logger.info(f"[STAGE_EXEC] MAINTAIN MODE: target={stage.target_vacuum_bar:.3f} bar, tolerance=±{stage.vacuum_tolerance_bar:.3f} bar")
+                logger.info(f"[STAGE_EXEC] Stage will run for max_time={stage.max_time_seconds}s (setpoint does NOT complete stage)")
                 self._update_status("Starting vacuum pump (maintain mode)...")
                 self._control_pump(True)
+                # Reset maintain pump state tracker
+                self._maintain_pump_on = True
             elif stage.pump_mode == PumpMode.OFF:
                 logger.info(f"[STAGE_EXEC] MATCH: pump_mode == OFF -> calling _control_pump(False)")
                 self._update_status("Pump OFF mode...")
@@ -471,26 +475,30 @@ class TestController:
                 
                 last_progress_log = elapsed
             
-            # Check completion conditions (OR logic - first to complete wins)
+            # Check completion conditions
+            # For MAINTAIN_VACUUM mode: only TIME completes the stage (not setpoint)
+            # For other modes: setpoint OR time completes the stage
             
-            # Condition 1: Setpoint reached
-            if stage.target_vacuum_bar is not None:
-                # Check if minimum time has passed before allowing setpoint completion
-                if elapsed >= stage.min_time_seconds:
-                    if current_vacuum >= stage.target_vacuum_bar:
-                        logger.info(f"  ✓ Setpoint reached: {current_vacuum:.3f} bar >= {stage.target_vacuum_bar:.3f} bar")
-                        logger.info(f"    (Pressure: {current_pressure_psig:.2f} PSIG)")
-                        return f"setpoint reached ({current_vacuum:.3f} bar)"
+            # Pump cycling for MAINTAIN_VACUUM mode - do this BEFORE completion checks
+            if stage.pump_mode == PumpMode.MAINTAIN_VACUUM and stage.target_vacuum_bar is not None:
+                self._maintain_vacuum_cycle(current_vacuum, stage.target_vacuum_bar, stage.vacuum_tolerance_bar)
             
-            # Condition 2: Time limit exceeded
+            # Condition 1: Setpoint reached (but NOT for MAINTAIN_VACUUM mode)
+            # In MAINTAIN_VACUUM mode, we want to HOLD at setpoint, not complete when we reach it
+            if stage.pump_mode != PumpMode.MAINTAIN_VACUUM:
+                if stage.target_vacuum_bar is not None:
+                    # Check if minimum time has passed before allowing setpoint completion
+                    if elapsed >= stage.min_time_seconds:
+                        if current_vacuum >= stage.target_vacuum_bar:
+                            logger.info(f"  ✓ Setpoint reached: {current_vacuum:.3f} bar >= {stage.target_vacuum_bar:.3f} bar")
+                            logger.info(f"    (Pressure: {current_pressure_psig:.2f} PSIG)")
+                            return f"setpoint reached ({current_vacuum:.3f} bar)"
+            
+            # Condition 2: Time limit exceeded (applies to ALL modes including MAINTAIN_VACUUM)
             if stage.max_time_seconds is not None:
                 if elapsed >= stage.max_time_seconds:
                     logger.info(f"  ⏱ Time limit reached: {elapsed:.1f}s >= {stage.max_time_seconds:.1f}s")
                     return f"time limit ({elapsed:.1f}s)"
-            
-            # Pump cycling for MAINTAIN_VACUUM mode
-            if stage.pump_mode == PumpMode.MAINTAIN_VACUUM and stage.target_vacuum_bar is not None:
-                self._maintain_vacuum_cycle(current_vacuum, stage.target_vacuum_bar, stage.vacuum_tolerance_bar)
             
             # Collect data if enabled
             if stage.collect_data and elapsed % 1.0 < sample_interval:  # Collect ~1 sample/sec
@@ -624,29 +632,38 @@ class TestController:
     
     def _maintain_vacuum_cycle(self, current_vacuum: float, target_vacuum: float, tolerance: float) -> None:
         """
-        Cycle pump to maintain vacuum at setpoint.
+        Cycle pump ON/OFF to maintain vacuum at setpoint within tolerance.
+        
+        Logic:
+        - If vacuum drops below (target - tolerance): turn pump ON
+        - If vacuum rises above (target + tolerance): turn pump OFF
+        - Within tolerance band: keep current pump state (hysteresis)
         
         Args:
             current_vacuum: Current vacuum reading in bar
-            target_vacuum: Target vacuum in bar
-            tolerance: Acceptable tolerance in bar
+            target_vacuum: Target vacuum in bar  
+            tolerance: Acceptable tolerance in bar (default 0.05)
         """
-        # TODO: Implement actual vacuum reading and control
-        # For now, this is a placeholder that would:
-        # - Turn pump OFF if vacuum > (target + tolerance)
-        # - Turn pump ON if vacuum < (target - tolerance)
+        # Track pump state for hysteresis (avoid rapid cycling)
+        if not hasattr(self, '_maintain_pump_on'):
+            self._maintain_pump_on = True  # Start with pump on to reach setpoint
         
-        # Example logic (when hardware is connected):
-        # if current_vacuum > target_vacuum + tolerance:
-        #     if self.pump.is_running():
-        #         logger.debug("Pump cycling OFF - vacuum above target")
-        #         self._control_pump(False)
-        # elif current_vacuum < target_vacuum - tolerance:
-        #     if not self.pump.is_running():
-        #         logger.debug("Pump cycling ON - vacuum below target")
-        #         self._control_pump(True)
+        lower_bound = target_vacuum - tolerance
+        upper_bound = target_vacuum + tolerance
         
-        pass  # Placeholder until hardware interface is implemented
+        if current_vacuum < lower_bound:
+            # Vacuum too low (closer to atmosphere) - need more vacuum
+            if not self._maintain_pump_on:
+                logger.info(f"[MAINTAIN] Vacuum {current_vacuum:.3f} bar < {lower_bound:.3f} bar - turning pump ON")
+                self._control_pump(True)
+                self._maintain_pump_on = True
+        elif current_vacuum > upper_bound:
+            # Vacuum too high (exceeds target) - can turn pump off
+            if self._maintain_pump_on:
+                logger.info(f"[MAINTAIN] Vacuum {current_vacuum:.3f} bar > {upper_bound:.3f} bar - turning pump OFF")
+                self._control_pump(False)
+                self._maintain_pump_on = False
+        # else: within tolerance band - maintain current state (hysteresis)
     
     def _vent_chamber(self) -> None:
         """Safely vent the test chamber."""
