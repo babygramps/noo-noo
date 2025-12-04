@@ -501,8 +501,9 @@ class TestSequence:
         """
         if 0 <= index < len(self.stages):
             stage = self.stages[index]
-            # Create a copy
-            new_stage = TestStage(**asdict(stage))
+            # Create a proper copy using to_dict/from_dict to handle nested IOAction objects
+            # (asdict would convert IOActions to dicts which breaks validation)
+            new_stage = TestStage.from_dict(stage.to_dict())
             if new_stage.name:
                 new_stage.name = f"{new_stage.name} (copy)"
             self.stages.insert(index + 1, new_stage)
