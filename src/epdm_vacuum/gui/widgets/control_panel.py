@@ -38,7 +38,7 @@ class ControlPanel(QWidget):
     start_test_requested = pyqtSignal()
     stop_test_requested = pyqtSignal()
     pump_control_requested = pyqtSignal(bool)  # True = ON, False = OFF
-    valve_control_requested = pyqtSignal(str, bool)  # (valve_name, state) - True = OPEN, False = CLOSED
+    valve_control_requested = pyqtSignal(str, bool)  # (valve_name, relay_state) - True = energize (NO valve CLOSES), False = de-energize (NO valve OPENS)
     tare_requested = pyqtSignal()
     save_data_requested = pyqtSignal()
     
@@ -144,54 +144,56 @@ class ControlPanel(QWidget):
         layout.addWidget(self.pump_btn, 0, 0, 1, 2)
         
         # Vacuum Valve toggle (row 1, left) - connects pump to chamber
-        self.vacuum_valve_btn = QPushButton("Vacuum Valve\nCLOSED")
+        # NOTE: NORMALLY-OPEN (NO) valve - de-energized = OPEN, energized = CLOSED
+        self.vacuum_valve_btn = QPushButton("Vacuum Valve\nOPEN")  # NO valve starts OPEN when de-energized
         self.vacuum_valve_btn.setMinimumHeight(45)
         self.vacuum_valve_btn.setCheckable(True)
         self.vacuum_valve_btn.setStyleSheet("""
             QPushButton { 
                 font-size: 10pt; 
                 font-weight: bold;
-                background-color: #ffcdd2;
-                border: 2px solid #c62828;
+                background-color: #c8e6c9;
+                border: 2px solid #2e7d32;
                 border-radius: 4px;
-                color: #b71c1c;
+                color: #1b5e20;
             }
             QPushButton:checked { 
-                background-color: #c8e6c9;
-                color: #1b5e20;
-                border-color: #2e7d32;
+                background-color: #ffcdd2;
+                color: #b71c1c;
+                border-color: #c62828;
             }
             QPushButton:hover {
                 border-width: 3px;
             }
         """)
-        self.vacuum_valve_btn.setToolTip("Vacuum valve - connects pump to chamber\nOPEN to draw vacuum")
+        self.vacuum_valve_btn.setToolTip("Vacuum valve (NO) - connects pump to chamber\nClick to CLOSE (energize relay)")
         self.vacuum_valve_btn.clicked.connect(lambda checked: self.on_valve_toggle("vacuum_valve"))
         layout.addWidget(self.vacuum_valve_btn, 1, 0)
         
         # Vent Valve toggle (row 1, right) - releases vacuum
-        self.vent_valve_btn = QPushButton("Vent Valve\nCLOSED")
+        # NOTE: NORMALLY-OPEN (NO) valve - de-energized = OPEN, energized = CLOSED
+        self.vent_valve_btn = QPushButton("Vent Valve\nOPEN")  # NO valve starts OPEN when de-energized
         self.vent_valve_btn.setMinimumHeight(45)
         self.vent_valve_btn.setCheckable(True)
         self.vent_valve_btn.setStyleSheet("""
             QPushButton { 
                 font-size: 10pt; 
                 font-weight: bold;
-                background-color: #ffcdd2;
-                border: 2px solid #c62828;
+                background-color: #c8e6c9;
+                border: 2px solid #2e7d32;
                 border-radius: 4px;
-                color: #b71c1c;
+                color: #1b5e20;
             }
             QPushButton:checked { 
-                background-color: #c8e6c9;
-                color: #1b5e20;
-                border-color: #2e7d32;
+                background-color: #ffcdd2;
+                color: #b71c1c;
+                border-color: #c62828;
             }
             QPushButton:hover {
                 border-width: 3px;
             }
         """)
-        self.vent_valve_btn.setToolTip("Vent valve - releases chamber to atmosphere\nOPEN to release vacuum")
+        self.vent_valve_btn.setToolTip("Vent valve (NO) - releases chamber to atmosphere\nClick to CLOSE (energize relay)")
         self.vent_valve_btn.clicked.connect(lambda checked: self.on_valve_toggle("vent_valve"))
         layout.addWidget(self.vent_valve_btn, 1, 1)
         
@@ -294,8 +296,11 @@ class ControlPanel(QWidget):
         logger.info(f"[ControlPanel] {valve_name} button checked={state}, requesting hardware change")
         
         # Update button text immediately for responsive UI
+        # NOTE: These are NORMALLY-OPEN (NO) valves:
+        #   - relay ON (state=True, checked) → valve CLOSED
+        #   - relay OFF (state=False, unchecked) → valve OPEN
         valve_label = valve_name.replace("_", " ").title()
-        btn.setText(f"{valve_label}\n{'OPEN' if state else 'CLOSED'}")
+        btn.setText(f"{valve_label}\n{'CLOSED' if state else 'OPEN'}")
         
         # Mark that we're handling this valve action (prevents callback interference)
         if not hasattr(self, '_pending_valve_actions'):
@@ -348,9 +353,13 @@ class ControlPanel(QWidget):
         """
         Programmatically set valve state (without emitting signal).
         
+        NOTE: These are NORMALLY-OPEN (NO) valves:
+            - state=True (relay ON) → valve physically CLOSED
+            - state=False (relay OFF) → valve physically OPEN
+        
         Args:
             valve_name: Name of the valve ("vacuum_valve" or "vent_valve")
-            state: True for OPEN, False for CLOSED
+            state: Relay state - True = energized (valve CLOSED), False = de-energized (valve OPEN)
         """
         if valve_name == "vacuum_valve":
             btn = self.vacuum_valve_btn
@@ -365,7 +374,8 @@ class ControlPanel(QWidget):
         
         btn.blockSignals(True)
         btn.setChecked(state)
-        btn.setText(f"{valve_label}\n{'OPEN' if state else 'CLOSED'}")
+        # NO valve: relay ON = CLOSED, relay OFF = OPEN
+        btn.setText(f"{valve_label}\n{'CLOSED' if state else 'OPEN'}")
         btn.blockSignals(False)
     
     def _sync_from_relay_manager(self) -> None:
@@ -397,7 +407,8 @@ class ControlPanel(QWidget):
         Args:
             module_name: Name of the relay module
             channel_name: Name of the channel/device
-            state: New state (True = ON/OPEN)
+            state: Relay state (True = ON/energized, False = OFF/de-energized)
+                   For NO valves: ON = CLOSED, OFF = OPEN
         """
         # Check if this is from our own pending action (avoid feedback loop)
         pending = getattr(self, '_pending_valve_actions', set())

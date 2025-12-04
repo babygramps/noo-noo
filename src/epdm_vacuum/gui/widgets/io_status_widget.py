@@ -39,8 +39,8 @@ class IOStatusWidget(QWidget):
     Widget displaying real-time status of all IO devices.
     
     Shows all configured IO devices with visual indicators for:
-    - OPEN/ON (green)
-    - CLOSED/OFF (red)
+    - Valves (NO type): OPEN (de-energized) = green, CLOSED (energized) = red
+    - Pump/outputs: ON = green, OFF = red
     - NOT SET (gray)
     - Analog values with progress bars
     """
@@ -50,7 +50,7 @@ class IOStatusWidget(QWidget):
         super().__init__(parent)
         
         self.io_devices: Dict[str, Dict[str, Any]] = {}
-        self.device_states: Dict[str, Optional[bool]] = {}  # device_name -> state (True=OPEN, False=CLOSED, None=NOT SET)
+        self.device_states: Dict[str, Optional[bool]] = {}  # device_name -> relay state (True=energized, False=de-energized, None=NOT SET)
         self.device_widgets: Dict[str, tuple] = {}  # device_name -> (indicator_label, state_label) or (indicator, value_label, progress_bar) for analog inputs
         self.analog_input_values: Dict[str, float] = {}  # device_name -> current value
         
@@ -97,7 +97,8 @@ class IOStatusWidget(QWidget):
         Args:
             module_name: Name of the relay module (e.g., "relay_module")
             channel_name: Name of the channel/device (e.g., "vacuum_valve")
-            state: New state (True = ON/OPEN, False = OFF/CLOSED)
+            state: Relay state (True = energized, False = de-energized)
+                   For NO valves: energized = CLOSED, de-energized = OPEN
         """
         # Use QTimer to ensure we update from the main thread (thread-safe)
         QTimer.singleShot(0, lambda: self._update_device_state_from_manager(channel_name, state))
@@ -114,7 +115,7 @@ class IOStatusWidget(QWidget):
         """
         if device_name in self.device_widgets:
             self.set_device_state(device_name, state)
-            logger.debug(f"IOStatusWidget updated from RelayStateManager: {device_name} -> {'OPEN' if state else 'CLOSED'}")
+            logger.debug(f"IOStatusWidget updated from RelayStateManager: {device_name} -> {'ENERGIZED' if state else 'DE-ENERGIZED'}")
     
     def _sync_from_relay_manager(self) -> None:
         """
@@ -540,11 +541,14 @@ class IOStatusWidget(QWidget):
     
     def _update_indicator_color(self, indicator: QLabel, state: Optional[bool]) -> None:
         """
-        Update indicator color based on state.
+        Update indicator color based on relay state.
+        
+        NOTE: This is a generic method. For valve-specific coloring
+        (NO valves where OPEN = de-energized = green), use set_device_state().
         
         Args:
             indicator: QLabel showing the colored indicator
-            state: True=OPEN/ON, False=CLOSED/OFF, None=NOT SET
+            state: Relay state - True=energized, False=de-energized, None=NOT SET
         """
         if state is True:
             # OPEN/ON - Green
@@ -560,9 +564,13 @@ class IOStatusWidget(QWidget):
         """
         Update the state of a specific device.
         
+        NOTE: For NORMALLY-OPEN (NO) valves:
+            - state=True (relay energized) → valve CLOSED (red)
+            - state=False (relay de-energized) → valve OPEN (green)
+        
         Args:
             device_name: Name of the device to update
-            state: True for OPEN/ON, False for CLOSED/OFF
+            state: Relay state - True = energized, False = de-energized
         """
         if device_name not in self.device_widgets:
             logger.warning(f"Device '{device_name}' not found in IO status widget")
@@ -572,23 +580,43 @@ class IOStatusWidget(QWidget):
         
         indicator, state_label = self.device_widgets[device_name]
         
-        # Update indicator color
-        self._update_indicator_color(indicator, state)
-        
         # Update state text
+        # NOTE: Valves are NORMALLY-OPEN (NO):
+        #   - relay ON (state=True) → valve CLOSED
+        #   - relay OFF (state=False) → valve OPEN
         device_info = self.io_devices.get(device_name, {})
-        if device_info.get("type") == "Digital":
-            state_text = "OPEN" if state else "CLOSED"
+        is_valve = "valve" in device_name.lower()
+        
+        if is_valve:
+            # NO valve: energized = CLOSED, de-energized = OPEN
+            state_text = "CLOSED" if state else "OPEN"
+        elif device_info.get("type") == "Digital":
+            # Other digital outputs (pump, etc.): state = ON/OFF
+            state_text = "ON" if state else "OFF"
         else:
             state_text = "ON" if state else "OFF"
         
         state_label.setText(state_text)
         
         # Update state label color
-        if state:
-            state_label.setStyleSheet("font-size: 10pt; color: #4CAF50; font-weight: bold;")
+        # For NO valves: OPEN (de-energized) = green (safe), CLOSED (energized) = red (actuated)
+        # For pump/others: ON = green, OFF = red
+        if is_valve:
+            # NO valve: OPEN is safe/green, CLOSED is actuated/red
+            if state:  # Energized = CLOSED
+                state_label.setStyleSheet("font-size: 10pt; color: #F44336; font-weight: bold;")
+                indicator.setStyleSheet("color: #F44336;")
+            else:  # De-energized = OPEN
+                state_label.setStyleSheet("font-size: 10pt; color: #4CAF50; font-weight: bold;")
+                indicator.setStyleSheet("color: #4CAF50;")
         else:
-            state_label.setStyleSheet("font-size: 10pt; color: #F44336; font-weight: bold;")
+            # Pump/other: ON = green, OFF = red
+            if state:
+                state_label.setStyleSheet("font-size: 10pt; color: #4CAF50; font-weight: bold;")
+                indicator.setStyleSheet("color: #4CAF50;")
+            else:
+                state_label.setStyleSheet("font-size: 10pt; color: #F44336; font-weight: bold;")
+                indicator.setStyleSheet("color: #F44336;")
         
         logger.debug(f"Updated device '{device_name}' state to: {state_text}")
     
@@ -800,7 +828,8 @@ class IOStatusWidget(QWidget):
             device_name: Name of the device
         
         Returns:
-            True if OPEN/ON, False if CLOSED/OFF, None if NOT SET
+            Relay state: True if energized, False if de-energized, None if NOT SET
+            (For NO valves: True = CLOSED, False = OPEN)
         """
         return self.device_states.get(device_name)
     
