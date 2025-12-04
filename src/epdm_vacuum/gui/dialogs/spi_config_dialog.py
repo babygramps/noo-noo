@@ -248,6 +248,23 @@ class ChannelWidget(QFrame):
             self.invert_check.stateChanged.connect(self._on_change)
             top_row.addWidget(self.invert_check)
         
+        # Relay output: Normally Open option
+        if self.io_type == "relay":
+            self.normally_open_check = QCheckBox("NO")
+            self.normally_open_check.setChecked(self.config.get("normally_open", False))
+            self.normally_open_check.setToolTip(
+                "Normally Open (NO) valve:\n"
+                "  • Valve is OPEN when relay is OFF\n"
+                "  • Valve is CLOSED when relay is ON\n\n"
+                "Normally Closed (NC) valve:\n"
+                "  • Valve is CLOSED when relay is OFF\n"
+                "  • Valve is OPEN when relay is ON\n\n"
+                "The software automatically inverts relay commands for NO valves."
+            )
+            self.normally_open_check.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px;")
+            self.normally_open_check.stateChanged.connect(self._on_change)
+            top_row.addWidget(self.normally_open_check)
+        
         main_layout.addLayout(top_row)
         
         # Analog input: Second row with span configuration
@@ -351,6 +368,11 @@ class ChannelWidget(QFrame):
         elif self.io_type == "digital_input":
             self.config["description"] = self.desc_edit.text()
             self.config["inverted"] = self.invert_check.isChecked()
+        elif self.io_type == "relay":
+            if hasattr(self, 'desc_edit'):
+                self.config["description"] = self.desc_edit.text()
+            if hasattr(self, 'normally_open_check'):
+                self.config["normally_open"] = self.normally_open_check.isChecked()
         else:
             if hasattr(self, 'desc_edit'):
                 self.config["description"] = self.desc_edit.text()

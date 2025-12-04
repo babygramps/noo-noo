@@ -553,14 +553,10 @@ class MainWindow(QMainWindow):
         
         # Initialize WidgetLords interface if enabled
         widgetlords_config = settings.get("hardware", "widgetlords", default={})
-        logger.info(f"[init_hardware] WidgetLords config: enabled={widgetlords_config.get('enabled')}")
         if widgetlords_config.get("enabled", False):
             try:
                 # Pass SPI modules configuration to the interface
                 spi_modules = widgetlords_config.get("spi_modules", [])
-                logger.info(f"[init_hardware] SPI modules from config: {len(spi_modules)} modules")
-                for i, mod in enumerate(spi_modules):
-                    logger.info(f"[init_hardware]   Module {i}: {mod.get('name')}, channels: {len(mod.get('channels', []))}")
                 widgetlords_iface = WidgetLordsInterface(spi_modules_config=spi_modules)
                 widgetlords_iface.connect()
                 logger.info(f"WidgetLords interface initialized with {len(spi_modules)} SPI module(s)")
@@ -741,13 +737,15 @@ class MainWindow(QMainWindow):
         Args:
             state: True to turn pump on, False to turn off
         """
-        logger.info(f"Setting pump to {'ON' if state else 'OFF'}")
+        # Get actual pump channel name from control panel's config
+        pump_name = self.control_panel.device_names.get("vacuum_pump", "vacuum_pump")
+        logger.info(f"Setting pump ({pump_name}) to {'ON' if state else 'OFF'}")
         
         # Control pump via WidgetLords interface
         if self.widgetlords_interface and self.widgetlords_interface.is_connected():
             try:
                 # Try to set relay by name first (new API)
-                success = self.widgetlords_interface.set_relay("relay_module", "vacuum_pump", state)
+                success = self.widgetlords_interface.set_relay("relay_module", pump_name, state)
                 
                 if not success:
                     # Fallback to legacy API (channel 0 on first relay module)
@@ -755,10 +753,10 @@ class MainWindow(QMainWindow):
                 
                 if success:
                     self.statusBar().showMessage(f"Pump {'ON' if state else 'OFF'}", 3000)
-                    logger.info(f"Pump relay set to {'ON' if state else 'OFF'}")
+                    logger.info(f"Pump relay ({pump_name}) set to {'ON' if state else 'OFF'}")
                 else:
                     self.statusBar().showMessage("Pump control failed", 3000)
-                    logger.error("Failed to set pump relay")
+                    logger.error(f"Failed to set pump relay ({pump_name})")
                     
             except Exception as e:
                 logger.error(f"Error controlling pump: {e}")
@@ -767,40 +765,34 @@ class MainWindow(QMainWindow):
             logger.warning("WidgetLords interface not available - pump control disabled")
             self.statusBar().showMessage("Hardware not connected - pump control unavailable", 3000)
     
-    def on_valve_control(self, valve_name: str, state: bool) -> None:
+    def on_valve_control(self, channel_name: str, state: bool) -> None:
         """
         Handle valve control request.
         
         Args:
-            valve_name: Name of the valve (e.g., "vacuum_valve", "vent_valve")
+            channel_name: Actual channel name from hardware config (e.g., "vacuum", "vent")
             state: True to open valve, False to close
         """
         state_str = "OPEN" if state else "CLOSED"
-        logger.info(f"[MainWindow] on_valve_control received: {valve_name} -> {state_str}")
+        logger.info(f"Setting valve {channel_name} to {state_str}")
         
         # Control valve via WidgetLords interface
-        if self.widgetlords_interface:
-            logger.info(f"[MainWindow] WidgetLords interface exists, connected={self.widgetlords_interface.is_connected()}")
-            if self.widgetlords_interface.is_connected():
-                try:
-                    logger.info(f"[MainWindow] Calling set_relay('relay_module', '{valve_name}', {state})")
-                    success = self.widgetlords_interface.set_relay("relay_module", valve_name, state)
+        if self.widgetlords_interface and self.widgetlords_interface.is_connected():
+            try:
+                success = self.widgetlords_interface.set_relay("relay_module", channel_name, state)
+                
+                if success:
+                    self.statusBar().showMessage(f"{channel_name}: {state_str}", 3000)
+                    logger.info(f"Valve {channel_name} set to {state_str}")
+                else:
+                    self.statusBar().showMessage(f"{channel_name} control failed", 3000)
+                    logger.error(f"Failed to set valve {channel_name}")
                     
-                    if success:
-                        self.statusBar().showMessage(f"{valve_name}: {state_str}", 3000)
-                        logger.info(f"[MainWindow] {valve_name} set to {state_str} - SUCCESS")
-                    else:
-                        self.statusBar().showMessage(f"{valve_name} control failed", 3000)
-                        logger.error(f"[MainWindow] Failed to set {valve_name} - set_relay returned False")
-                        
-                except Exception as e:
-                    logger.error(f"[MainWindow] Error controlling {valve_name}: {e}", exc_info=True)
-                    self.statusBar().showMessage(f"Valve error: {e}", 5000)
-            else:
-                logger.warning(f"[MainWindow] WidgetLords interface not connected")
-                self.statusBar().showMessage("Hardware not connected - valve control unavailable", 3000)
+            except Exception as e:
+                logger.error(f"Error controlling valve {channel_name}: {e}")
+                self.statusBar().showMessage(f"Valve error: {e}", 5000)
         else:
-            logger.warning(f"[MainWindow] WidgetLords interface is None - {valve_name} control disabled")
+            logger.warning(f"WidgetLords interface not available - valve control disabled")
             self.statusBar().showMessage("Hardware not connected - valve control unavailable", 3000)
     
     def _register_relay_state_listener(self) -> None:

@@ -20,18 +20,22 @@ hardware:
           - channel: 0
             name: vacuum_pump
             enabled: true
+            normally_open: false  # NC: relay ON = pump running
             description: Main vacuum pump relay
           - channel: 1
             name: vent_valve
             enabled: true
-            description: Chamber vent valve
+            normally_open: true   # NO: relay OFF = valve open, relay ON = valve closed
+            description: Chamber vent valve (normally open for safety)
           - channel: 2
             name: vacuum_valve
             enabled: true
-            description: Vacuum line isolation valve
+            normally_open: true   # NO: relay OFF = valve open, relay ON = valve closed
+            description: Vacuum line isolation valve (normally open)
           - channel: 3
             name: spare_relay
             enabled: false
+            normally_open: false
             description: Spare relay output
       
       - name: analog_inputs
@@ -281,23 +285,31 @@ io_devices:
   #   - vent_valve: Valve to atmosphere (opens to release vacuum)
   #   - generic: Other devices (no special handling in sequences)
   #
+  # normally_open field (for valves):
+  #   - true: Valve is open when relay is OFF (NO valve)
+  #   - false: Valve is closed when relay is OFF (NC valve)
+  #   The software automatically inverts relay commands for NO valves
+  #
   digital_outputs:
     - name: vacuum_pump
       channel: 0
       device_role: vacuum_pump
+      normally_open: false  # NC: relay ON = pump running
       description: Main vacuum pump relay (controlled automatically by pump mode)
       default_state: false
     
     - name: vent_valve
       channel: 1
       device_role: vent_valve
-      description: Vent valve - releases chamber to atmosphere
+      normally_open: true   # NO: valve open for safety when power off
+      description: Vent valve - releases chamber to atmosphere (normally open for safety)
       default_state: false
     
     - name: vacuum_valve
       channel: 2
       device_role: vacuum_valve
-      description: Vacuum valve - between pump and chamber
+      normally_open: true   # NO: valve open when power off
+      description: Vacuum valve - between pump and chamber (normally open)
       default_state: false
 
 # Calibration Files

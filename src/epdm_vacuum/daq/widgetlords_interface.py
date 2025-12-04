@@ -45,6 +45,9 @@ class ChannelConfig:
     name: str = ""
     enabled: bool = True
     description: str = ""
+    # Relay/valve configuration
+    normally_open: bool = False  # NO valve: relay OFF = open, relay ON = closed
+                                 # NC valve: relay OFF = closed, relay ON = open
     # Analog input span configuration
     input_type: str = "4-20mA"  # "4-20mA", "0-10V", "0-5V"
     low_input: float = 4.0      # Low span input value (mA or V)
@@ -236,26 +239,37 @@ class RelayModule(SPIModule):
                 return ch.name
         return None
     
-    def write_by_name(self, channel_name: str, state: bool) -> bool:
+    def write_by_name(self, channel_name: str, desired_state: bool) -> bool:
         """
-        Write a relay state by channel name.
+        Write a relay state by channel name, accounting for NO/NC valve configuration.
+        
+        For Normally Open (NO) valves (normally_open=True):
+          - desired_state=True (OPEN) → relay OFF
+          - desired_state=False (CLOSED) → relay ON
+          
+        For Normally Closed (NC) valves (normally_open=False):
+          - desired_state=True (ON/OPEN) → relay ON
+          - desired_state=False (OFF/CLOSED) → relay OFF
         
         Args:
             channel_name: Name of the channel (from config)
-            state: True for ON, False for OFF
+            desired_state: True for ON/OPEN, False for OFF/CLOSED
         
         Returns:
             bool: True if successful
         """
-        available_channels = [(ch.name, ch.channel, ch.enabled) for ch in self.channels]
-        logger.info(f"[write_by_name] Looking for '{channel_name}' in channels: {available_channels}")
-        
         for ch in self.channels:
             if ch.name == channel_name and ch.enabled:
-                logger.info(f"[write_by_name] Found channel '{channel_name}' at index {ch.channel}")
-                return self.write_single(ch.channel, state)
+                # Invert relay state for normally-open valves
+                relay_state = not desired_state if ch.normally_open else desired_state
+                state_desc = "OPEN" if desired_state else "CLOSED"
+                relay_desc = "ON" if relay_state else "OFF"
+                no_nc = "NO" if ch.normally_open else "NC"
+                logger.debug(f"Setting {no_nc} relay '{channel_name}' (ch {ch.channel}): {state_desc} → relay {relay_desc}")
+                return self.write_single(ch.channel, relay_state)
         
-        logger.warning(f"Channel '{channel_name}' not found in relay module '{self.name}'")
+        available = [ch.name for ch in self.channels if ch.enabled]
+        logger.warning(f"Channel '{channel_name}' not found in relay module '{self.name}'. Available: {available}")
         return False
     
     def get_state(self, relay: int) -> bool:
@@ -776,9 +790,6 @@ class WidgetLordsInterface(HardwareInterface):
     def _create_module(self, config: Dict) -> Optional[SPIModule]:
         """Create a module instance from config."""
         try:
-            logger.info(f"[_create_module] Creating module from config: {config.get('name')}")
-            logger.info(f"[_create_module] Raw channels in config: {config.get('channels', [])}")
-            
             # Parse channels
             channels = []
             for ch_cfg in config.get("channels", []):
@@ -787,6 +798,8 @@ class WidgetLordsInterface(HardwareInterface):
                     name=ch_cfg.get("name", ""),
                     enabled=ch_cfg.get("enabled", True),
                     description=ch_cfg.get("description", ""),
+                    # Relay/valve configuration
+                    normally_open=ch_cfg.get("normally_open", False),
                     # Span scaling configuration (critical for analog inputs!)
                     input_type=ch_cfg.get("input_type", "4-20mA"),
                     low_input=ch_cfg.get("low_input", 4.0),
@@ -800,8 +813,8 @@ class WidgetLordsInterface(HardwareInterface):
                     inverted=ch_cfg.get("inverted", False),
                 )
                 channels.append(ch_config)
-                logger.info(f"[_create_module] Added channel: {ch_config.name} (ch={ch_config.channel}, enabled={ch_config.enabled})")
                 logger.debug(f"Parsed channel config: ch={ch_config.channel}, name={ch_config.name}, "
+                           f"normally_open={ch_config.normally_open}, "
                            f"input_type={ch_config.input_type}, low={ch_config.low_input}->{ch_config.low_output}, "
                            f"high={ch_config.high_input}->{ch_config.high_output}, units={ch_config.units}")
             
@@ -1074,16 +1087,10 @@ class WidgetLordsInterface(HardwareInterface):
         channel_name = str(state_or_channel)
         relay_state = bool(state) if state is not None else False
         
-        logger.info(f"[set_relay] module='{module_name}', channel='{channel_name}', state={relay_state}")
-        logger.info(f"[set_relay] Available relay modules: {list(self.relay_modules.keys())}")
-        
         if module_name in self.relay_modules:
-            logger.info(f"[set_relay] Found module '{module_name}', calling write_by_name")
-            result = self.relay_modules[module_name].write_by_name(channel_name, relay_state)
-            logger.info(f"[set_relay] write_by_name returned: {result}")
-            return result
+            return self.relay_modules[module_name].write_by_name(channel_name, relay_state)
         
-        logger.warning(f"[set_relay] Relay module '{module_name}' not found in {list(self.relay_modules.keys())}")
+        logger.warning(f"Relay module '{module_name}' not found. Available: {list(self.relay_modules.keys())}")
         return False
     
     def read_analog(self, module_name: str, channel_name: str) -> Optional[float]:

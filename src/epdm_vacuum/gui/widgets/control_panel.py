@@ -6,9 +6,14 @@ Provides buttons and controls for:
 - Manual pump and valve control
 - Tare operations
 - Data saving
+
+Device names are loaded from hardware_config.yaml using device_role
+to ensure compatibility across different hardware configurations.
 """
 
 import logging
+from pathlib import Path
+from typing import Dict, Optional
 
 from PyQt5.QtWidgets import (
     QWidget,
@@ -23,6 +28,73 @@ from PyQt5.QtCore import pyqtSignal, Qt
 logger = logging.getLogger(__name__)
 
 
+def _load_device_config_from_yaml() -> Dict[str, Dict]:
+    """
+    Load device configuration from hardware config.
+    
+    Returns:
+        Dict mapping device_role to config dict containing:
+        - name: actual channel name
+        - normally_open: bool (True for NO valves, False for NC)
+        
+        e.g.: {"vacuum_valve": {"name": "vacuum", "normally_open": True}}
+    """
+    role_to_config = {}
+    
+    try:
+        import yaml
+        config_file = Path(__file__).parent.parent.parent / "config" / "hardware_config.yaml"
+        
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                config = yaml.safe_load(f)
+            
+            # Check SPI modules for relay channels
+            spi_modules = config.get("hardware", {}).get("widgetlords", {}).get("spi_modules", [])
+            for module in spi_modules:
+                if module.get("module_type") == "PI-SPI-DIN-4KO":
+                    for ch in module.get("channels", []):
+                        ch_name = ch.get("name", "")
+                        normally_open = ch.get("normally_open", False)
+                        
+                        if ch_name:
+                            ch_config = {"name": ch_name, "normally_open": normally_open}
+                            # Map common names to roles
+                            if "pump" in ch_name.lower():
+                                role_to_config["vacuum_pump"] = ch_config
+                            elif "vent" in ch_name.lower():
+                                role_to_config["vent_valve"] = ch_config
+                            elif "vacuum" in ch_name.lower() and "pump" not in ch_name.lower():
+                                role_to_config["vacuum_valve"] = ch_config
+            
+            # Also check io_devices section for explicit roles
+            io_devices = config.get("io_devices", {})
+            for device in io_devices.get("digital_outputs", []):
+                device_name = device.get("name", "")
+                device_role = device.get("device_role", "")
+                normally_open = device.get("normally_open", False)
+                if device_role and device_name:
+                    # io_devices takes precedence
+                    role_to_config[device_role] = {"name": device_name, "normally_open": normally_open}
+            
+            logger.info(f"Loaded device config: {role_to_config}")
+        else:
+            logger.warning(f"Config file not found: {config_file}")
+            
+    except Exception as e:
+        logger.error(f"Failed to load device config: {e}")
+    
+    # Fallback defaults if nothing found
+    if "vacuum_pump" not in role_to_config:
+        role_to_config["vacuum_pump"] = {"name": "vacuum_pump", "normally_open": False}
+    if "vacuum_valve" not in role_to_config:
+        role_to_config["vacuum_valve"] = {"name": "vacuum_valve", "normally_open": False}
+    if "vent_valve" not in role_to_config:
+        role_to_config["vent_valve"] = {"name": "vent_valve", "normally_open": False}
+    
+    return role_to_config
+
+
 class ControlPanel(QWidget):
     """
     Widget for test control operations.
@@ -32,6 +104,9 @@ class ControlPanel(QWidget):
     - Pump and valve control
     - Tare load cells
     - Save data
+    
+    Device names are loaded dynamically from hardware_config.yaml
+    to support different naming conventions across deployments.
     """
     
     # Signals
@@ -46,12 +121,25 @@ class ControlPanel(QWidget):
         """Initialize the control panel."""
         super().__init__()
         
+        # Load device config from hardware_config.yaml
+        # Contains: role -> {"name": actual_channel_name, "normally_open": bool}
+        self.device_config = _load_device_config_from_yaml()
+        
+        # Extract just the names for backward compatibility
+        self.device_names = {role: cfg["name"] for role, cfg in self.device_config.items()}
+        logger.info(f"ControlPanel using device config: {self.device_config}")
+        
         self.test_running = False
         self.pump_on = False
+        
+        # Use actual channel names for valve states
         self.valve_states = {
-            "vent_valve": False,
-            "vacuum_valve": False,
+            self.device_names["vent_valve"]: False,
+            self.device_names["vacuum_valve"]: False,
         }
+        
+        # Store role -> button mapping for updates
+        self.valve_buttons: Dict[str, QPushButton] = {}
         
         self.init_ui()
         self._sync_from_relay_manager()
@@ -105,12 +193,28 @@ class ControlPanel(QWidget):
         """
         Create pump and valve control buttons group.
         
+        Device names are loaded from hardware_config.yaml to support
+        different naming conventions across deployments.
+        
         Returns:
             QGroupBox: I/O controls group
         """
         group = QGroupBox("Pump & Valves")
         layout = QGridLayout()
         layout.setSpacing(8)
+        
+        # Get actual channel names and NO/NC config
+        pump_cfg = self.device_config.get("vacuum_pump", {"name": "vacuum_pump", "normally_open": False})
+        vacuum_valve_cfg = self.device_config.get("vacuum_valve", {"name": "vacuum_valve", "normally_open": False})
+        vent_valve_cfg = self.device_config.get("vent_valve", {"name": "vent_valve", "normally_open": False})
+        
+        pump_name = pump_cfg["name"]
+        vacuum_valve_name = vacuum_valve_cfg["name"]
+        vent_valve_name = vent_valve_cfg["name"]
+        
+        # NO/NC descriptions for tooltips
+        vacuum_valve_type = "Normally Open (NO)" if vacuum_valve_cfg["normally_open"] else "Normally Closed (NC)"
+        vent_valve_type = "Normally Open (NO)" if vent_valve_cfg["normally_open"] else "Normally Closed (NC)"
         
         # Pump toggle button (row 0)
         self.pump_btn = QPushButton("Pump OFF")
@@ -133,7 +237,7 @@ class ControlPanel(QWidget):
                 border-color: #666;
             }
         """)
-        self.pump_btn.setToolTip("Toggle vacuum pump ON/OFF")
+        self.pump_btn.setToolTip(f"Toggle vacuum pump ON/OFF\n(Channel: {pump_name})")
         self.pump_btn.clicked.connect(self.on_pump_toggle)
         layout.addWidget(self.pump_btn, 0, 0, 1, 2)
         
@@ -159,9 +263,15 @@ class ControlPanel(QWidget):
                 border-width: 3px;
             }
         """)
-        self.vacuum_valve_btn.setToolTip("Vacuum valve - connects pump to chamber\nOPEN to draw vacuum")
-        self.vacuum_valve_btn.clicked.connect(lambda checked: self.on_valve_toggle("vacuum_valve"))
+        self.vacuum_valve_btn.setToolTip(
+            f"Vacuum valve - connects pump to chamber\n"
+            f"OPEN to draw vacuum\n"
+            f"(Channel: {vacuum_valve_name}, {vacuum_valve_type})"
+        )
+        # Pass the ACTUAL channel name from config, not the role
+        self.vacuum_valve_btn.clicked.connect(lambda checked, name=vacuum_valve_name: self.on_valve_toggle_by_name(name, "vacuum_valve"))
         layout.addWidget(self.vacuum_valve_btn, 1, 0)
+        self.valve_buttons["vacuum_valve"] = self.vacuum_valve_btn
         
         # Vent Valve toggle (row 1, right) - releases vacuum
         self.vent_valve_btn = QPushButton("Vent Valve\nCLOSED")
@@ -185,9 +295,15 @@ class ControlPanel(QWidget):
                 border-width: 3px;
             }
         """)
-        self.vent_valve_btn.setToolTip("Vent valve - releases chamber to atmosphere\nOPEN to release vacuum")
-        self.vent_valve_btn.clicked.connect(lambda checked: self.on_valve_toggle("vent_valve"))
+        self.vent_valve_btn.setToolTip(
+            f"Vent valve - releases chamber to atmosphere\n"
+            f"OPEN to release vacuum\n"
+            f"(Channel: {vent_valve_name}, {vent_valve_type})"
+        )
+        # Pass the ACTUAL channel name from config, not the role
+        self.vent_valve_btn.clicked.connect(lambda checked, name=vent_valve_name: self.on_valve_toggle_by_name(name, "vent_valve"))
         layout.addWidget(self.vent_valve_btn, 1, 1)
+        self.valve_buttons["vent_valve"] = self.vent_valve_btn
         
         group.setLayout(layout)
         return group
@@ -250,33 +366,33 @@ class ControlPanel(QWidget):
         
         self.pump_control_requested.emit(self.pump_on)
     
-    def on_valve_toggle(self, valve_name: str) -> None:
-        """Handle valve toggle button click."""
-        logger.info(f"[ControlPanel] on_valve_toggle called for: {valve_name}")
+    def on_valve_toggle_by_name(self, channel_name: str, valve_role: str) -> None:
+        """
+        Handle valve toggle button click.
         
-        if valve_name == "vacuum_valve":
-            btn = self.vacuum_valve_btn
-        elif valve_name == "vent_valve":
-            btn = self.vent_valve_btn
-        else:
-            logger.warning(f"Unknown valve: {valve_name}")
+        Args:
+            channel_name: The actual channel name from hardware config (e.g., "vacuum", "vent")
+            valve_role: The role for display purposes (e.g., "vacuum_valve", "vent_valve")
+        """
+        btn = self.valve_buttons.get(valve_role)
+        if not btn:
+            logger.warning(f"No button found for role: {valve_role}")
             return
         
         state = btn.isChecked()
-        self.valve_states[valve_name] = state
-        logger.info(f"[ControlPanel] {valve_name} button checked={state}")
+        self.valve_states[channel_name] = state
         
-        # Update button text
-        valve_label = valve_name.replace("_", " ").title()
+        # Update button text using the display role
+        valve_label = valve_role.replace("_", " ").title()
         if state:
             btn.setText(f"{valve_label}\nOPEN")
-            logger.info(f"[ControlPanel] {valve_name} OPEN requested - emitting signal")
+            logger.info(f"{valve_role} ({channel_name}) OPEN requested")
         else:
             btn.setText(f"{valve_label}\nCLOSED")
-            logger.info(f"[ControlPanel] {valve_name} CLOSED requested - emitting signal")
+            logger.info(f"{valve_role} ({channel_name}) CLOSED requested")
         
-        self.valve_control_requested.emit(valve_name, state)
-        logger.info(f"[ControlPanel] Signal emitted for {valve_name}={state}")
+        # Emit signal with the ACTUAL channel name (what hardware expects)
+        self.valve_control_requested.emit(channel_name, state)
     
     def on_tare(self) -> None:
         """Handle tare button click."""
@@ -312,24 +428,22 @@ class ControlPanel(QWidget):
         self.pump_btn.setText("Pump ON" if on else "Pump OFF")
         self.pump_btn.blockSignals(False)
     
-    def set_valve_state(self, valve_name: str, state: bool) -> None:
+    def set_valve_state_by_role(self, valve_role: str, state: bool) -> None:
         """
-        Programmatically set valve state (without emitting signal).
+        Programmatically set valve state by role (without emitting signal).
         
         Args:
-            valve_name: Name of the valve ("vacuum_valve" or "vent_valve")
+            valve_role: Role of the valve ("vacuum_valve" or "vent_valve")
             state: True for OPEN, False for CLOSED
         """
-        if valve_name == "vacuum_valve":
-            btn = self.vacuum_valve_btn
-        elif valve_name == "vent_valve":
-            btn = self.vent_valve_btn
-        else:
-            logger.warning(f"Unknown valve: {valve_name}")
+        btn = self.valve_buttons.get(valve_role)
+        if not btn:
+            logger.warning(f"Unknown valve role: {valve_role}")
             return
         
-        self.valve_states[valve_name] = state
-        valve_label = valve_name.replace("_", " ").title()
+        channel_name = self.device_names.get(valve_role, valve_role)
+        self.valve_states[channel_name] = state
+        valve_label = valve_role.replace("_", " ").title()
         
         btn.blockSignals(True)
         btn.setChecked(state)
@@ -341,18 +455,35 @@ class ControlPanel(QWidget):
         try:
             from ...daq.relay_state_manager import relay_state_manager
             
-            # Sync pump state
-            pump_state = relay_state_manager.get_state("relay_module", "vacuum_pump")
+            # Sync pump state using actual channel name from config
+            pump_name = self.device_names.get("vacuum_pump", "vacuum_pump")
+            pump_state = relay_state_manager.get_state("relay_module", pump_name)
             self.set_pump_state(pump_state)
             
-            # Sync valve states
-            for valve_name in ["vacuum_valve", "vent_valve"]:
-                state = relay_state_manager.get_state("relay_module", valve_name)
-                self.set_valve_state(valve_name, state)
+            # Sync valve states using actual channel names from config
+            for valve_role in ["vacuum_valve", "vent_valve"]:
+                channel_name = self.device_names.get(valve_role, valve_role)
+                state = relay_state_manager.get_state("relay_module", channel_name)
+                self.set_valve_state_by_role(valve_role, state)
             
             logger.debug("Control panel synced from relay state manager")
         except Exception as e:
             logger.debug(f"Could not sync from relay manager: {e}")
+    
+    def _get_role_for_channel(self, channel_name: str) -> Optional[str]:
+        """
+        Get the role for a given channel name.
+        
+        Args:
+            channel_name: Actual channel name from hardware
+            
+        Returns:
+            Role name if found, None otherwise
+        """
+        for role, name in self.device_names.items():
+            if name == channel_name:
+                return role
+        return None
     
     def on_relay_state_changed(self, module_name: str, channel_name: str, state: bool) -> None:
         """
@@ -360,11 +491,17 @@ class ControlPanel(QWidget):
         
         Args:
             module_name: Name of the relay module
-            channel_name: Name of the channel/device
+            channel_name: Name of the channel/device (actual hardware name)
             state: New state (True = ON/OPEN)
         """
-        if channel_name == "vacuum_pump":
+        # Check if this is the pump
+        pump_name = self.device_names.get("vacuum_pump", "vacuum_pump")
+        if channel_name == pump_name:
             self.set_pump_state(state)
-        elif channel_name in ["vacuum_valve", "vent_valve"]:
-            self.set_valve_state(channel_name, state)
+            return
+        
+        # Check valve roles
+        role = self._get_role_for_channel(channel_name)
+        if role in ["vacuum_valve", "vent_valve"]:
+            self.set_valve_state_by_role(role, state)
 
