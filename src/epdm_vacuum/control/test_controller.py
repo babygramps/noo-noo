@@ -704,15 +704,27 @@ class TestController:
         """
         logger.debug(f"      → {device_name}: {'OPEN/ON' if state else 'CLOSED/OFF'}")
         
-        # TODO: Implement actual hardware control via WidgetLords interface
-        # This would map device_name to relay channel and set the state
-        # Example:
-        # if self.widgetlords:
-        #     channel = self._get_device_channel(device_name)
-        #     self.widgetlords.set_relay(channel, state)
+        # Update global relay state manager (for cross-component sync)
+        try:
+            from ..daq.relay_state_manager import relay_state_manager
+            # Use "relay_module" as default module name (matches hardware_config.yaml)
+            relay_state_manager.set_state("relay_module", device_name, state)
+        except Exception as e:
+            logger.warning(f"Could not update relay state manager: {e}")
         
-        # For now, just log the action
-        logger.debug(f"Digital output {device_name}: {state}")
+        # Actually control the hardware via WidgetLords interface
+        if self.widgetlords:
+            try:
+                # Try new-style call: set_relay(module_name, channel_name, state)
+                success = self.widgetlords.set_relay("relay_module", device_name, state)
+                if not success:
+                    logger.warning(f"Failed to set {device_name} via WidgetLords interface")
+                else:
+                    logger.debug(f"Hardware: {device_name} set to {'ON' if state else 'OFF'}")
+            except Exception as e:
+                logger.error(f"Error setting digital output {device_name}: {e}")
+        else:
+            logger.debug(f"No hardware interface - simulated: {device_name} = {'ON' if state else 'OFF'}")
     
     def _set_analog_output(self, device_name: str, value: float) -> None:
         """

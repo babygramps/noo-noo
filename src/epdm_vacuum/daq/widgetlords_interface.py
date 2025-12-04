@@ -119,11 +119,18 @@ class RelayModule(SPIModule):
     
     4 SPDT relay outputs with 2A AC/DC rating.
     Supports stacking up to 4 modules per chip enable using addresses 0-3.
+    
+    State is tracked both locally and in the global RelayStateManager
+    for cross-component state synchronization.
     """
     
     def __init__(self, config: SPIModuleConfig):
         super().__init__(config)
         self._relay_states = [False] * 4
+        
+        # Import global state manager
+        from .relay_state_manager import relay_state_manager
+        self._state_manager = relay_state_manager
     
     def initialize(self) -> bool:
         """Initialize the 4KO relay module."""
@@ -172,9 +179,15 @@ class RelayModule(SPIModule):
             if self._hardware:
                 self._hardware.write(states)
             
-            # Update internal state tracking
+            # Update internal state tracking and global state manager
             for i in range(4):
-                self._relay_states[i] = bool(states & (1 << i))
+                new_state = bool(states & (1 << i))
+                self._relay_states[i] = new_state
+                
+                # Update global state manager
+                channel_name = self._get_channel_name(i)
+                if channel_name:
+                    self._state_manager.set_state(self.name, channel_name, new_state)
             
             logger.debug(f"Relay module '{self.name}': wrote 0x{states:02X}")
             return True
@@ -203,12 +216,25 @@ class RelayModule(SPIModule):
                 self._hardware.write_single(relay, 1 if state else 0)
             
             self._relay_states[relay] = state
+            
+            # Update global state manager with channel name
+            channel_name = self._get_channel_name(relay)
+            if channel_name:
+                self._state_manager.set_state(self.name, channel_name, state)
+            
             logger.debug(f"Relay module '{self.name}': K{relay+1} = {'ON' if state else 'OFF'}")
             return True
             
         except Exception as e:
             logger.error(f"Failed to write relay {relay}: {e}")
             return False
+    
+    def _get_channel_name(self, relay: int) -> Optional[str]:
+        """Get channel name for a relay number."""
+        for ch in self.channels:
+            if ch.channel == relay and ch.enabled:
+                return ch.name
+        return None
     
     def write_by_name(self, channel_name: str, state: bool) -> bool:
         """

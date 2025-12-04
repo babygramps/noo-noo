@@ -1145,7 +1145,9 @@ class MainWindow(QMainWindow):
         logger.info("Opening hardware configuration dialog...")
         
         from .dialogs.spi_config_dialog import SPIConfigDialog
-        dialog = SPIConfigDialog(self)
+        
+        # Pass the shared widgetlords interface so relay state is synchronized
+        dialog = SPIConfigDialog(self, shared_interface=self.widgetlords_interface)
         dialog.config_saved.connect(self.on_hardware_config_saved)
         dialog.exec_()
     

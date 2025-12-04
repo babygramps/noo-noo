@@ -693,22 +693,54 @@ class SPIConfigDialog(QDialog):
     
     config_saved = pyqtSignal()
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, shared_interface=None):
+        """
+        Initialize the SPI configuration dialog.
+        
+        Args:
+            parent: Parent widget
+            shared_interface: Optional shared WidgetLordsInterface from main app.
+                             If provided, this interface will be used for testing
+                             instead of creating a new one.
+        """
         super().__init__(parent)
         self.config_file_path = Path(__file__).parent.parent.parent / "config" / "hardware_config.yaml"
         self.spi_modules: List[Dict[str, Any]] = []
         self.module_cards: List[ModuleCard] = []
         self.modbus_config: Dict[str, Any] = {}
-        self.test_interface = None  # For manual I/O testing
+        
+        # For manual I/O testing - use shared interface if provided
+        self.test_interface = shared_interface
+        self._owns_interface = shared_interface is None  # Track if we created it
         
         self.init_ui()
         self.load_config()
         
-        logger.info("Hardware Configuration dialog initialized")
+        # If shared interface provided and connected, show as connected
+        if shared_interface and shared_interface.is_connected():
+            self._update_connection_status(connected=True, shared=True)
+        
+        logger.info("Hardware Configuration dialog initialized" + 
+                   (" with shared interface" if shared_interface else ""))
+    
+    def _update_connection_status(self, connected: bool, shared: bool = False):
+        """Update the connection status display."""
+        if hasattr(self, 'connection_status_label'):
+            if connected:
+                status = "Connected (Shared)" if shared else "Connected"
+                self.connection_status_label.setText(status)
+                self.connection_status_label.setStyleSheet(f"color: {COLORS['success']}; font-weight: bold;")
+                if hasattr(self, 'connect_btn'):
+                    self.connect_btn.setText("Reconnect" if not shared else "Using Shared")
+                    self.connect_btn.setEnabled(not shared)
+            else:
+                self.connection_status_label.setText("Not Connected")
+                self.connection_status_label.setStyleSheet(f"color: {COLORS['text_muted']};")
     
     def closeEvent(self, event):
         """Clean up when dialog closes."""
-        if self.test_interface:
+        # Only disconnect if we created the interface ourselves
+        if self.test_interface and self._owns_interface:
             try:
                 self.test_interface.disconnect()
                 logger.info("Disconnected test interface")
@@ -1083,6 +1115,13 @@ class SPIConfigDialog(QDialog):
     
     def connect_for_testing(self):
         """Connect to hardware for testing."""
+        # If we already have a shared interface, just populate controls
+        if self.test_interface and self.test_interface.is_connected():
+            logger.info("Using existing shared interface for testing")
+            self.populate_test_controls()
+            self._sync_button_states_from_manager()
+            return
+        
         try:
             from ...daq.widgetlords_interface import WidgetLordsInterface
             
@@ -1098,6 +1137,7 @@ class SPIConfigDialog(QDialog):
             
             # Create and connect interface
             self.test_interface = WidgetLordsInterface(spi_modules_config=current_modules)
+            self._owns_interface = True  # We created it, we own it
             
             if self.test_interface.connect():
                 self.connection_status_label.setText("Connected")
@@ -1106,6 +1146,7 @@ class SPIConfigDialog(QDialog):
                 
                 # Populate test controls
                 self.populate_test_controls()
+                self._sync_button_states_from_manager()
             else:
                 self.connection_status_label.setText("Connection Failed")
                 self.connection_status_label.setStyleSheet(f"color: {COLORS['danger']}; font-weight: bold;")
@@ -1117,11 +1158,33 @@ class SPIConfigDialog(QDialog):
             self.connection_status_label.setStyleSheet(f"color: {COLORS['warning']}; font-weight: bold;")
             self.test_interface = None
             self.populate_test_controls()
+            self._sync_button_states_from_manager()
             logger.warning("Widgetlords library not available - using mock mode")
             
         except Exception as e:
             logger.error(f"Failed to connect for testing: {e}")
             QMessageBox.critical(self, "Error", f"Failed to connect:\n{e}")
+    
+    def _sync_button_states_from_manager(self):
+        """Sync toggle button states from the global relay state manager."""
+        try:
+            from ...daq.relay_state_manager import relay_state_manager
+            
+            all_states = relay_state_manager.get_all_states()
+            
+            for key, btn in self.relay_toggle_buttons.items():
+                parts = key.split(":")
+                if len(parts) == 2:
+                    module_name, channel_name = parts
+                    state = all_states.get(module_name, {}).get(channel_name, False)
+                    btn.blockSignals(True)
+                    btn.setChecked(state)
+                    btn.setText("ON" if state else "OFF")
+                    btn.blockSignals(False)
+            
+            logger.debug(f"Synced {len(self.relay_toggle_buttons)} relay buttons from state manager")
+        except Exception as e:
+            logger.warning(f"Could not sync button states: {e}")
     
     def populate_test_controls(self):
         """Populate the test controls based on configured modules."""
