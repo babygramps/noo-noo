@@ -19,9 +19,13 @@ Run:
 import argparse
 import sys
 import time
+from pathlib import Path
 from typing import List, Tuple
 
-sys.path.insert(0, "src")
+# Make imports work no matter where the script is run from
+SCRIPT_DIR = Path(__file__).resolve().parent
+ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(ROOT / "src"))
 
 from epdm_vacuum.config.settings import get_settings, create_tlb4_config_from_settings
 from epdm_vacuum.daq.modbus_interface import ModbusInterface
@@ -41,7 +45,7 @@ def sample_raw(interface: ModbusInterface, samples: int = 10, delay: float = 0.2
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="TLB4 slope helper (kg_per_division estimator)")
-    parser.add_argument("--port", default=None, help="Serial port (e.g., COM4 or /dev/ttyUSB0). Defaults to config.")
+    parser.add_argument("--port", default=None, help="Serial port (e.g., COM4 or /dev/ttyUSB0). Defaults to config, then auto.")
     parser.add_argument("--weight", type=float, default=10.0, help="Known weight in kg placed across all 4 cells.")
     parser.add_argument("--samples", type=int, default=12, help="Samples to average for each phase.")
     args = parser.parse_args()
@@ -49,7 +53,15 @@ def main() -> None:
     settings = get_settings()
     tlb4_config = create_tlb4_config_from_settings(settings)
 
-    port = args.port or settings.get("hardware", "modbus", "tlb4", "port", default="COM4")
+    # Resolve port: CLI > config > platform-default (/dev/ttyUSB0 on Linux, COM4 on Windows)
+    port = args.port or settings.get("hardware", "modbus", "tlb4", "port", default=None)
+    if not port:
+        if sys.platform.startswith("linux"):
+            port = "/dev/ttyUSB0"
+        elif sys.platform.startswith("win"):
+            port = "COM4"
+        else:
+            port = "/dev/ttyUSB0"
     print(f"Using port: {port}")
     print(f"Known weight: {args.weight:.2f} kg (across all 4 channels)")
     print(f"Registers (from config): CH1={tlb4_config.reg_channel_1}, CH2={tlb4_config.reg_channel_2}, "
