@@ -320,8 +320,8 @@ def create_tlb4_config_from_settings(settings: Optional[Settings] = None) -> "TL
     # Parse register addresses
     registers = tlb4_settings.get("registers", {})
     
-    # Parse data format
-    data_format_str = tlb4_settings.get("data_format", "int32").lower()
+    # Parse data format (default to legacy int16 for backward compatibility)
+    data_format_str = tlb4_settings.get("data_format", "int16").lower()
     data_format_map = {
         "int16": DataFormat.INT16,
         "uint16": DataFormat.UINT16,
@@ -329,7 +329,7 @@ def create_tlb4_config_from_settings(settings: Optional[Settings] = None) -> "TL
         "uint32": DataFormat.UINT32,
         "float32": DataFormat.FLOAT32,
     }
-    data_format = data_format_map.get(data_format_str, DataFormat.INT32)
+    data_format = data_format_map.get(data_format_str, DataFormat.INT16)
     
     # Parse channel scaling - simplified for factory-calibrated load cells
     channel_scaling = tlb4_settings.get("channel_scaling", {})
@@ -342,29 +342,33 @@ def create_tlb4_config_from_settings(settings: Optional[Settings] = None) -> "TL
         ch_settings = channel_scaling.get(ch_key, {})
         
         channels.append(TLB4ChannelConfig(
-            register_address=registers.get(ch_key, 50 + (i - 1) * 2),
+            register_address=registers.get(ch_key, 8 + (i - 1) * 2),
             data_format=data_format,
             enabled=ch_settings.get("enabled", True),
         ))
     
     # Create TLB4Config
     config = TLB4Config(
-        reg_gross_weight=registers.get("gross_weight", 7),
-        reg_net_weight=registers.get("net_weight", 9),
-        reg_tare_weight=registers.get("tare_weight", 11),
+        reg_gross_weight=registers.get("gross_weight", 0),
+        reg_net_weight=registers.get("net_weight", 2),
+        reg_tare_weight=registers.get("tare_weight", 4),
         reg_status=registers.get("status", 6),
-        reg_channel_1=registers.get("channel_1", 50),
-        reg_channel_2=registers.get("channel_2", 52),
-        reg_channel_3=registers.get("channel_3", 54),
-        reg_channel_4=registers.get("channel_4", 56),
+        reg_channel_1=registers.get("channel_1", 8),
+        reg_channel_2=registers.get("channel_2", 10),
+        reg_channel_3=registers.get("channel_3", 12),
+        reg_channel_4=registers.get("channel_4", 14),
         channels=channels,
         gross_weight_format=data_format,
-        decimal_places=tlb4_settings.get("decimal_places", 0),
-        use_decimal_scaling=False,
+        decimal_places=tlb4_settings.get("decimal_places", 2),
+        use_decimal_scaling=tlb4_settings.get("use_decimal_scaling", True),
         kg_per_division=kg_per_division,
     )
     
-    logger.info(f"TLB4 configuration loaded: kg_per_division={kg_per_division}")
+    logger.info(
+        "TLB4 configuration loaded "
+        f"(default registers: gross=0 net=2 tare=4 ch=8/10/12/14, data_format={data_format_str}, "
+        f"kg_per_division={kg_per_division})"
+    )
     return config
 
 

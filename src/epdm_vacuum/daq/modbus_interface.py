@@ -1035,7 +1035,7 @@ class ModbusInterface(HardwareInterface):
             self.handle_error(e)
             return False, error_msg
     
-    def span_calibration(self, known_weight: float, decimal_places: int = 2) -> Tuple[bool, str, int]:
+    def span_calibration(self, known_weight: float, decimal_places: Optional[int] = None) -> Tuple[bool, str, int]:
         """
         Perform Span Calibration (known weight).
         
@@ -1053,7 +1053,8 @@ class ModbusInterface(HardwareInterface):
         
         Args:
             known_weight: The known weight value (e.g., 50.00 for 50kg)
-            decimal_places: Number of decimal places (default 2, so 50.00 becomes 5000)
+            decimal_places: Number of decimal places. Defaults to the TLB4 config
+                (cfg.decimal_places) to avoid mismatches with device settings.
         
         Returns:
             Tuple[bool, str, int]: (success, message, error_code)
@@ -1063,16 +1064,18 @@ class ModbusInterface(HardwareInterface):
             if not self.initialized or self.instrument is None:
                 return False, "Modbus interface not connected", -1
             
+            # Resolve decimal places from config if not provided
+            cfg = self.tlb4_config
+            dp = cfg.decimal_places if decimal_places is None else decimal_places
+            
             # Convert weight to integer with decimal places
             # e.g., 50.00 kg with 2 decimals = 5000
-            weight_int = int(known_weight * (10 ** decimal_places))
+            weight_int = int(known_weight * (10 ** dp))
             
             logger.info("=" * 50)
             logger.info("SPAN CALIBRATION - Starting")
-            logger.info(f"Known weight: {known_weight} kg ({weight_int} with {decimal_places} decimals)")
+            logger.info(f"Known weight: {known_weight} kg ({weight_int} with {dp} decimals)")
             logger.info("=" * 50)
-            
-            cfg = self.tlb4_config
             
             # Use lock for ENTIRE calibration sequence to prevent DAQ thread conflicts
             with self._lock:
@@ -1110,7 +1113,7 @@ class ModbusInterface(HardwareInterface):
                     # Verify by reading current weight
                     try:
                         post_weight = int(self._read_value(cfg.reg_gross_weight, cfg.gross_weight_format))
-                        scaled_weight = post_weight / (10 ** decimal_places)
+                        scaled_weight = post_weight / (10 ** dp)
                         logger.info(f"Post-calibration gross weight: {post_weight} raw = {scaled_weight:.2f} kg")
                     except Exception as e:
                         logger.warning(f"Could not read post-calibration weight: {e}")
