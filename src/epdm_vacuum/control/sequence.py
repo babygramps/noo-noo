@@ -231,14 +231,15 @@ class TestStage:
         
         # Vacuum setpoint validation
         if self.target_vacuum_bar is not None:
-            if self.target_vacuum_bar < 0 or self.target_vacuum_bar > 1.0:
-                errors.append(f"Target vacuum {self.target_vacuum_bar} bar is out of range [0, 1.0]")
+            # Accept both absolute (0..1 bar) and negative gauge values (e.g., -0.3 bar)
+            if self.target_vacuum_bar < -1.0 or self.target_vacuum_bar > 1.0:
+                errors.append(f"Target vacuum {self.target_vacuum_bar} bar is out of range [-1.0, 1.0]")
             
-            # Check against config limits
+            # Check against config limits (use magnitude to allow gauge-negatives)
             if config_limits:
                 max_vacuum = config_limits.get("max_vacuum_bar", 1.0)
-                if self.target_vacuum_bar > max_vacuum:
-                    errors.append(f"Target vacuum {self.target_vacuum_bar} bar exceeds config limit {max_vacuum} bar")
+                if abs(self.target_vacuum_bar) > max_vacuum:
+                    errors.append(f"Target vacuum {self.target_vacuum_bar} bar exceeds config limit {max_vacuum} bar (magnitude)")
         
         # Time limit validation
         if self.max_time_seconds is not None:
