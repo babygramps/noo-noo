@@ -48,9 +48,13 @@ class ControlPanel(QWidget):
         
         self.test_running = False
         self.pump_on = False
+        
+        # Resolve valve names from configuration (device_role), fall back to defaults
+        self.vacuum_valve_name, self.vent_valve_name = self._load_valve_names()
+        
         self.valve_states = {
-            "vent_valve": False,
-            "vacuum_valve": False,
+            self.vent_valve_name: False,
+            self.vacuum_valve_name: False,
         }
         
         # Pending action flags to prevent callback interference
@@ -145,7 +149,8 @@ class ControlPanel(QWidget):
         
         # Vacuum Valve toggle (row 1, left) - connects pump to chamber
         # NOTE: NORMALLY-OPEN (NO) valve - de-energized = OPEN, energized = CLOSED
-        self.vacuum_valve_btn = QPushButton("Vacuum Valve\nOPEN")  # NO valve starts OPEN when de-energized
+        vac_label = self._format_valve_label(self.vacuum_valve_name)
+        self.vacuum_valve_btn = QPushButton(f"{vac_label}\nOPEN")  # NO valve starts OPEN when de-energized
         self.vacuum_valve_btn.setMinimumHeight(45)
         self.vacuum_valve_btn.setCheckable(True)
         self.vacuum_valve_btn.setStyleSheet("""
@@ -166,13 +171,14 @@ class ControlPanel(QWidget):
                 border-width: 3px;
             }
         """)
-        self.vacuum_valve_btn.setToolTip("Vacuum valve (NO) - connects pump to chamber\nClick to CLOSE (energize relay)")
-        self.vacuum_valve_btn.clicked.connect(lambda checked: self.on_valve_toggle("vacuum_valve"))
+        self.vacuum_valve_btn.setToolTip(f"{vac_label} (NO) - connects pump to chamber\nClick to CLOSE (energize relay)")
+        self.vacuum_valve_btn.clicked.connect(lambda checked: self.on_valve_toggle(self.vacuum_valve_name))
         layout.addWidget(self.vacuum_valve_btn, 1, 0)
         
         # Vent Valve toggle (row 1, right) - releases vacuum
         # NOTE: NORMALLY-OPEN (NO) valve - de-energized = OPEN, energized = CLOSED
-        self.vent_valve_btn = QPushButton("Vent Valve\nOPEN")  # NO valve starts OPEN when de-energized
+        vent_label = self._format_valve_label(self.vent_valve_name)
+        self.vent_valve_btn = QPushButton(f"{vent_label}\nOPEN")  # NO valve starts OPEN when de-energized
         self.vent_valve_btn.setMinimumHeight(45)
         self.vent_valve_btn.setCheckable(True)
         self.vent_valve_btn.setStyleSheet("""
@@ -193,8 +199,8 @@ class ControlPanel(QWidget):
                 border-width: 3px;
             }
         """)
-        self.vent_valve_btn.setToolTip("Vent valve (NO) - releases chamber to atmosphere\nClick to CLOSE (energize relay)")
-        self.vent_valve_btn.clicked.connect(lambda checked: self.on_valve_toggle("vent_valve"))
+        self.vent_valve_btn.setToolTip(f"{vent_label} (NO) - releases chamber to atmosphere\nClick to CLOSE (energize relay)")
+        self.vent_valve_btn.clicked.connect(lambda checked: self.on_valve_toggle(self.vent_valve_name))
         layout.addWidget(self.vent_valve_btn, 1, 1)
         
         group.setLayout(layout)
@@ -283,9 +289,9 @@ class ControlPanel(QWidget):
         """
         logger.info(f"[ControlPanel] on_valve_toggle called for: {valve_name}")
         
-        if valve_name == "vacuum_valve":
+        if valve_name == self.vacuum_valve_name:
             btn = self.vacuum_valve_btn
-        elif valve_name == "vent_valve":
+        elif valve_name == self.vent_valve_name:
             btn = self.vent_valve_btn
         else:
             logger.warning(f"Unknown valve: {valve_name}")
@@ -299,7 +305,7 @@ class ControlPanel(QWidget):
         # NOTE: These are NORMALLY-OPEN (NO) valves:
         #   - relay ON (state=True, checked) → valve CLOSED
         #   - relay OFF (state=False, unchecked) → valve OPEN
-        valve_label = valve_name.replace("_", " ").title()
+        valve_label = self._format_valve_label(valve_name)
         btn.setText(f"{valve_label}\n{'CLOSED' if state else 'OPEN'}")
         
         # Mark that we're handling this valve action (prevents callback interference)
@@ -361,16 +367,16 @@ class ControlPanel(QWidget):
             valve_name: Name of the valve ("vacuum_valve" or "vent_valve")
             state: Relay state - True = energized (valve CLOSED), False = de-energized (valve OPEN)
         """
-        if valve_name == "vacuum_valve":
+        if valve_name == self.vacuum_valve_name:
             btn = self.vacuum_valve_btn
-        elif valve_name == "vent_valve":
+        elif valve_name == self.vent_valve_name:
             btn = self.vent_valve_btn
         else:
             logger.warning(f"Unknown valve: {valve_name}")
             return
         
         self.valve_states[valve_name] = state
-        valve_label = valve_name.replace("_", " ").title()
+        valve_label = self._format_valve_label(valve_name)
         
         btn.blockSignals(True)
         btn.setChecked(state)
@@ -388,7 +394,7 @@ class ControlPanel(QWidget):
             self.set_pump_state(pump_state)
             
             # Sync valve states
-            for valve_name in ["vacuum_valve", "vent_valve"]:
+            for valve_name in [self.vacuum_valve_name, self.vent_valve_name]:
                 state = relay_state_manager.get_state("relay_module", valve_name)
                 self.set_valve_state(valve_name, state)
             
@@ -425,6 +431,35 @@ class ControlPanel(QWidget):
         
         if channel_name == "vacuum_pump":
             self.set_pump_state(state)
-        elif channel_name in ["vacuum_valve", "vent_valve"]:
+        elif channel_name in [self.vacuum_valve_name, self.vent_valve_name]:
             self.set_valve_state(channel_name, state)
+
+    def _load_valve_names(self) -> tuple[str, str]:
+        """
+        Load valve names from config using device_role mapping.
+        
+        Returns:
+            (vacuum_valve_name, vent_valve_name)
+        """
+        vac_name = "vacuum_valve"
+        vent_name = "vent_valve"
+        try:
+            from ...config.settings import get_settings
+            settings = get_settings()
+            devices = settings.get("io_devices", "digital_outputs", default=[])
+            for dev in devices:
+                role = dev.get("device_role", "").lower()
+                name = dev.get("name")
+                if role == "vacuum_valve" and name:
+                    vac_name = name
+                elif role == "vent_valve" and name:
+                    vent_name = name
+        except Exception as e:
+            logger.debug(f"Could not load valve names from config, using defaults: {e}")
+        return vac_name, vent_name
+
+    @staticmethod
+    def _format_valve_label(name: str) -> str:
+        """User-friendly label for a valve name."""
+        return name.replace("_", " ").title()
 
