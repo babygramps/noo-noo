@@ -1,0 +1,106 @@
+name: 300mbar3times
+description: Leak check at 300 mbar, seal for 180s, then vent; repeat 3 cycles.
+cycles: 3
+created_date: '2025-12-09T00:00:00'
+modified_date: '2025-12-09T00:00:00'
+author: User
+stages:
+  # Stage 1: Evacuate to 300 mbar with vent closed and vacuum valve open
+  - name: Evacuate to 300 mbar
+    target_vacuum_bar: 0.3
+    max_time_seconds: 120.0
+    min_time_seconds: 5.0
+    pump_mode: continuous
+    vacuum_tolerance_bar: 0.02
+    collect_data: true
+    io_actions:
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: true
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Open vacuum valve to connect pump to chamber
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Close vent valve before evacuation
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: end_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Ensure vent valve stays closed when 300 mbar is reached
+      
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: false
+        timing: end_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Close vacuum valve as soon as setpoint is reached
+
+  # Stage 2: Pump off and hold sealed chamber for leak check
+  - name: Pump Off and Hold (180s)
+    target_vacuum_bar: null
+    max_time_seconds: 180.0
+    min_time_seconds: 180.0
+    pump_mode: off
+    vacuum_tolerance_bar: 0.05
+    collect_data: true
+    io_actions:
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Keep vacuum valve closed during 180s hold
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Keep vent valve closed during leak check hold
+
+  # Stage 3: Vent chamber to atmosphere before next cycle
+  - name: Vent Chamber
+    target_vacuum_bar: null
+    max_time_seconds: 30.0
+    min_time_seconds: 5.0
+    pump_mode: off
+    vacuum_tolerance_bar: 0.05
+    collect_data: true
+    io_actions:
+      - device_name: vacuum_valve
+        action_type: digital_output
+        value: false
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Keep vacuum valve closed while venting
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: true
+        timing: start_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Open vent valve to bring chamber back to atmosphere
+      
+      - device_name: vent_valve
+        action_type: digital_output
+        value: false
+        timing: end_of_stage
+        delay_seconds: 0.0
+        duration_seconds: null
+        description: Close vent valve at end to prepare for next cycle
+
