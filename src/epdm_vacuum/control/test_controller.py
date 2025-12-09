@@ -344,7 +344,8 @@ class TestController:
             bool: True if stage completed successfully
         """
         try:
-            stage_start_time = time.time()
+            # Use monotonic clock for elapsed calculations to avoid jumps if system time changes
+            stage_start_time = time.monotonic()
             stage_data = []
             
             # DEBUG: Log stage execution start
@@ -413,7 +414,7 @@ class TestController:
             # Store stage data
             self.stage_data.append(stage_data)
             
-            stage_duration = time.time() - stage_start_time
+            stage_duration = time.monotonic() - stage_start_time
             logger.info(f"  Duration: {stage_duration:.1f} seconds")
             logger.info(f"  Data Points Collected: {len(stage_data)}")
             
@@ -447,7 +448,8 @@ class TestController:
             logger.info(f"    - Minimum Hold: {stage.min_time_seconds:.1f}s")
         
         while self.state == TestState.RUNNING:
-            elapsed = time.time() - stage_start
+            # Monotonic time prevents freezes when system clock steps (e.g., NTP)
+            elapsed = time.monotonic() - stage_start
             
             # TODO: Read actual vacuum from sensors
             current_vacuum = 0.0  # Placeholder
