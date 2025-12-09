@@ -1,13 +1,13 @@
 name: 300mbar3times
-description: Leak check at 300 mbar, seal for 180s, then vent; repeat 3 cycles.
+description: Leak check at -300 mbar (gauge), seal for 180s, then vent; repeat 3 cycles.
 cycles: 3
 created_date: '2025-12-09T00:00:00'
 modified_date: '2025-12-09T00:00:00'
 author: User
 stages:
-  # Stage 1: Evacuate to 300 mbar with vent closed and vacuum valve open
-  - name: Evacuate to 300 mbar
-    target_vacuum_bar: 0.3
+  # Stage 1: Evacuate to -300 mbar gauge with vent closed and vacuum valve open
+  - name: Evacuate to -300 mbar
+    target_vacuum_bar: -0.3
     max_time_seconds: 120.0
     min_time_seconds: 5.0
     pump_mode: continuous
