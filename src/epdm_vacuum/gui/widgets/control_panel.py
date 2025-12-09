@@ -436,16 +436,37 @@ class ControlPanel(QWidget):
 
     def _load_valve_names(self) -> tuple[str, str]:
         """
-        Load valve names from config using device_role mapping.
+        Load valve names from config.
         
-        Returns:
-            (vacuum_valve_name, vent_valve_name)
+        Priority:
+        1) spi_modules → relay_module channel names (SSOT for hardware mapping)
+        2) io_devices.digital_outputs with device_role
+        3) Defaults: ("vacuum_valve", "vent_valve")
         """
         vac_name = "vacuum_valve"
         vent_name = "vent_valve"
         try:
             from ...config.settings import get_settings
             settings = get_settings()
+            
+            # First preference: spi_modules relay module channel names
+            spi_modules = settings.get("hardware", "widgetlords", "spi_modules", default=[])
+            for module in spi_modules:
+                if module.get("module_type") == "PI-SPI-DIN-4KO" and module.get("name") == "relay_module":
+                    for ch in module.get("channels", []):
+                        name = ch.get("name")
+                        role = ch.get("device_role", "").lower()
+                        channel_num = ch.get("channel")
+                        # If device_role is missing, infer by channel name
+                        inferred_role = role or ("vacuum_valve" if name == "vacuum_valve" else "vent_valve" if name == "vent_valve" else "")
+                        if inferred_role == "vacuum_valve" and name is not None:
+                            vac_name = name
+                        elif inferred_role == "vent_valve" and name is not None:
+                            vent_name = name
+                    # Found relay_module; no need to check other modules
+                    break
+            
+            # Fallback: io_devices roles (metadata only)
             devices = settings.get("io_devices", "digital_outputs", default=[])
             for dev in devices:
                 role = dev.get("device_role", "").lower()
