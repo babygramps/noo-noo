@@ -211,8 +211,8 @@ export default function Dashboard() {
       <footer className="mt-8 pt-4 border-t border-panel-border">
         <div className="flex items-center justify-between text-xs text-gray-600">
           <span>EPDM Vacuum Fixture v2.0.0</span>
-          <span>
-            {currentData?.datetime || new Date().toLocaleString()}
+          <span suppressHydrationWarning>
+            {currentData?.datetime || '---'}
           </span>
         </div>
       </footer>
