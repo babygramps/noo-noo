@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'EPDM Vacuum Test Fixture',
+  title: 'Noo-Noo',
   description: 'Web control interface for vacuum seal testing system',
 };
 

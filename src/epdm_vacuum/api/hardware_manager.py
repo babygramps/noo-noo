@@ -244,6 +244,7 @@ class HardwareManager:
                 logger.error(f"Modbus read error: {e}")
                 data.update({
                     "gross_weight_kg": 0.0,
+                    "total_force_kg": 0.0,
                     "load_cell_1_kg": 0.0,
                     "load_cell_2_kg": 0.0,
                     "load_cell_3_kg": 0.0,
@@ -253,6 +254,7 @@ class HardwareManager:
             # Mock data when not connected
             data.update({
                 "gross_weight_kg": 0.0,
+                "total_force_kg": 0.0,
                 "load_cell_1_kg": 0.0,
                 "load_cell_2_kg": 0.0,
                 "load_cell_3_kg": 0.0,

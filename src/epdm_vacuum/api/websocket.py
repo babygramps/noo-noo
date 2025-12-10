@@ -152,6 +152,7 @@ class SensorDataBroadcaster:
             "vacuum_bar": 0.0,
             "pressure_psi": 0.0,
             "gross_weight_kg": 0.0,
+            "total_force_kg": 0.0,
             "load_cell_1_kg": 0.0,
             "load_cell_2_kg": 0.0,
             "load_cell_3_kg": 0.0,

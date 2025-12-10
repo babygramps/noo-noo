@@ -105,7 +105,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">
-              EPDM Vacuum Test Fixture
+              Noo-Noo
             </h1>
             <p className="text-sm text-gray-500">
               Web Control Interface
@@ -150,7 +150,7 @@ export default function Dashboard() {
               cell3: currentData?.load_cell_3_kg,
               cell4: currentData?.load_cell_4_kg,
             }}
-            total={currentData?.gross_weight_kg}
+            total={currentData?.total_force_kg}
           />
 
           <IOStatusDisplay ioStates={ioStates} />

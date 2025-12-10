@@ -464,10 +464,18 @@ class ModbusInterface(HardwareInterface):
                 result[f"load_cell_{i}_raw"] = 0
                 result[f"load_cell_{i}_kg"] = 0.0
         
+        # Calculate total_force_kg as sum of software-tared individual load cells
+        # This is more reliable than gross_weight_kg which is NOT software-tared
+        total_force_kg = sum(
+            result.get(f"load_cell_{i}_kg", 0.0) for i in range(1, 5)
+        )
+        result["total_force_kg"] = total_force_kg
+        
         if diagnostic_log:
             # Calculate what 500g should read as
             expected_raw_per_500g = cfg.kg_per_division * 0.5
             logger.info(f"  [INFO] For 500g weight: expected raw increase = {expected_raw_per_500g:.0f}")
+            logger.info(f"  [TOTAL] total_force_kg (sum of tared cells) = {total_force_kg:.4f} kg")
             logger.info("=" * 70)
         
         # Read status register
