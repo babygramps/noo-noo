@@ -381,16 +381,32 @@ class HardwareManager:
             return False, str(e)
     
     def get_io_states(self) -> Dict[str, bool]:
-        """Get current IO device states."""
+        """
+        Get current IO device states.
+        
+        Returns physical states (not relay states):
+        - For valves (NO type): True = physically OPEN, False = physically CLOSED
+          (inverted from relay state since relay ON = valve closed)
+        - For pump: True = ON, False = OFF (direct relay state)
+        """
         try:
             from ..daq.relay_state_manager import relay_state_manager
             all_states = relay_state_manager.get_all_states()
             
-            # Flatten to simple dict
+            # Valves that need inversion (NO type: relay ON = valve CLOSED)
+            no_valves = {"vacuum_valve", "vent_valve"}
+            
+            # Flatten to simple dict with valve inversion
             result = {}
             for module_name, channels in all_states.items():
-                for channel_name, state in channels.items():
-                    result[channel_name] = state
+                for channel_name, relay_state in channels.items():
+                    if channel_name in no_valves:
+                        # Invert for NO valves: relay ON means valve CLOSED
+                        # Return physical state: True = OPEN, False = CLOSED
+                        result[channel_name] = not relay_state
+                    else:
+                        # Pump and other devices: relay state = device state
+                        result[channel_name] = relay_state
             return result
         except Exception as e:
             logger.error(f"Error getting IO states: {e}")

@@ -865,11 +865,13 @@ class TestController:
                 # NOTE: State is now tracked by RelayStateManager (SSOT)
                 # The _set_digital_output method updates RelayStateManager
                 
-                # Notify IO callback with RELAY state (not desired state)
-                # The UI correctly interprets relay state for NO valves
+                # Notify IO callback with PHYSICAL state (not relay state)
+                # For valves: True = physically OPEN, False = physically CLOSED
+                # For pump: True = ON, False = OFF
+                physical_state = desired_state if is_valve else relay_state
                 if self.io_callback:
-                    logger.info(f"[IO_ACTION] Notifying IO callback: {action.device_name} = {relay_state}")
-                    self.io_callback(action.device_name, relay_state)
+                    logger.info(f"[IO_ACTION] Notifying IO callback: {action.device_name} = {physical_state} (physical state)")
+                    self.io_callback(action.device_name, physical_state)
                 else:
                     logger.warning(f"[IO_ACTION] No IO callback registered!")
             
@@ -885,7 +887,8 @@ class TestController:
                 relay_on = False if is_valve else True
                 self._set_digital_output(action.device_name, relay_on)
                 if self.io_callback:
-                    self.io_callback(action.device_name, relay_on)
+                    # Notify with physical state: True = OPEN/ON
+                    self.io_callback(action.device_name, True)
                 
                 # Wait for duration
                 if action.duration_seconds:
@@ -895,7 +898,8 @@ class TestController:
                 relay_off = True if is_valve else False
                 self._set_digital_output(action.device_name, relay_off)
                 if self.io_callback:
-                    self.io_callback(action.device_name, relay_off)
+                    # Notify with physical state: False = CLOSED/OFF
+                    self.io_callback(action.device_name, False)
             
         except Exception as e:
             logger.error(f"Error executing I/O action {action}: {e}", exc_info=True)
