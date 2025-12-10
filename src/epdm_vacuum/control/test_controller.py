@@ -393,9 +393,13 @@ class TestController:
             self._execute_io_actions(stage, IOActionTiming.DURING_STAGE)
             
             # Run stage with completion monitoring
+            logger.info("[STAGE_EXEC] Entering _run_stage_with_monitoring...")
             completion_reason = self._run_stage_with_monitoring(stage, stage_data)
             
-            logger.info(f"  Completion Reason: {completion_reason}")
+            logger.info("=" * 60)
+            logger.info(f"[STAGE_COMPLETE] Monitoring returned: '{completion_reason}'")
+            logger.info(f"[STAGE_COMPLETE] About to: 1) END_OF_STAGE IO, 2) TURN OFF PUMP, 3) AFTER_STAGE IO")
+            logger.info("=" * 60)
             self._update_status(f"Stage complete: {completion_reason}")
             
             # Notify stage completion
@@ -403,10 +407,13 @@ class TestController:
                 self.completion_callback(self.current_stage_index, completion_reason)
             
             # Execute I/O actions: END_OF_STAGE
+            logger.info("[STAGE_COMPLETE] Step 1: Executing END_OF_STAGE I/O actions...")
             self._execute_io_actions(stage, IOActionTiming.END_OF_STAGE)
             
             # Turn off pump
+            logger.info("[STAGE_COMPLETE] Step 2: Turning off pump...")
             self._control_pump(False)
+            logger.info("[STAGE_COMPLETE] Step 2: Pump turn-off command sent!")
             
             # Execute I/O actions: AFTER_STAGE
             self._execute_io_actions(stage, IOActionTiming.AFTER_STAGE)
@@ -435,9 +442,14 @@ class TestController:
         Returns:
             str: Reason for completion ("setpoint reached", "time limit", etc.)
         """
-        stage_start = time.time()
+        # CRITICAL: Use time.monotonic() for elapsed calculations (not time.time()!)
+        # time.time() returns epoch time (~1.7 billion), time.monotonic() returns system uptime
+        # Mixing them gives wildly wrong elapsed values!
+        stage_start = time.monotonic()
         sample_interval = 0.1  # Check conditions every 100ms
         last_progress_log = 0.0  # Track last progress log time
+        
+        logger.info(f"[TIMING] stage_start={stage_start:.3f} (monotonic), will use monotonic for elapsed")
         
         logger.info(f"  Monitoring Completion Conditions:")
         if stage.target_vacuum_bar is not None:
@@ -448,17 +460,32 @@ class TestController:
             logger.info(f"    - Minimum Hold: {stage.min_time_seconds:.1f}s")
         logger.info(f"    - NOTE: vacuum_bar from sensors is POSITIVE magnitude (e.g., 0.3 = 300mbar vacuum)")
         
+        min_time_passed_logged = False  # Track if we've logged passing min_time
+        loop_count = 0
+        
         while self.state == TestState.RUNNING:
+            loop_count += 1
             # Monotonic time prevents freezes when system clock steps (e.g., NTP)
             elapsed = time.monotonic() - stage_start
+            
+            # Log timing debug info occasionally
+            if loop_count <= 5 or loop_count % 100 == 0:
+                logger.debug(f"[LOOP #{loop_count}] elapsed={elapsed:.2f}s, min_time={stage.min_time_seconds}s, state={self.state}")
             
             # TODO: Read actual vacuum from sensors
             current_vacuum = 0.0  # Placeholder
             
             # Check minimum time first
             if elapsed < stage.min_time_seconds:
+                if loop_count <= 3:
+                    logger.debug(f"[MIN_TIME] Waiting... elapsed={elapsed:.2f}s < min_time={stage.min_time_seconds}s")
                 time.sleep(sample_interval)
                 continue
+            
+            # Log once when min_time is passed
+            if not min_time_passed_logged:
+                logger.info(f"[MIN_TIME] ✓ Minimum time passed: elapsed={elapsed:.2f}s >= {stage.min_time_seconds}s - now checking setpoint")
+                min_time_passed_logged = True
             
             # Read actual vacuum level from sensor FIRST
             # vacuum_bar: 0 = atmosphere, ~1 = full vacuum (matches sequence setpoint units)
@@ -540,15 +567,24 @@ class TestController:
                         # Setpoint reached when current vacuum magnitude >= target magnitude
                         setpoint_reached = current_magnitude >= target_magnitude
                         
-                        # Detailed debug logging (every 5 seconds when close to setpoint)
-                        if int(elapsed) % 5 == 0 or current_magnitude >= target_magnitude * 0.8:
-                            logger.debug(f"[SETPOINT_CHECK] target={target:.3f} bar, target_mag={target_magnitude:.3f}, "
-                                        f"current_vacuum={current_vacuum:.3f}, current_mag={current_magnitude:.3f}, "
-                                        f"reached={setpoint_reached}, pressure_psig={current_pressure_psig:.2f}")
+                        # VERBOSE LOGGING - always log setpoint check status every second
+                        if int(elapsed) != int(elapsed - sample_interval):  # Log once per second
+                            pct_progress = (current_magnitude / target_magnitude * 100) if target_magnitude > 0 else 0
+                            logger.info(f"[SETPOINT] {current_magnitude:.4f} / {target_magnitude:.4f} bar = {pct_progress:.1f}% | "
+                                       f"PSIG={current_pressure_psig:.2f} | reached={setpoint_reached}")
+                        
+                        # Log when getting close (80%+)
+                        if current_magnitude >= target_magnitude * 0.8:
+                            logger.info(f"[SETPOINT] APPROACHING TARGET: {current_magnitude:.4f} >= {target_magnitude * 0.8:.4f} (80% threshold)")
                         
                         if setpoint_reached:
-                            logger.info(f"  ✓ Setpoint reached: |{current_vacuum:.3f}| bar >= |{target:.3f}| bar")
-                            logger.info(f"    (Pressure: {current_pressure_psig:.2f} PSIG, magnitude comparison)")
+                            logger.info("=" * 60)
+                            logger.info(f"[SETPOINT] ✓✓✓ SETPOINT REACHED! ✓✓✓")
+                            logger.info(f"[SETPOINT]   Current: {current_magnitude:.4f} bar")
+                            logger.info(f"[SETPOINT]   Target:  {target_magnitude:.4f} bar")
+                            logger.info(f"[SETPOINT]   PSIG:    {current_pressure_psig:.2f}")
+                            logger.info(f"[SETPOINT]   Returning 'setpoint reached' - pump should turn OFF next")
+                            logger.info("=" * 60)
                             return f"setpoint reached ({current_vacuum:.3f} bar)"
             
             # Condition 2: Time limit exceeded (applies to ALL modes including MAINTAIN_VACUUM)
