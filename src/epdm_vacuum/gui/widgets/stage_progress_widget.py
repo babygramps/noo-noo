@@ -49,6 +49,11 @@ class StageProgressWidget(QWidget):
         self.completion_reason: str = ""
         self.elapsed_time: float = 0.0
         
+        # Cycle tracking
+        self.current_cycle: int = 0
+        self.total_cycles: int = 1
+        self.previous_cycle: int = -1  # Track cycle changes for reset
+        
         # Animation state
         self.animation_phase: float = 0.0
         self.animation_timer = QTimer()
@@ -64,10 +69,30 @@ class StageProgressWidget(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
         
-        # Title
+        # Title row with cycle indicator
+        title_row = QHBoxLayout()
         title_label = QLabel("Test Stage Progress")
         title_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #333;")
-        layout.addWidget(title_label)
+        title_row.addWidget(title_label)
+        
+        title_row.addStretch()
+        
+        # Cycle indicator (hidden when single cycle)
+        self.cycle_label = QLabel("")
+        self.cycle_label.setStyleSheet("""
+            QLabel {
+                font-size: 12pt;
+                font-weight: bold;
+                color: white;
+                background-color: #FF9800;
+                border-radius: 10px;
+                padding: 4px 12px;
+            }
+        """)
+        self.cycle_label.setVisible(False)
+        title_row.addWidget(self.cycle_label)
+        
+        layout.addLayout(title_row)
         
         # Timeline canvas
         self.timeline_canvas = TimelineCanvas(self)
@@ -142,23 +167,54 @@ class StageProgressWidget(QWidget):
         self.completion_reason = ""
         self.elapsed_time = 0.0
         
+        # Get cycle count from sequence
+        self.total_cycles = getattr(sequence, 'cycles', 1) or 1
+        self.current_cycle = 0
+        self.previous_cycle = -1
+        
+        # Update cycle indicator visibility
+        if self.total_cycles > 1:
+            self.cycle_label.setText(f"Cycle 1/{self.total_cycles}")
+            self.cycle_label.setVisible(True)
+        else:
+            self.cycle_label.setVisible(False)
+        
         self.timeline_canvas.set_sequence(sequence)
         self._update_display()
         
-        logger.info(f"Set sequence: {sequence.name} with {len(sequence.stages)} stages")
+        logger.info(f"Set sequence: {sequence.name} with {len(sequence.stages)} stages x {self.total_cycles} cycles")
     
-    def set_current_stage(self, stage_index: int, stage_name: str) -> None:
+    def set_current_stage(self, stage_index: int, stage_name: str,
+                         current_cycle: int = 0, total_cycles: int = 1) -> None:
         """
         Set the currently executing stage.
         
         Args:
-            stage_index: Index of current stage (0-based)
+            stage_index: Index of current stage within cycle (0-based)
             stage_name: Name of the current stage
+            current_cycle: Current cycle number (0-based)
+            total_cycles: Total number of cycles
         """
+        # Detect new cycle - reset completed stages and progress
+        if current_cycle != self.previous_cycle:
+            logger.info(f"New cycle detected: {current_cycle + 1}/{total_cycles} - resetting stage progress")
+            self.completed_stages.clear()
+            self.timeline_canvas.reset_cycle()  # Reset timeline for new cycle
+            self.previous_cycle = current_cycle
+        
         self.current_stage_index = stage_index
+        self.current_cycle = current_cycle
+        self.total_cycles = total_cycles
         self.stage_progress = 0.0
         self.completion_reason = ""
         self.elapsed_time = 0.0
+        
+        # Update cycle indicator
+        if total_cycles > 1:
+            self.cycle_label.setText(f"Cycle {current_cycle + 1}/{total_cycles}")
+            self.cycle_label.setVisible(True)
+        else:
+            self.cycle_label.setVisible(False)
         
         self.timeline_canvas.set_current_stage(stage_index)
         self._update_display()
@@ -167,7 +223,10 @@ class StageProgressWidget(QWidget):
         if not self.animation_timer.isActive():
             self.animation_timer.start()
         
-        logger.info(f"Current stage set to: {stage_index} - {stage_name}")
+        if total_cycles > 1:
+            logger.info(f"Current stage set to: Cycle {current_cycle + 1}/{total_cycles}, Stage {stage_index} - {stage_name}")
+        else:
+            logger.info(f"Current stage set to: {stage_index} - {stage_name}")
     
     def update_progress(self, percentage: float, status_text: str) -> None:
         """
@@ -212,7 +271,11 @@ class StageProgressWidget(QWidget):
         self.stage_progress = 0.0
         self.completion_reason = ""
         self.elapsed_time = 0.0
+        self.current_cycle = 0
+        self.total_cycles = 1
+        self.previous_cycle = -1
         
+        self.cycle_label.setVisible(False)
         self.timeline_canvas.reset()
         self.animation_timer.stop()
         self._update_display()
@@ -325,6 +388,14 @@ class TimelineCanvas(QWidget):
     def reset(self) -> None:
         """Reset the timeline."""
         self.sequence = None
+        self.current_stage_index = -1
+        self.completed_stages.clear()
+        self.stage_progress = 0.0
+        self.completion_reasons.clear()
+        self.update()
+    
+    def reset_cycle(self) -> None:
+        """Reset timeline for a new cycle (clear completed stages but keep sequence)."""
         self.current_stage_index = -1
         self.completed_stages.clear()
         self.stage_progress = 0.0

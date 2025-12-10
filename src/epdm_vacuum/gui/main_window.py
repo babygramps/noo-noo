@@ -1185,21 +1185,27 @@ class MainWindow(QMainWindow):
         logger.info(f"Sequence changed to: {sequence.name}")
         self.statusBar().showMessage(f"Loaded sequence: {sequence.name}")
     
-    def on_stage_changed(self, current: int, total: int, stage_name: str) -> None:
+    def on_stage_changed(self, stage_index: int, stages_per_cycle: int, 
+                         current_cycle: int, total_cycles: int, stage_name: str) -> None:
         """
         Handle stage change during test execution.
         
         Args:
-            current: Current stage index
-            total: Total number of stages
+            stage_index: Current stage index within the cycle (0-based)
+            stages_per_cycle: Number of stages in one cycle
+            current_cycle: Current cycle number (0-based)
+            total_cycles: Total number of cycles
             stage_name: Name of the current stage
         """
-        status = f"Executing: Stage {current + 1}/{total} - {stage_name}"
+        if total_cycles > 1:
+            status = f"Executing: Cycle {current_cycle + 1}/{total_cycles} - Stage {stage_index + 1}/{stages_per_cycle} - {stage_name}"
+        else:
+            status = f"Executing: Stage {stage_index + 1}/{stages_per_cycle} - {stage_name}"
         self.statusBar().showMessage(status)
         logger.info(f"Stage changed: {status}")
         
-        # Update test status panel
-        self.test_status_panel.set_current_stage(current, stage_name)
+        # Update test status panel with cycle information
+        self.test_status_panel.set_current_stage(stage_index, stage_name, current_cycle, total_cycles)
     
     def on_io_state_changed(self, device_name: str, state: bool) -> None:
         """

@@ -91,7 +91,8 @@ class TestController:
         
         # Callbacks for status updates
         self.status_callback: Optional[Callable[[str], None]] = None
-        self.stage_callback: Optional[Callable[[int, int, TestStage], None]] = None
+        # stage_callback signature: (stage_index, stages_per_cycle, current_cycle, total_cycles, stage)
+        self.stage_callback: Optional[Callable[[int, int, int, int, TestStage], None]] = None
         self.io_callback: Optional[Callable[[str, bool], None]] = None
         self.progress_callback: Optional[Callable[[float, str], None]] = None
         self.completion_callback: Optional[Callable[[int, str], None]] = None
@@ -281,9 +282,10 @@ class TestController:
                 else:
                     self._update_status(f"Stage {stage_index + 1}/{stages_per_cycle}: {stage_name}")
                 
-                # Notify stage change (use global index for progress tracking)
+                # Notify stage change with cycle information
+                # stage_callback(stage_index, stages_per_cycle, current_cycle, total_cycles, stage)
                 if self.stage_callback:
-                    self.stage_callback(global_stage_index, total_stages, stage)
+                    self.stage_callback(stage_index, stages_per_cycle, cycle, total_cycles, stage)
                 
                 # Execute the stage
                 stage_success = self._execute_stage(stage)
@@ -1049,12 +1051,17 @@ class TestController:
         """
         self.status_callback = callback
     
-    def set_stage_callback(self, callback: Callable[[int, int, TestStage], None]) -> None:
+    def set_stage_callback(self, callback: Callable[[int, int, int, int, TestStage], None]) -> None:
         """
         Set callback for stage transitions.
         
         Args:
-            callback: Function to call with (current_stage, total_stages, stage_object)
+            callback: Function to call with (stage_index, stages_per_cycle, current_cycle, total_cycles, stage_object)
+                      - stage_index: 0-based index within the current cycle
+                      - stages_per_cycle: Number of stages in one cycle
+                      - current_cycle: 0-based cycle number
+                      - total_cycles: Total number of cycles
+                      - stage_object: The TestStage object
         """
         self.stage_callback = callback
     
@@ -1140,12 +1147,15 @@ class TestController:
             csv_file_path = Path(self.csv_path)
             csv_file_path.parent.mkdir(parents=True, exist_ok=True)
             
+            # Enhance metadata with sequence information and test description
+            enhanced_metadata = self._build_enhanced_metadata()
+            
             # Save metadata to separate JSON file
-            if self.test_metadata:
+            if enhanced_metadata:
                 metadata_path = csv_file_path.with_suffix('.json')
                 try:
                     with open(metadata_path, 'w') as meta_file:
-                        json.dump(self.test_metadata, meta_file, indent=2)
+                        json.dump(enhanced_metadata, meta_file, indent=2)
                     logger.info(f"Saved test metadata to: {metadata_path}")
                 except Exception as e:
                     logger.error(f"Failed to save metadata file: {e}", exc_info=True)
@@ -1192,6 +1202,183 @@ class TestController:
             
         except Exception as e:
             logger.error(f"Error writing to CSV: {e}", exc_info=True)
+    
+    def _build_enhanced_metadata(self) -> Dict[str, Any]:
+        """
+        Build enhanced metadata with comprehensive test description for LLM analysis.
+        
+        Returns:
+            Dict: Enhanced metadata including test description, sequence info, and data interpretation guide
+        """
+        # Start with user-provided metadata
+        metadata = dict(self.test_metadata) if self.test_metadata else {}
+        
+        # Add test system information
+        metadata["test_system"] = {
+            "name": "EPDM Gasket Vacuum Seal Testing System",
+            "description": "Automated vacuum seal testing fixture for EPDM gaskets",
+            "hardware": {
+                "vacuum_pump": "Controlled via relay module (PI-SPI-DIN-4KO)",
+                "vacuum_valve": "Normally-open solenoid valve isolating pump from chamber",
+                "vent_valve": "Normally-open solenoid valve for chamber venting",
+                "pressure_sensor": "4-20mA analog pressure transmitter (-14.7 to +30 PSIG)",
+                "load_cells": "TLB4 4-channel load cell transmitter via Modbus RTU"
+            }
+        }
+        
+        # Add sequence information if available
+        if self.current_sequence:
+            seq = self.current_sequence
+            total_cycles = getattr(seq, 'cycles', 1) or 1
+            
+            # Build stage descriptions
+            stage_descriptions = []
+            for i, stage in enumerate(seq.stages):
+                stage_desc = {
+                    "stage_number": i + 1,
+                    "name": stage.name,
+                    "pump_mode": stage.pump_mode.value,
+                    "target_vacuum_bar": stage.target_vacuum_bar,
+                    "max_time_seconds": stage.max_time_seconds,
+                    "min_time_seconds": stage.min_time_seconds,
+                    "io_actions": []
+                }
+                
+                # Add IO actions
+                for action in stage.io_actions:
+                    stage_desc["io_actions"].append({
+                        "device": action.device_name,
+                        "value": "OPEN/ON" if action.value else "CLOSED/OFF",
+                        "timing": action.timing.value
+                    })
+                
+                stage_descriptions.append(stage_desc)
+            
+            metadata["sequence"] = {
+                "name": seq.name,
+                "description": getattr(seq, 'description', ''),
+                "total_cycles": total_cycles,
+                "stages_per_cycle": len(seq.stages),
+                "total_stages": len(seq.stages) * total_cycles,
+                "stages": stage_descriptions
+            }
+        
+        # Add comprehensive test description for LLM analysis
+        metadata["test_description"] = self._generate_test_description()
+        
+        # Add data interpretation guide
+        metadata["data_interpretation_guide"] = {
+            "csv_columns": {
+                "timestamp": "Unix timestamp (seconds since epoch)",
+                "datetime": "Human-readable datetime string",
+                "elapsed_time": "Seconds since stage started",
+                "stage_index": "Current stage number (0-based index)",
+                "stage_name": "Name of the current stage",
+                "vacuum_bar": "Vacuum level in bar (POSITIVE magnitude: 0.3 = 300 mbar below atmosphere)",
+                "pressure_psig": "Gauge pressure in PSIG (NEGATIVE = vacuum, POSITIVE = above atmosphere)",
+                "pressure_mbar": "Gauge pressure in millibar",
+                "target_vacuum_bar": "Target vacuum setpoint for the stage",
+                "test_state": "Current test execution state",
+                "io_vacuum_pump": "Vacuum pump relay state (ON/OFF)",
+                "io_vacuum_valve": "Vacuum isolation valve state (OPEN/CLOSED)",
+                "io_vent_valve": "Chamber vent valve state (OPEN/CLOSED)",
+                "total_force_kg": "Total force from all load cells in kg",
+                "channel_*_kg": "Individual load cell readings in kg"
+            },
+            "sign_conventions": {
+                "vacuum_bar": "Always POSITIVE magnitude. 0.3 bar = 300 mbar vacuum (below atmosphere)",
+                "pressure_psig": "Negative = vacuum (below atmosphere), Positive = pressurized (above atmosphere)",
+                "atmospheric_reference": "0 PSIG = atmospheric pressure (~14.7 PSIA)"
+            },
+            "valve_conventions": {
+                "vacuum_valve_OPEN": "Chamber connected to vacuum pump",
+                "vacuum_valve_CLOSED": "Chamber isolated from vacuum pump",
+                "vent_valve_OPEN": "Chamber venting to atmosphere",
+                "vent_valve_CLOSED": "Chamber sealed from atmosphere"
+            }
+        }
+        
+        return metadata
+    
+    def _generate_test_description(self) -> str:
+        """
+        Generate a comprehensive text description of how the test works.
+        
+        Returns:
+            str: Detailed test description for LLM/AI analysis
+        """
+        description = """
+## EPDM Gasket Vacuum Seal Test - Operation Description
+
+### Purpose
+This test evaluates the vacuum sealing performance of EPDM gaskets by:
+1. Drawing vacuum in a sealed test chamber containing the gasket
+2. Monitoring vacuum level and force over time
+3. Detecting any vacuum loss (leak) through the gasket seal
+
+### Test Hardware Operation
+
+**Vacuum System:**
+- A vacuum pump creates negative pressure (vacuum) in the test chamber
+- A vacuum isolation valve (vacuum_valve) connects/disconnects the pump from the chamber
+- A vent valve (vent_valve) allows the chamber to return to atmospheric pressure
+
+**Measurement System:**
+- Pressure sensor measures chamber pressure (negative PSIG = vacuum)
+- Load cells measure compression force on the gasket (in kg)
+
+### Typical Test Sequence Flow
+
+**Stage 1 - Evacuation:**
+- Vent valve CLOSES (seals chamber from atmosphere)
+- Vacuum valve OPENS (connects pump to chamber)
+- Pump runs in CONTINUOUS mode
+- Vacuum increases (pressure becomes more negative)
+- Stage completes when target vacuum is reached OR time limit expires
+
+**Stage 2 - Hold/Leak Check:**
+- Vacuum valve CLOSES (isolates chamber from pump)
+- Pump turns OFF
+- Chamber remains sealed
+- Any vacuum loss indicates a leak through the gasket
+- Monitor vacuum_bar - it should remain stable if seal is good
+- Leak rate = change in vacuum over time
+
+**Stage 3 - Vent:**
+- Vent valve OPENS (allows air into chamber)
+- Chamber returns to atmospheric pressure (vacuum_bar → 0)
+- Prepares for next cycle or test completion
+
+### How to Analyze the Data
+
+**For Seal Quality Assessment:**
+1. Find the "Hold" stage data (pump_mode = "off", both valves closed)
+2. Calculate vacuum change: initial_vacuum - final_vacuum
+3. Calculate leak rate: vacuum_change / hold_time (mbar/min or bar/min)
+4. Lower leak rate = better seal
+
+**For Evacuation Performance:**
+1. Find the "Evacuate" stage data (pump_mode = "continuous")
+2. Check time to reach target vacuum (evacuation speed)
+3. Monitor force during evacuation (gasket compression)
+
+**Key Indicators:**
+- vacuum_bar increasing during evacuation = system working correctly
+- vacuum_bar stable during hold = good seal
+- vacuum_bar decreasing during hold = leak detected
+- Higher force values = more gasket compression
+
+**Multi-Cycle Tests:**
+- Tests may repeat the evacuate-hold-vent sequence multiple times
+- Compare leak rates across cycles to assess seal degradation
+- First cycle may show different behavior as gasket "seats"
+
+### Data Quality Notes
+- First few seconds after valve changes may show transient behavior
+- Ignore data points during stage transitions
+- Focus on steady-state portions of each stage for analysis
+"""
+        return description.strip()
     
     def _close_csv_file(self) -> None:
         """Close the CSV file."""

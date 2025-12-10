@@ -111,18 +111,24 @@ class TestStatusPanel(QWidget):
         
         logger.info(f"Test status panel loaded sequence: {sequence.name}")
     
-    def set_current_stage(self, stage_index: int, stage_name: str) -> None:
+    def set_current_stage(self, stage_index: int, stage_name: str, 
+                         current_cycle: int = 0, total_cycles: int = 1) -> None:
         """
         Set the currently executing stage.
         
         Args:
-            stage_index: Index of current stage (0-based)
+            stage_index: Index of current stage within the cycle (0-based)
             stage_name: Name of the current stage
+            current_cycle: Current cycle number (0-based)
+            total_cycles: Total number of cycles
         """
         if self.stage_progress_widget:
-            self.stage_progress_widget.set_current_stage(stage_index, stage_name)
+            self.stage_progress_widget.set_current_stage(stage_index, stage_name, current_cycle, total_cycles)
         
-        logger.info(f"Test status panel: current stage set to {stage_index} - {stage_name}")
+        if total_cycles > 1:
+            logger.info(f"Test status panel: Cycle {current_cycle + 1}/{total_cycles}, Stage {stage_index} - {stage_name}")
+        else:
+            logger.info(f"Test status panel: Stage {stage_index} - {stage_name}")
     
     def update_stage_progress(self, percentage: float, status_text: str) -> None:
         """
