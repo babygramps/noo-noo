@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { clsx } from 'clsx';
-import { X, Play, Calendar, User, FlaskConical, FileText, Target, Clock, ChevronDown, ChevronUp, Info } from 'lucide-react';
+import { X, Play, Calendar, User, FlaskConical, FileText, Target, Clock, ChevronDown, ChevronUp, Info, Scale, RefreshCw } from 'lucide-react';
+import type { GasketWeighingResult } from './GasketWeighingModal';
 
 export interface TestMetadata {
   test_name: string;
@@ -27,6 +28,8 @@ interface TestMetadataModalProps {
   onSubmit: (metadata: TestMetadata) => void;
   sequenceName: string | null;
   isLoading?: boolean;
+  gasketWeight?: GasketWeighingResult | null;
+  onReweigh?: () => void;
 }
 
 function generateTestId(testName: string, date: Date): string {
@@ -50,6 +53,8 @@ export function TestMetadataModal({
   onSubmit,
   sequenceName,
   isLoading = false,
+  gasketWeight,
+  onReweigh,
 }: TestMetadataModalProps) {
   // Form state
   const [testName, setTestName] = useState('');
@@ -187,6 +192,60 @@ export function TestMetadataModal({
         {/* Content */}
         <form onSubmit={handleSubmit} className="overflow-y-auto max-h-[calc(90vh-180px)]">
           <div className="px-6 py-4 space-y-3">
+            {/* Gasket Weight Section (shown if weight captured) */}
+            {gasketWeight && (
+              <div className="rounded-xl border-2 border-emerald-500/40 bg-gradient-to-br from-emerald-900/20 to-emerald-950/20 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30">
+                      <Scale className="w-5 h-5 text-emerald-400" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-emerald-300">Gasket Assembly Weight</h4>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-2xl font-bold font-mono text-emerald-400">
+                          {gasketWeight.weight_kg.toFixed(3)}
+                        </span>
+                        <span className="text-sm text-emerald-400/70">kg</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {gasketWeight.assembly_id && (
+                      <span className="text-xs text-slate-400 bg-slate-800/50 px-2 py-1 rounded">
+                        ID: {gasketWeight.assembly_id}
+                      </span>
+                    )}
+                    {onReweigh && (
+                      <button
+                        type="button"
+                        onClick={onReweigh}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-lg transition-colors"
+                      >
+                        <RefreshCw size={14} />
+                        Re-weigh
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* No weight captured hint */}
+            {!gasketWeight && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                <div className="flex items-start gap-3">
+                  <Scale className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm text-amber-200/80">
+                      <strong>Tip:</strong> Weigh the gasket assembly before starting the test using the 
+                      &quot;Weigh Assembly&quot; button in the Control Panel. The weight will be recorded in the test data.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Basic Info Section */}
             <CollapsibleSection
               title="Test Information"

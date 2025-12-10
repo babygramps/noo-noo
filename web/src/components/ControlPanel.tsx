@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { clsx } from 'clsx';
-import { Play, Square, Power, Wind, RotateCcw, Settings2 } from 'lucide-react';
+import { Play, Square, Power, Wind, RotateCcw, Settings2, Scale } from 'lucide-react';
 import * as api from '@/lib/api';
 import type { IOStates, SequenceSummary } from '@/lib/api';
 
@@ -15,6 +15,7 @@ interface ControlPanelProps {
   onStartTestRequest?: () => void;
   onTestStopped?: () => void;
   onTareComplete?: () => void;
+  onWeighAssembly?: () => void;
 }
 
 export function ControlPanel({
@@ -26,6 +27,7 @@ export function ControlPanel({
   onStartTestRequest,
   onTestStopped,
   onTareComplete,
+  onWeighAssembly,
 }: ControlPanelProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -265,6 +267,21 @@ export function ControlPanel({
             labels={['CLOSED', 'OPEN']}
           />
         </div>
+
+        {/* Weigh Assembly button */}
+        <button
+          onClick={onWeighAssembly}
+          disabled={loading !== null || testRunning}
+          className={clsx(
+            'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold transition-all duration-200',
+            'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300',
+            'hover:bg-emerald-500/30 hover:border-emerald-400/50',
+            'disabled:opacity-50 disabled:cursor-not-allowed'
+          )}
+        >
+          <Scale size={18} />
+          <span>Weigh Assembly</span>
+        </button>
 
         {/* Tare button */}
         <button

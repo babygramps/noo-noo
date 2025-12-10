@@ -8,6 +8,7 @@ import { ControlPanel, IOStatusDisplay } from '@/components/ControlPanel';
 import { StageProgress, StageList } from '@/components/StageProgress';
 import { TestMetadataModal, TestMetadata } from '@/components/TestMetadataModal';
 import { TestDataBrowser } from '@/components/TestDataBrowser';
+import { GasketWeighingModal, GasketWeighingResult } from '@/components/GasketWeighingModal';
 import * as api from '@/lib/api';
 import type { SequenceSummary, Sequence } from '@/lib/api';
 import { Activity, Gauge, Scale, Settings, HardDrive } from 'lucide-react';
@@ -38,6 +39,10 @@ export default function Dashboard() {
   const [isStartingTest, setIsStartingTest] = useState(false);
   const [currentMetadata, setCurrentMetadata] = useState<TestMetadata | null>(null);
   const [isDataBrowserOpen, setIsDataBrowserOpen] = useState(false);
+  
+  // Gasket weighing state
+  const [isWeighingModalOpen, setIsWeighingModalOpen] = useState(false);
+  const [gasketWeighingResult, setGasketWeighingResult] = useState<GasketWeighingResult | null>(null);
 
   // Fetch sequences on mount
   useEffect(() => {
@@ -98,17 +103,46 @@ export default function Dashboard() {
     setIsMetadataModalOpen(true);
   }, [selectedSequenceName]);
   
+  const handleWeighAssembly = useCallback(() => {
+    setIsWeighingModalOpen(true);
+  }, []);
+  
+  const handleWeighingCapture = useCallback((result: GasketWeighingResult) => {
+    setGasketWeighingResult(result);
+    setIsWeighingModalOpen(false);
+    // Optionally open metadata modal to start test
+    // setIsMetadataModalOpen(true);
+  }, []);
+  
+  const handleWeighingSkip = useCallback(() => {
+    setGasketWeighingResult(null);
+    setIsWeighingModalOpen(false);
+  }, []);
+  
   const handleMetadataSubmit = useCallback(async (metadata: TestMetadata) => {
     if (!selectedSequenceName) return;
     
     setIsStartingTest(true);
+    
+    // Merge gasket weighing result into metadata
+    const enhancedMetadata: Record<string, unknown> = { ...metadata };
+    if (gasketWeighingResult) {
+      enhancedMetadata.gasket_assembly_weight_kg = gasketWeighingResult.weight_kg;
+      enhancedMetadata.gasket_assembly_id = gasketWeighingResult.assembly_id || null;
+      enhancedMetadata.gasket_assembly_description = gasketWeighingResult.assembly_description || null;
+      enhancedMetadata.gasket_weight_timestamp = gasketWeighingResult.timestamp;
+      enhancedMetadata.gasket_weight_tared = gasketWeighingResult.is_tared;
+      enhancedMetadata.gasket_weight_individual_cells_kg = gasketWeighingResult.individual_cells;
+    }
+    
     setCurrentMetadata(metadata);
     
     try {
-      const result = await api.startTest(selectedSequenceName, metadata as Record<string, unknown>);
+      const result = await api.startTest(selectedSequenceName, enhancedMetadata);
       if (result.success) {
         clearHistory();
         setIsMetadataModalOpen(false);
+        setGasketWeighingResult(null); // Clear after test starts
       } else {
         console.error('Failed to start test:', result.message);
       }
@@ -117,7 +151,7 @@ export default function Dashboard() {
     } finally {
       setIsStartingTest(false);
     }
-  }, [selectedSequenceName, clearHistory]);
+  }, [selectedSequenceName, clearHistory, gasketWeighingResult]);
 
   const handleTestStopped = useCallback(() => {
     setCurrentMetadata(null);
@@ -306,6 +340,7 @@ export default function Dashboard() {
               onStartTestRequest={handleStartTestRequest}
               onTestStopped={handleTestStopped}
               onTareComplete={clearHistory}
+              onWeighAssembly={handleWeighAssembly}
             />
             
             {/* Current Test Metadata Summary */}
@@ -356,6 +391,15 @@ export default function Dashboard() {
         </div>
       </footer>
       
+      {/* Gasket Weighing Modal */}
+      <GasketWeighingModal
+        isOpen={isWeighingModalOpen}
+        onClose={() => setIsWeighingModalOpen(false)}
+        onCapture={handleWeighingCapture}
+        onSkip={handleWeighingSkip}
+        currentData={currentData}
+      />
+      
       {/* Test Metadata Modal */}
       <TestMetadataModal
         isOpen={isMetadataModalOpen}
@@ -363,6 +407,11 @@ export default function Dashboard() {
         onSubmit={handleMetadataSubmit}
         sequenceName={selectedSequenceName}
         isLoading={isStartingTest}
+        gasketWeight={gasketWeighingResult}
+        onReweigh={() => {
+          setIsMetadataModalOpen(false);
+          setIsWeighingModalOpen(true);
+        }}
       />
       
       {/* Test Data Browser Modal */}
