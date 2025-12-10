@@ -523,10 +523,25 @@ class HardwareManager:
         
         self._current_sequence = sequence
         
-        # Generate CSV path
+        # Generate CSV path using test_id from metadata if available
         from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        csv_path = f"data/test_{timestamp}.csv"
+        import re
+        
+        test_id = None
+        if metadata:
+            test_id = metadata.get('test_id')
+        
+        if test_id:
+            # Sanitize test_id for use as filename (remove unsafe characters)
+            safe_test_id = re.sub(r'[^\w\-]', '_', str(test_id))
+            csv_path = f"data/{safe_test_id}.csv"
+            logger.info(f"Using test_id for filename: {safe_test_id}")
+        else:
+            # Fallback to generic timestamp-based naming
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_path = f"data/test_{timestamp}.csv"
+            logger.info(f"No test_id in metadata, using timestamp filename: test_{timestamp}")
+        
         self._current_csv_path = csv_path  # Store for Google Drive upload
         
         # Create test controller
