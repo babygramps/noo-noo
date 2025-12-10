@@ -472,22 +472,7 @@ class TestController:
             if loop_count <= 5 or loop_count % 100 == 0:
                 logger.debug(f"[LOOP #{loop_count}] elapsed={elapsed:.2f}s, min_time={stage.min_time_seconds}s, state={self.state}")
             
-            # TODO: Read actual vacuum from sensors
-            current_vacuum = 0.0  # Placeholder
-            
-            # Check minimum time first
-            if elapsed < stage.min_time_seconds:
-                if loop_count <= 3:
-                    logger.debug(f"[MIN_TIME] Waiting... elapsed={elapsed:.2f}s < min_time={stage.min_time_seconds}s")
-                time.sleep(sample_interval)
-                continue
-            
-            # Log once when min_time is passed
-            if not min_time_passed_logged:
-                logger.info(f"[MIN_TIME] ✓ Minimum time passed: elapsed={elapsed:.2f}s >= {stage.min_time_seconds}s - now checking setpoint")
-                min_time_passed_logged = True
-            
-            # Read actual vacuum level from sensor FIRST
+            # Read actual vacuum level from sensor FIRST (always, even during min_time wait)
             # vacuum_bar: 0 = atmosphere, ~1 = full vacuum (matches sequence setpoint units)
             # pressure_psig: gauge pressure (negative = vacuum, positive = above atmosphere)
             current_vacuum = 0.0
@@ -500,7 +485,7 @@ class TestController:
                 except Exception as e:
                     logger.warning(f"Failed to read vacuum sensor: {e}")
             
-            # Calculate progress percentage
+            # Calculate progress percentage (always, so UI stays updated)
             progress = 0.0
             if stage.max_time_seconds is not None and stage.max_time_seconds > 0:
                 progress = min(1.0, elapsed / stage.max_time_seconds)
@@ -510,7 +495,12 @@ class TestController:
                     # Use magnitude so negative gauge readings still show progress
                     progress = min(1.0, abs(current_vacuum) / target_mag)
             
-            # Emit progress update every second
+            # Log when min_time passes (once)
+            if not min_time_passed_logged and elapsed >= stage.min_time_seconds:
+                logger.info(f"[MIN_TIME] ✓ Minimum time passed: elapsed={elapsed:.2f}s >= {stage.min_time_seconds}s")
+                min_time_passed_logged = True
+            
+            # Emit progress update every second (always, even during min_time wait)
             if elapsed - last_progress_log >= 1.0:
                 status_text = f"Elapsed: {elapsed:.1f}s"
                 if stage.target_vacuum_bar is not None:
@@ -519,6 +509,9 @@ class TestController:
                     pct_of_target = (current_mag / target_mag * 100) if target_mag > 0 else 0
                     status_text += f" | Vacuum: {current_vacuum:.3f} bar ({pct_of_target:.0f}% of {stage.target_vacuum_bar:.3f})"
                     status_text += f" ({current_pressure_psig:.1f} PSIG)"
+                else:
+                    # For stages without vacuum target, show current vacuum reading anyway
+                    status_text += f" | Vacuum: {current_vacuum:.3f} bar ({current_pressure_psig:.1f} PSIG)"
                 
                 # Notify progress callback
                 if self.progress_callback:
