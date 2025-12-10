@@ -14,6 +14,7 @@ interface ControlPanelProps {
   onSequenceSelect: (name: string) => void;
   onStartTestRequest?: () => void;
   onTestStopped?: () => void;
+  onTareComplete?: () => void;
 }
 
 export function ControlPanel({
@@ -24,6 +25,7 @@ export function ControlPanel({
   onSequenceSelect,
   onStartTestRequest,
   onTestStopped,
+  onTareComplete,
 }: ControlPanelProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +99,10 @@ export function ControlPanel({
 
     try {
       const result = await api.tareLoadCells();
-      if (!result.success) {
+      if (result.success) {
+        // Clear chart history since force values are now relative to new zero
+        onTareComplete?.();
+      } else {
         setError(result.message);
       }
     } catch (err) {
@@ -105,7 +110,7 @@ export function ControlPanel({
     } finally {
       setLoading(null);
     }
-  }, []);
+  }, [onTareComplete]);
 
   return (
     <div className="panel-card space-y-5">

@@ -285,6 +285,7 @@ export default function Dashboard() {
               onSequenceSelect={handleSequenceSelect}
               onStartTestRequest={handleStartTestRequest}
               onTestStopped={handleTestStopped}
+              onTareComplete={clearHistory}
             />
             
             {/* Current Test Metadata Summary */}
