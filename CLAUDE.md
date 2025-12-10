@@ -169,10 +169,13 @@ from epdm_vacuum.api.hardware_manager import get_hardware_manager
 hw = get_hardware_manager()
 hw.initialize()  # Called once at startup
 
-# Hardware control
+# Hardware control (set_valve takes RELAY state, not physical state)
 hw.set_pump(True)
-hw.set_valve("vacuum_valve", True)  # True = CLOSED (NO valves)
+hw.set_valve("vacuum_valve", True)  # True = relay ON = valve CLOSED
 hw.tare_load_cells()
+
+# Reading state (get_io_states returns PHYSICAL state)
+states = hw.get_io_states()  # {"vacuum_valve": True} means valve is OPEN
 
 # Sensor data
 data = hw.get_sensor_data()  # Returns latest cached readings
@@ -189,7 +192,7 @@ status = hw.get_test_status()
 |--------|----------|-------------|
 | GET | `/api/status` | System status (connections, test state) |
 | GET | `/api/sensors` | Current sensor readings |
-| GET | `/api/io/states` | Current relay/valve states |
+| GET | `/api/io/states` | Current IO states (physical: True=OPEN/ON) |
 | POST | `/api/pump/on` | Turn pump ON |
 | POST | `/api/pump/off` | Turn pump OFF |
 | POST | `/api/valve/{name}/{action}` | Control valve (open/close) |
@@ -218,7 +221,7 @@ The WebSocket streams these message types at 10Hz:
 { type: "status", message: "Starting stage: Evacuate" }
 { type: "stage_change", data: { stage_index, stage_name, current_cycle, total_cycles } }
 { type: "progress", data: { progress: 0.75, status: "Reaching setpoint..." } }
-{ type: "io_change", data: { device: "vacuum_valve", state: true } }
+{ type: "io_change", data: { device: "vacuum_valve", state: true } }  // state = physical (true=OPEN)
 { type: "test_complete" }
 { type: "error", message: "..." }
 
@@ -329,14 +332,28 @@ All valves are **NORMALLY-OPEN (NO)** type:
 - `value: true` means "I want this valve OPEN" → relay becomes FALSE
 - `value: false` means "I want this valve CLOSED" → relay becomes TRUE
 
-**In Web API:**
+**In Web API (control):**
 - `POST /api/valve/vacuum_valve/close` → relay ON → valve physically closed
 - `POST /api/valve/vacuum_valve/open` → relay OFF → valve physically open
 
-The inversion happens in `test_controller.py:_execute_single_io_action()`:
+**In Web API (reading state):**
+- `GET /api/io/states` returns **physical state** (not relay state)
+- `io_change` WebSocket events also use **physical state**
+- For valves: `true` = physically OPEN, `false` = physically CLOSED
+- For pump: `true` = ON, `false` = OFF
+
+The inversion happens in two places:
+1. `test_controller.py:_execute_single_io_action()` - inverts when setting relay
+2. `hardware_manager.py:get_io_states()` - inverts when reading for API
+
 ```python
+# Setting (test_controller.py)
 if is_valve:
     relay_state = not desired_state  # Invert for NO valves
+
+# Reading (hardware_manager.py)  
+if channel_name in no_valves:
+    result[channel_name] = not relay_state  # Return physical state
 ```
 
 ### Relay State Management
