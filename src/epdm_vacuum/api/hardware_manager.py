@@ -503,7 +503,7 @@ class HardwareManager:
         
         try:
             if self.test_controller:
-                self.test_controller.stop()
+                self.test_controller.stop_test()
             
             # Safe shutdown - turn off pump
             if self.widgetlords_interface and self.widgetlords_interface.is_connected():
