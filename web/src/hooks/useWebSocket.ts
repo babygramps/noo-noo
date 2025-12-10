@@ -45,8 +45,57 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isConnectingRef = useRef(false);
+  const isMountedRef = useRef(true);
+  
+  // Use refs for callbacks to avoid dependency issues
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
+  const cleanup = useCallback(() => {
+    // Clear reconnect timeout
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    // Clear ping interval
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = null;
+    }
+  }, []);
 
   const connect = useCallback(() => {
+    // Prevent multiple simultaneous connection attempts
+    if (isConnectingRef.current) {
+      console.log('[WebSocket] Already connecting, skipping...');
+      return;
+    }
+    
+    // Don't connect if unmounted
+    if (!isMountedRef.current) {
+      console.log('[WebSocket] Component unmounted, skipping connect...');
+      return;
+    }
+
+    // Clean up any existing connection first
+    cleanup();
+    
+    if (wsRef.current) {
+      console.log('[WebSocket] Closing existing connection before reconnect');
+      const oldWs = wsRef.current;
+      wsRef.current = null;
+      // Remove event handlers to prevent triggering reconnect
+      oldWs.onclose = null;
+      oldWs.onerror = null;
+      oldWs.onmessage = null;
+      oldWs.onopen = null;
+      oldWs.close();
+    }
+
+    isConnectingRef.current = true;
+
     // Determine WebSocket URL
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = process.env.NEXT_PUBLIC_WS_HOST || window.location.host;
@@ -59,6 +108,13 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
     ws.onopen = () => {
       console.log('[WebSocket] Connected');
+      isConnectingRef.current = false;
+      
+      if (!isMountedRef.current) {
+        ws.close();
+        return;
+      }
+      
       setIsConnected(true);
 
       // Start ping interval
@@ -71,6 +127,12 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
     ws.onclose = (event) => {
       console.log('[WebSocket] Disconnected:', event.code, event.reason);
+      isConnectingRef.current = false;
+      
+      if (!isMountedRef.current) {
+        return;
+      }
+      
       setIsConnected(false);
 
       // Clear ping interval
@@ -79,54 +141,62 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
         pingIntervalRef.current = null;
       }
 
-      // Reconnect after delay
-      reconnectTimeoutRef.current = setTimeout(() => {
-        console.log('[WebSocket] Attempting reconnect...');
-        connect();
-      }, 3000);
+      // Only reconnect if component is still mounted and this is our current ws
+      if (isMountedRef.current && wsRef.current === ws) {
+        reconnectTimeoutRef.current = setTimeout(() => {
+          if (isMountedRef.current) {
+            console.log('[WebSocket] Attempting reconnect...');
+            connect();
+          }
+        }, 3000);
+      }
     };
 
     ws.onerror = (error) => {
       console.error('[WebSocket] Error:', error);
+      isConnectingRef.current = false;
     };
 
     ws.onmessage = (event) => {
+      if (!isMountedRef.current) return;
+      
       try {
         const message: WebSocketMessage = JSON.parse(event.data);
         setLastMessage(message);
 
-        // Route message to appropriate handler
+        // Route message to appropriate handler (using ref to get latest callbacks)
+        const opts = optionsRef.current;
         switch (message.type) {
           case 'sensor_data':
-            options.onSensorData?.(message.data as SensorData);
+            opts.onSensorData?.(message.data as SensorData);
             break;
 
           case 'status':
-            options.onStatusMessage?.(message.message || '');
+            opts.onStatusMessage?.(message.message || '');
             break;
 
           case 'stage_change':
-            options.onStageChange?.(message.data as StageChangeData);
+            opts.onStageChange?.(message.data as StageChangeData);
             break;
 
           case 'progress':
-            options.onProgress?.(message.data as ProgressData);
+            opts.onProgress?.(message.data as ProgressData);
             break;
 
           case 'io_change':
-            options.onIOChange?.(message.data as IOChangeData);
+            opts.onIOChange?.(message.data as IOChangeData);
             break;
 
           case 'test_complete':
-            options.onTestComplete?.();
+            opts.onTestComplete?.();
             break;
 
           case 'error':
-            options.onError?.(message.message || 'Unknown error');
+            opts.onError?.(message.message || 'Unknown error');
             break;
 
           case 'connected':
-            options.onConnected?.(message.data);
+            opts.onConnected?.(message.data);
             break;
 
           case 'heartbeat':
@@ -141,24 +211,25 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
         console.error('[WebSocket] Failed to parse message:', error);
       }
     };
-  }, [options]);
+  }, [cleanup]);
 
   const disconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-
-    if (pingIntervalRef.current) {
-      clearInterval(pingIntervalRef.current);
-      pingIntervalRef.current = null;
-    }
+    cleanup();
 
     if (wsRef.current) {
-      wsRef.current.close();
+      const ws = wsRef.current;
       wsRef.current = null;
+      // Remove event handlers to prevent triggering reconnect
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.onmessage = null;
+      ws.onopen = null;
+      ws.close();
     }
-  }, []);
+    
+    setIsConnected(false);
+    isConnectingRef.current = false;
+  }, [cleanup]);
 
   const send = useCallback((message: unknown) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -166,14 +237,16 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     }
   }, []);
 
-  // Connect on mount
+  // Connect on mount, disconnect on unmount
   useEffect(() => {
+    isMountedRef.current = true;
     connect();
 
     return () => {
+      isMountedRef.current = false;
       disconnect();
     };
-  }, [connect, disconnect]);
+  }, []); // Empty dependency array - only run on mount/unmount
 
   return {
     isConnected,
