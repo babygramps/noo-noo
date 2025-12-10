@@ -441,11 +441,12 @@ class TestController:
         
         logger.info(f"  Monitoring Completion Conditions:")
         if stage.target_vacuum_bar is not None:
-            logger.info(f"    - Vacuum Setpoint: {stage.target_vacuum_bar:.3f} bar")
+            logger.info(f"    - Vacuum Setpoint: {stage.target_vacuum_bar:.3f} bar (magnitude: {abs(stage.target_vacuum_bar):.3f})")
         if stage.max_time_seconds is not None:
             logger.info(f"    - Time Limit: {stage.max_time_seconds:.1f}s")
         if stage.min_time_seconds > 0:
             logger.info(f"    - Minimum Hold: {stage.min_time_seconds:.1f}s")
+        logger.info(f"    - NOTE: vacuum_bar from sensors is POSITIVE magnitude (e.g., 0.3 = 300mbar vacuum)")
         
         while self.state == TestState.RUNNING:
             # Monotonic time prevents freezes when system clock steps (e.g., NTP)
@@ -486,16 +487,24 @@ class TestController:
             if elapsed - last_progress_log >= 1.0:
                 status_text = f"Elapsed: {elapsed:.1f}s"
                 if stage.target_vacuum_bar is not None:
-                    status_text += f" | Vacuum: {current_vacuum:.3f}/{stage.target_vacuum_bar:.3f} bar"
+                    target_mag = abs(stage.target_vacuum_bar)
+                    current_mag = abs(current_vacuum)
+                    pct_of_target = (current_mag / target_mag * 100) if target_mag > 0 else 0
+                    status_text += f" | Vacuum: {current_vacuum:.3f} bar ({pct_of_target:.0f}% of {stage.target_vacuum_bar:.3f})"
                     status_text += f" ({current_pressure_psig:.1f} PSIG)"
                 
                 # Notify progress callback
                 if self.progress_callback:
                     self.progress_callback(progress, status_text)
                 
-                # Log progress periodically (every 5 seconds)
-                if int(elapsed) % 5 == 0:
-                    logger.debug(f"  Progress: {progress*100:.1f}% - {status_text}")
+                # Log progress periodically (every 2 seconds for better visibility)
+                if int(elapsed) % 2 == 0:
+                    logger.info(f"[MONITOR] {status_text}")
+                    if stage.target_vacuum_bar is not None:
+                        target_mag = abs(stage.target_vacuum_bar)
+                        current_mag = abs(current_vacuum)
+                        logger.info(f"[MONITOR]   target_mag={target_mag:.4f}, current_mag={current_mag:.4f}, "
+                                   f"reached={current_mag >= target_mag}")
                 
                 last_progress_log = elapsed
             
@@ -514,15 +523,32 @@ class TestController:
                     # Check if minimum time has passed before allowing setpoint completion
                     if elapsed >= stage.min_time_seconds:
                         target = stage.target_vacuum_bar
-                        if target >= 0:
-                            setpoint_reached = current_vacuum >= target
-                        else:
-                            # For negative gauge targets, use <= comparison
-                            setpoint_reached = current_vacuum <= target
+                        
+                        # IMPORTANT: current_vacuum from widgetlords.read() is ALWAYS POSITIVE
+                        # (it's the magnitude of vacuum: vacuum_bar = -pressure_psig * conversion)
+                        # Target in sequences can be:
+                        #   - Positive (0.3 bar = 300mbar vacuum magnitude)
+                        #   - Negative gauge (-0.3 bar = 300mbar below atmosphere)
+                        # 
+                        # To compare correctly, we need to use magnitudes:
+                        #   - current_vacuum is already a positive magnitude
+                        #   - For negative targets, use abs(target) for comparison
+                        
+                        target_magnitude = abs(target)
+                        current_magnitude = abs(current_vacuum)
+                        
+                        # Setpoint reached when current vacuum magnitude >= target magnitude
+                        setpoint_reached = current_magnitude >= target_magnitude
+                        
+                        # Detailed debug logging (every 5 seconds when close to setpoint)
+                        if int(elapsed) % 5 == 0 or current_magnitude >= target_magnitude * 0.8:
+                            logger.debug(f"[SETPOINT_CHECK] target={target:.3f} bar, target_mag={target_magnitude:.3f}, "
+                                        f"current_vacuum={current_vacuum:.3f}, current_mag={current_magnitude:.3f}, "
+                                        f"reached={setpoint_reached}, pressure_psig={current_pressure_psig:.2f}")
                         
                         if setpoint_reached:
-                            logger.info(f"  ✓ Setpoint reached: {current_vacuum:.3f} bar vs target {target:.3f} bar")
-                            logger.info(f"    (Pressure: {current_pressure_psig:.2f} PSIG)")
+                            logger.info(f"  ✓ Setpoint reached: |{current_vacuum:.3f}| bar >= |{target:.3f}| bar")
+                            logger.info(f"    (Pressure: {current_pressure_psig:.2f} PSIG, magnitude comparison)")
                             return f"setpoint reached ({current_vacuum:.3f} bar)"
             
             # Condition 2: Time limit exceeded (applies to ALL modes including MAINTAIN_VACUUM)
@@ -665,25 +691,36 @@ class TestController:
         """
         Cycle pump ON/OFF to maintain vacuum at setpoint within tolerance.
         
-        Logic:
-        - If vacuum drops below (target - tolerance): turn pump ON
-        - If vacuum rises above (target + tolerance): turn pump OFF
+        Logic (using magnitudes to handle both positive and negative gauge values):
+        - If |vacuum| < |target| - tolerance: turn pump ON (need more vacuum)
+        - If |vacuum| > |target| + tolerance: turn pump OFF (exceeded target)
         - Within tolerance band: keep current pump state (hysteresis)
         
         Args:
-            current_vacuum: Current vacuum reading in bar
-            target_vacuum: Target vacuum in bar  
+            current_vacuum: Current vacuum reading in bar (positive magnitude from widgetlords)
+            target_vacuum: Target vacuum in bar (can be negative gauge like -0.3)
             tolerance: Acceptable tolerance in bar (default 0.05)
         """
         # Track pump state for hysteresis (avoid rapid cycling)
         if not hasattr(self, '_maintain_pump_on'):
             self._maintain_pump_on = True  # Start with pump on to reach setpoint
         
+        # Track logging to avoid spam
+        if not hasattr(self, '_maintain_log_count'):
+            self._maintain_log_count = 0
+        self._maintain_log_count += 1
+        
         # Use magnitudes so this works for positive (absolute) and negative gauge readings
         target_mag = abs(target_vacuum)
         current_mag = abs(current_vacuum)
         lower_bound = max(0.0, target_mag - tolerance)
         upper_bound = target_mag + tolerance
+        
+        # Log state periodically (every ~5 seconds at 10Hz = every 50 calls)
+        verbose = self._maintain_log_count <= 10 or self._maintain_log_count % 50 == 0
+        if verbose:
+            logger.info(f"[MAINTAIN] current_mag={current_mag:.3f}, target_mag={target_mag:.3f}, "
+                       f"bounds=[{lower_bound:.3f}, {upper_bound:.3f}], pump_on={self._maintain_pump_on}")
         
         if current_mag < lower_bound:
             # Not enough vacuum yet (too close to atmosphere) - need more vacuum

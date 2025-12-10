@@ -1044,7 +1044,9 @@ class WidgetLordsInterface(HardwareInterface):
                     data["pressure_psi"] = pressure_psig  # Legacy key
                     
                     # Legacy vacuum keys (for backward compatibility with plots, etc.)
-                    # vacuum = -pressure for gauge pressure
+                    # IMPORTANT: vacuum_bar is calculated as POSITIVE MAGNITUDE
+                    # vacuum = -pressure_psig (flip sign so vacuum below atmosphere is positive)
+                    # This means vacuum_bar = 0.3 represents 300 mbar of vacuum (below atmosphere)
                     vacuum_psi = -pressure_psig
                     vacuum_bar = vacuum_psi * 0.0689476
                     data["vacuum_psi"] = vacuum_psi
@@ -1053,9 +1055,10 @@ class WidgetLordsInterface(HardwareInterface):
                     if self._data_read_count <= 5:
                         logger.info(f"  Pressure: raw_V={raw_voltage:.4f}V -> {raw_mA:.2f}mA")
                         logger.info(f"  Gauge: {pressure_psig:.2f} PSIG = {pressure_mbar:.1f} mbar")
-                        logger.info(f"  (Negative = vacuum, Positive = above atmospheric)")
-                    else:
-                        logger.debug(f"Pressure: {raw_mA:.2f}mA -> {pressure_psig:.2f} PSIG ({pressure_mbar:.1f} mbar)")
+                        logger.info(f"  vacuum_bar={vacuum_bar:.4f} (POSITIVE magnitude; 0.3 = 300mbar vacuum)")
+                        logger.info(f"  (Negative PSIG = vacuum, Positive PSIG = above atmospheric)")
+                    elif self._data_read_count % 50 == 0:  # Log every 5 seconds at 10Hz
+                        logger.debug(f"Pressure: {raw_mA:.2f}mA -> {pressure_psig:.2f} PSIG, vacuum_bar={vacuum_bar:.4f}")
             
             return data
             
