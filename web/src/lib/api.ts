@@ -192,4 +192,38 @@ export async function saveSequence(sequence: Sequence): Promise<APIResponse> {
   });
 }
 
+// Test Data Files
+export interface TestDataFile {
+  filename: string;
+  file_type: 'csv' | 'json';
+  size_bytes: number;
+  size_formatted: string;
+  modified_time: string;
+  modified_timestamp: number;
+  test_name: string | null;
+  test_id: string | null;
+  operator: string | null;
+  sequence_name: string | null;
+  has_metadata: boolean;
+}
+
+export async function listTestData(): Promise<TestDataFile[]> {
+  const response = await fetchAPI<{ files: TestDataFile[] }>('/api/data');
+  return response.data?.files || [];
+}
+
+export async function getTestMetadata(filename: string): Promise<Record<string, unknown>> {
+  const response = await fetchAPI<Record<string, unknown>>(`/api/data/${encodeURIComponent(filename)}/metadata`);
+  return response.data || {};
+}
+
+export async function deleteTestData(filename: string): Promise<APIResponse> {
+  return fetchAPI(`/api/data/${encodeURIComponent(filename)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function getTestDataDownloadUrl(filename: string): string {
+  return `${API_BASE}/api/data/${encodeURIComponent(filename)}`;
+}
 

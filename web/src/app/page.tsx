@@ -7,9 +7,11 @@ import { LiveChart } from '@/components/LiveChart';
 import { ControlPanel, IOStatusDisplay } from '@/components/ControlPanel';
 import { StageProgress, StageList } from '@/components/StageProgress';
 import { TestMetadataModal, TestMetadata } from '@/components/TestMetadataModal';
+import { TestDataBrowser } from '@/components/TestDataBrowser';
 import * as api from '@/lib/api';
 import type { SequenceSummary, Sequence } from '@/lib/api';
-import { Activity, Gauge, Scale, Settings } from 'lucide-react';
+import { Activity, Gauge, Scale, Settings, HardDrive } from 'lucide-react';
+import Image from 'next/image';
 
 export default function Dashboard() {
   // WebSocket sensor data
@@ -35,6 +37,7 @@ export default function Dashboard() {
   const [isMetadataModalOpen, setIsMetadataModalOpen] = useState(false);
   const [isStartingTest, setIsStartingTest] = useState(false);
   const [currentMetadata, setCurrentMetadata] = useState<TestMetadata | null>(null);
+  const [isDataBrowserOpen, setIsDataBrowserOpen] = useState(false);
 
   // Fetch sequences on mount
   useEffect(() => {
@@ -135,8 +138,15 @@ export default function Dashboard() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-3">
-                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500/20 to-cyan-500/20 border border-teal-500/30">
-                  <Gauge className="w-5 h-5 text-teal-400" />
+                <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500/20 to-yellow-500/20 border border-amber-500/30 overflow-hidden">
+                  <Image
+                    src="/noo-noo-logo.png"
+                    alt="Noo-Noo"
+                    width={40}
+                    height={40}
+                    className="object-contain"
+                    priority
+                  />
                 </div>
                 <div>
                   <h1 className="text-xl font-bold text-gradient">
@@ -162,6 +172,16 @@ export default function Dashboard() {
                   </div>
                 </div>
               )}
+              
+              {/* Test Data Browser Button */}
+              <button
+                onClick={() => setIsDataBrowserOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20 hover:border-cyan-500/50 transition-all"
+                title="View Test Data"
+              >
+                <HardDrive className="w-4 h-4" />
+                <span className="hidden sm:inline text-sm font-medium">Data</span>
+              </button>
               
               {/* Connection Status */}
               <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-panel-surface border border-panel-border">
@@ -343,6 +363,12 @@ export default function Dashboard() {
         onSubmit={handleMetadataSubmit}
         sequenceName={selectedSequenceName}
         isLoading={isStartingTest}
+      />
+      
+      {/* Test Data Browser Modal */}
+      <TestDataBrowser
+        isOpen={isDataBrowserOpen}
+        onClose={() => setIsDataBrowserOpen(false)}
       />
     </div>
   );

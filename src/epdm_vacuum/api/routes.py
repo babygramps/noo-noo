@@ -8,9 +8,13 @@ plus WebSocket for real-time data streaming.
 from typing import Dict, Any, Optional, List
 import logging
 import asyncio
+import json
+from pathlib import Path
+from datetime import datetime
+import os
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 
 from .hardware_manager import get_hardware_manager
@@ -397,6 +401,290 @@ async def create_sequence(request: SequenceCreateRequest):
         raise
     except Exception as e:
         logger.error(f"Error creating sequence: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# === Test Data Management ===
+
+def get_data_directory() -> Path:
+    """Get the data directory path."""
+    # Default data directory relative to project root
+    data_dir = Path(__file__).parent.parent.parent.parent / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
+class TestDataFile(BaseModel):
+    """Information about a test data file."""
+    filename: str
+    file_type: str  # 'csv' or 'json'
+    size_bytes: int
+    size_formatted: str
+    modified_time: str
+    modified_timestamp: float
+    test_name: Optional[str] = None
+    test_id: Optional[str] = None
+    operator: Optional[str] = None
+    sequence_name: Optional[str] = None
+    has_metadata: bool = False
+
+
+def format_file_size(size_bytes: int) -> str:
+    """Format file size in human-readable format."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    else:
+        return f"{size_bytes / (1024 * 1024):.2f} MB"
+
+
+def extract_metadata_from_json(json_path: Path) -> Dict[str, Any]:
+    """Extract metadata fields from a JSON file."""
+    try:
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+        
+        # Extract useful fields - handle various metadata structures
+        result = {}
+        
+        # Check for direct fields
+        if 'test_name' in data:
+            result['test_name'] = data['test_name']
+        if 'test_id' in data:
+            result['test_id'] = data['test_id']
+        if 'operator' in data:
+            result['operator'] = data['operator']
+        if 'sequence_name' in data:
+            result['sequence_name'] = data['sequence_name']
+        
+        # Check for nested metadata dict (old format)
+        metadata = data.get('metadata', {})
+        if isinstance(metadata, dict):
+            result['test_name'] = result.get('test_name') or metadata.get('test_name')
+            result['test_id'] = result.get('test_id') or metadata.get('test_id')
+            result['operator'] = result.get('operator') or metadata.get('operator')
+            result['sequence_name'] = result.get('sequence_name') or metadata.get('sequence_name')
+        
+        return result
+    except Exception as e:
+        logger.debug(f"Could not extract metadata from {json_path}: {e}")
+        return {}
+
+
+@router.get("/api/data")
+async def list_test_data():
+    """
+    List all test data files in the data directory.
+    
+    Returns CSV files with their associated metadata from JSON files.
+    """
+    try:
+        data_dir = get_data_directory()
+        files: List[TestDataFile] = []
+        
+        # Find all CSV and standalone JSON files
+        csv_files = list(data_dir.glob("*.csv"))
+        json_files = list(data_dir.glob("*.json"))
+        
+        # Create a set of JSON basenames for quick lookup
+        json_basenames = {jf.stem for jf in json_files}
+        
+        for csv_file in csv_files:
+            stat = csv_file.stat()
+            
+            # Look for matching JSON metadata file
+            json_file = csv_file.with_suffix('.json')
+            metadata = {}
+            has_metadata = False
+            
+            if json_file.exists():
+                metadata = extract_metadata_from_json(json_file)
+                has_metadata = True
+            
+            files.append(TestDataFile(
+                filename=csv_file.name,
+                file_type='csv',
+                size_bytes=stat.st_size,
+                size_formatted=format_file_size(stat.st_size),
+                modified_time=datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                modified_timestamp=stat.st_mtime,
+                test_name=metadata.get('test_name'),
+                test_id=metadata.get('test_id'),
+                operator=metadata.get('operator'),
+                sequence_name=metadata.get('sequence_name'),
+                has_metadata=has_metadata,
+            ))
+        
+        # Also include standalone JSON files (metadata files without CSV)
+        for json_file in json_files:
+            # Skip if there's a matching CSV file (already included above)
+            csv_companion = json_file.with_suffix('.csv')
+            if csv_companion.exists():
+                continue
+            
+            stat = json_file.stat()
+            metadata = extract_metadata_from_json(json_file)
+            
+            files.append(TestDataFile(
+                filename=json_file.name,
+                file_type='json',
+                size_bytes=stat.st_size,
+                size_formatted=format_file_size(stat.st_size),
+                modified_time=datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                modified_timestamp=stat.st_mtime,
+                test_name=metadata.get('test_name'),
+                test_id=metadata.get('test_id'),
+                operator=metadata.get('operator'),
+                sequence_name=metadata.get('sequence_name'),
+                has_metadata=True,
+            ))
+        
+        # Sort by modification time, newest first
+        files.sort(key=lambda f: f.modified_timestamp, reverse=True)
+        
+        return APIResponse(
+            success=True,
+            message=f"Found {len(files)} test data files",
+            data={"files": [f.model_dump() for f in files]}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error listing test data: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/data/{filename}")
+async def download_test_data(filename: str):
+    """
+    Download a specific test data file.
+    
+    Args:
+        filename: Name of the file to download (CSV or JSON)
+    """
+    try:
+        # Sanitize filename to prevent path traversal
+        safe_filename = Path(filename).name
+        if safe_filename != filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
+        data_dir = get_data_directory()
+        file_path = data_dir / safe_filename
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+        
+        # Determine content type
+        if file_path.suffix.lower() == '.csv':
+            media_type = 'text/csv'
+        elif file_path.suffix.lower() == '.json':
+            media_type = 'application/json'
+        else:
+            media_type = 'application/octet-stream'
+        
+        return FileResponse(
+            path=file_path,
+            filename=safe_filename,
+            media_type=media_type,
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/data/{filename}/metadata")
+async def get_test_metadata(filename: str):
+    """
+    Get metadata for a test data file.
+    
+    For CSV files, returns content of the associated JSON metadata file.
+    For JSON files, returns the file content directly.
+    """
+    try:
+        # Sanitize filename
+        safe_filename = Path(filename).name
+        if safe_filename != filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
+        data_dir = get_data_directory()
+        
+        # If requesting metadata for CSV, look for JSON companion
+        if safe_filename.endswith('.csv'):
+            json_filename = safe_filename.replace('.csv', '.json')
+        else:
+            json_filename = safe_filename
+        
+        json_path = data_dir / json_filename
+        
+        if not json_path.exists():
+            raise HTTPException(status_code=404, detail=f"Metadata not found for: {filename}")
+        
+        with open(json_path, 'r') as f:
+            metadata = json.load(f)
+        
+        return APIResponse(
+            success=True,
+            message="Metadata retrieved",
+            data=metadata
+        )
+        
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"Invalid JSON in metadata file: {e}")
+    except Exception as e:
+        logger.error(f"Error reading metadata: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/api/data/{filename}")
+async def delete_test_data(filename: str):
+    """
+    Delete a test data file and its associated metadata.
+    
+    Args:
+        filename: Name of the file to delete
+    """
+    try:
+        # Sanitize filename
+        safe_filename = Path(filename).name
+        if safe_filename != filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
+        data_dir = get_data_directory()
+        file_path = data_dir / safe_filename
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+        
+        deleted_files = []
+        
+        # Delete the main file
+        file_path.unlink()
+        deleted_files.append(safe_filename)
+        
+        # If CSV, also delete associated JSON metadata
+        if safe_filename.endswith('.csv'):
+            json_path = file_path.with_suffix('.json')
+            if json_path.exists():
+                json_path.unlink()
+                deleted_files.append(json_path.name)
+        
+        logger.info(f"Deleted test data files: {deleted_files}")
+        
+        return APIResponse(
+            success=True,
+            message=f"Deleted {len(deleted_files)} file(s)",
+            data={"deleted": deleted_files}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting file: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

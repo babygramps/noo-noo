@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import Image from 'next/image';
 import {
   LineChart,
   Line,
@@ -37,7 +38,8 @@ export function LiveChart({
       index,
       time: d.timestamp,
       vacuum: Math.abs(d.vacuum_bar || 0),
-      force: d.gross_weight_kg || 0,
+      // Use total_force_kg (sum of software-tared load cells) with fallback to gross_weight_kg
+      force: d.total_force_kg ?? d.gross_weight_kg ?? 0,
       label: new Date(d.timestamp * 1000).toLocaleTimeString('en-US', {
         hour12: false,
         hour: '2-digit',
@@ -62,26 +64,56 @@ export function LiveChart({
 
   if (chartData.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <div className="text-center">
-          <div className="flex items-center justify-center w-16 h-16 mx-auto rounded-2xl bg-slate-800/50 border border-slate-700/50 mb-4">
-            <svg className="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
+      <div className="relative h-full w-full">
+        {/* Watermark */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="w-3/4 h-3/4 relative opacity-[0.04]">
+            <Image
+              src="/noo-noo-logo.png"
+              alt=""
+              fill
+              className="object-contain"
+              aria-hidden="true"
+            />
           </div>
-          <div className="text-sm text-slate-500">Waiting for data...</div>
-          <div className="text-xs text-slate-600 mt-1">Start a test to see real-time graphs</div>
+        </div>
+        
+        <div className="relative h-full flex items-center justify-center">
+          <div className="text-center">
+            <div className="flex items-center justify-center w-16 h-16 mx-auto rounded-2xl bg-slate-800/50 border border-slate-700/50 mb-4">
+              <svg className="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+            </div>
+            <div className="text-sm text-slate-500">Waiting for data...</div>
+            <div className="text-xs text-slate-600 mt-1">Start a test to see real-time graphs</div>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <LineChart
-        data={chartData}
-        margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
-      >
+    <div className="relative w-full h-full">
+      {/* Watermark */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
+        <div className="w-3/4 h-3/4 relative opacity-[0.04]">
+          <Image
+            src="/noo-noo-logo.png"
+            alt=""
+            fill
+            className="object-contain"
+            aria-hidden="true"
+          />
+        </div>
+      </div>
+      
+      {/* Chart */}
+      <ResponsiveContainer width="100%" height="100%" className="relative z-10">
+        <LineChart
+          data={chartData}
+          margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
+        >
         <CartesianGrid strokeDasharray="3 3" stroke="#2a3140" opacity={0.5} />
         
         <XAxis
@@ -207,6 +239,7 @@ export function LiveChart({
         )}
       </LineChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
