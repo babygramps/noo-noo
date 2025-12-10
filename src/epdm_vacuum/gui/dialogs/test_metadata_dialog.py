@@ -32,10 +32,18 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QScrollArea,
     QSizePolicy,
+    QFrame,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QDate, QTime
 
 logger = logging.getLogger(__name__)
+
+
+# Import WeighingResult for type hints (avoid circular import with TYPE_CHECKING)
+try:
+    from .gasket_weighing_dialog import WeighingResult
+except ImportError:
+    WeighingResult = None
 
 
 class TestMetadataDialog(QDialog):
@@ -54,6 +62,7 @@ class TestMetadataDialog(QDialog):
         
         self.metadata: Dict[str, Any] = {}
         self.save_path: str = ""
+        self._gasket_weight_result = None  # Optional WeighingResult
         
         self.init_ui()
         self.set_default_values()
@@ -71,6 +80,7 @@ class TestMetadataDialog(QDialog):
         
         # Create form sections
         self.create_basic_info_section(layout)
+        self.create_gasket_weight_section(layout)  # Gasket weight display
         self.create_material_section(layout)
         self.create_targets_section(layout)
         self.create_notes_section(layout)
@@ -119,6 +129,153 @@ class TestMetadataDialog(QDialog):
         
         group.setLayout(form)
         parent_layout.addWidget(group)
+    
+    def create_gasket_weight_section(self, parent_layout: QVBoxLayout) -> None:
+        """Create gasket assembly weight display section."""
+        # Container frame for the weight display
+        self.gasket_weight_frame = QFrame()
+        self.gasket_weight_frame.setStyleSheet("""
+            QFrame {
+                background-color: #e8f5e9;
+                border: 2px solid #27ae60;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
+        frame_layout = QHBoxLayout(self.gasket_weight_frame)
+        frame_layout.setSpacing(15)
+        
+        # Icon/indicator
+        weight_icon = QLabel("⚖️")
+        weight_icon.setStyleSheet("font-size: 28pt;")
+        frame_layout.addWidget(weight_icon)
+        
+        # Weight info container
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(4)
+        
+        title = QLabel("Gasket Assembly Weight")
+        title.setStyleSheet("font-size: 11pt; font-weight: bold; color: #1e8449;")
+        info_layout.addWidget(title)
+        
+        # Weight value display
+        self.gasket_weight_label = QLabel("Not recorded")
+        self.gasket_weight_label.setStyleSheet("""
+            font-size: 18pt; 
+            font-weight: bold; 
+            color: #27ae60;
+            font-family: 'Consolas', monospace;
+        """)
+        info_layout.addWidget(self.gasket_weight_label)
+        
+        # Assembly ID (if provided)
+        self.gasket_assembly_id_label = QLabel("")
+        self.gasket_assembly_id_label.setStyleSheet("font-size: 9pt; color: #7f8c8d;")
+        self.gasket_assembly_id_label.hide()
+        info_layout.addWidget(self.gasket_assembly_id_label)
+        
+        frame_layout.addLayout(info_layout, stretch=1)
+        
+        # Re-weigh button
+        self.reweigh_btn = QPushButton("Re-weigh")
+        self.reweigh_btn.setFixedSize(80, 35)
+        self.reweigh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                font-weight: bold;
+                border: none;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #2ecc71;
+            }
+        """)
+        self.reweigh_btn.clicked.connect(self._on_reweigh)
+        frame_layout.addWidget(self.reweigh_btn)
+        
+        # Hidden by default - shown when weight is set
+        self.gasket_weight_frame.hide()
+        parent_layout.addWidget(self.gasket_weight_frame)
+        
+        # Placeholder for when no weight is recorded (optional prompt)
+        self.no_weight_label = QLabel(
+            "💡 Tip: Gasket assembly weight was not recorded. "
+            "You can still proceed with the test."
+        )
+        self.no_weight_label.setStyleSheet("""
+            QLabel {
+                color: #856404;
+                background-color: #fff3cd;
+                padding: 8px 12px;
+                border-radius: 6px;
+                font-size: 9pt;
+            }
+        """)
+        self.no_weight_label.setWordWrap(True)
+        self.no_weight_label.hide()  # Initially hidden
+        parent_layout.addWidget(self.no_weight_label)
+    
+    def set_gasket_weight(self, weighing_result) -> None:
+        """
+        Set the gasket assembly weight from a WeighingResult.
+        
+        Args:
+            weighing_result: WeighingResult object from GasketWeighingDialog
+        """
+        if weighing_result is None:
+            self._gasket_weight_result = None
+            self.gasket_weight_frame.hide()
+            self.no_weight_label.show()
+            return
+        
+        self._gasket_weight_result = weighing_result
+        
+        # Update display
+        weight_kg = weighing_result.weight_kg
+        self.gasket_weight_label.setText(f"{weight_kg:.3f} kg")
+        
+        # Show assembly ID if provided
+        if weighing_result.assembly_id:
+            self.gasket_assembly_id_label.setText(f"Assembly ID: {weighing_result.assembly_id}")
+            self.gasket_assembly_id_label.show()
+        else:
+            self.gasket_assembly_id_label.hide()
+        
+        # Show the weight frame, hide the placeholder
+        self.gasket_weight_frame.show()
+        self.no_weight_label.hide()
+        
+        logger.info(f"Gasket weight set in metadata dialog: {weight_kg:.3f} kg")
+    
+    def _on_reweigh(self) -> None:
+        """Handle re-weigh button click."""
+        # Import here to avoid circular imports
+        from .gasket_weighing_dialog import GasketWeighingDialog
+        
+        # Try to get the parent's interfaces
+        parent = self.parent()
+        modbus_interface = getattr(parent, 'modbus_interface', None) if parent else None
+        data_buffer = getattr(parent, 'data_buffer', None) if parent else None
+        
+        def get_current_data():
+            if data_buffer:
+                return data_buffer.get_last() or {}
+            return {}
+        
+        dialog = GasketWeighingDialog(
+            parent=self,
+            modbus_interface=modbus_interface,
+            get_current_data_callback=get_current_data,
+        )
+        
+        result = dialog.exec_()
+        
+        if result == QDialog.Accepted:
+            weighing_result = dialog.get_result()
+            if weighing_result:
+                self.set_gasket_weight(weighing_result)
+                logger.info(f"Re-weighed gasket assembly: {weighing_result.weight_kg:.3f} kg")
     
     def create_material_section(self, parent_layout: QVBoxLayout) -> None:
         """Create material information section."""
@@ -514,6 +671,12 @@ This test evaluates the vacuum sealing performance of EPDM gaskets by:
             "notes": self.notes_edit.toPlainText().strip(),
         }
         
+        # Include gasket assembly weight if recorded
+        if self._gasket_weight_result is not None:
+            gasket_data = self._gasket_weight_result.to_dict()
+            metadata.update(gasket_data)
+            logger.info(f"Including gasket weight in metadata: {gasket_data.get('gasket_assembly_weight_kg')} kg")
+        
         # Include test description if checkbox is checked
         if self.include_description_checkbox.isChecked():
             description = self.test_description_edit.toPlainText().strip()
@@ -601,6 +764,26 @@ This test evaluates the vacuum sealing performance of EPDM gaskets by:
         
         if "user_test_description" in metadata:
             self.test_description_edit.setPlainText(metadata["user_test_description"])
+        
+        # Gasket assembly weight (from existing metadata)
+        if "gasket_assembly_weight_kg" in metadata:
+            # Reconstruct weight display from metadata
+            weight_kg = metadata["gasket_assembly_weight_kg"]
+            assembly_id = metadata.get("gasket_assembly_id", "")
+            
+            self.gasket_weight_label.setText(f"{weight_kg:.3f} kg")
+            
+            if assembly_id:
+                self.gasket_assembly_id_label.setText(f"Assembly ID: {assembly_id}")
+                self.gasket_assembly_id_label.show()
+            else:
+                self.gasket_assembly_id_label.hide()
+            
+            self.gasket_weight_frame.show()
+            self.no_weight_label.hide()
+            
+            # Note: We don't reconstruct the full WeighingResult here since we're just displaying
+            logger.info(f"Populated gasket weight from existing metadata: {weight_kg:.3f} kg")
         
         # Update test ID based on populated values
         self.update_test_id()

@@ -36,6 +36,7 @@ from .threads.daq_thread import DataAcquisitionThread
 from .threads.control_thread import ControlThread
 from .dialogs.sequence_editor import SequenceEditorDialog
 from .dialogs.test_metadata_dialog import TestMetadataDialog
+from .dialogs.gasket_weighing_dialog import GasketWeighingDialog, WeighingResult
 from ..control.sequence_manager import SequenceManager
 from ..logging.data_logger import DataLogger
 from ..logging.buffer import DataBuffer
@@ -656,8 +657,17 @@ class MainWindow(QMainWindow):
             logger.warning("Control thread already running")
             return
         
+        # Step 1: Gasket Assembly Weighing (optional but recommended)
+        weighing_result = self._show_gasket_weighing_dialog()
+        # weighing_result is None if user skipped, or WeighingResult if captured
+        
         # Show metadata dialog to get test information and save location
         metadata_dialog = TestMetadataDialog(self)
+        
+        # Pre-populate with weighing result if available
+        if weighing_result:
+            metadata_dialog.set_gasket_weight(weighing_result)
+        
         result = metadata_dialog.exec_()
         
         if result != QDialog.Accepted:
@@ -668,6 +678,10 @@ class MainWindow(QMainWindow):
         # Get metadata and save path
         test_metadata = metadata_dialog.get_metadata()
         csv_path = metadata_dialog.get_save_path()
+        
+        # Merge weighing result into metadata if available
+        if weighing_result:
+            test_metadata.update(weighing_result.to_dict())
         
         logger.info(f"Test metadata collected: {test_metadata}")
         logger.info(f"Data will be saved to: {csv_path}")
@@ -723,6 +737,37 @@ class MainWindow(QMainWindow):
         
         self.statusBar().showMessage(f"Test started: {test_metadata.get('test_name', 'Unnamed Test')}")
         logger.info(f"Started test with sequence: {current_seq.name if current_seq else 'None'}")
+    
+    def _show_gasket_weighing_dialog(self) -> Optional[WeighingResult]:
+        """
+        Show the gasket assembly weighing dialog.
+        
+        Returns:
+            WeighingResult if weight was captured, None if skipped
+        """
+        from typing import Dict, Any
+        
+        def get_current_sensor_data() -> Dict[str, Any]:
+            """Get current sensor data from the data buffer."""
+            return self.data_buffer.get_last() or {}
+        
+        dialog = GasketWeighingDialog(
+            parent=self,
+            modbus_interface=self.modbus_interface,
+            get_current_data_callback=get_current_sensor_data,
+        )
+        
+        result = dialog.exec_()
+        
+        if result == QDialog.Accepted:
+            weighing_result = dialog.get_result()
+            if weighing_result:
+                logger.info(f"Gasket assembly weight captured: {weighing_result.weight_kg:.3f} kg")
+                return weighing_result
+        else:
+            logger.info("Gasket weighing skipped or cancelled")
+        
+        return None
     
     def on_stop_test(self) -> None:
         """

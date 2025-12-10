@@ -105,6 +105,18 @@ class DataBuffer:
             else:
                 return list(self.buffer)[-n:]
     
+    def get_last(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the most recent data point.
+        
+        Returns:
+            Dict: Most recent data point, or None if buffer is empty
+        """
+        with self.lock:
+            if len(self.buffer) > 0:
+                return self.buffer[-1].copy()
+            return None
+    
     def get_range(
         self,
         start_time: Optional[float] = None,
