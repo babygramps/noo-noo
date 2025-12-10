@@ -2,18 +2,29 @@
 
 ## Project Overview
 
-EPDM Gasket Vacuum Seal Testing System - Python/PyQt5 application for Raspberry Pi 5 that controls vacuum seal testing equipment via Modbus RTU (load cells) and SPI (analog I/O).
+EPDM Gasket Vacuum Seal Testing System - Python/PyQt5 application for Raspberry Pi 5 that controls vacuum seal testing equipment via Modbus RTU (load cells) and SPI (analog I/O). Includes a web-based monitoring interface via FastAPI + Next.js.
 
 **Purpose**: Automated vacuum seal testing for EPDM gaskets. The system draws vacuum in a sealed chamber, monitors pressure/force over time, and detects leaks through seal degradation.
 
 ## Quick Commands
 
 ```bash
-# Run the GUI application
+# Run the GUI application (PyQt5)
 python -m epdm_vacuum.app_main
 
-# Run Flask API (optional remote monitoring)
+# Run the FastAPI backend (for web interface)
 python -m epdm_vacuum.api_main
+# Or with uvicorn directly:
+uvicorn epdm_vacuum.api_main:app --host 0.0.0.0 --port 8000
+
+# Run the Next.js web frontend
+cd web && npm run dev
+
+# Start both backend and frontend (Windows)
+./scripts/run_web.ps1
+
+# Start both backend and frontend (Linux/Pi)
+./scripts/run_web.sh
 
 # TLB4 register scanner (discover Modbus registers)
 python scripts/tlb4_register_scanner.py --port COM4 --interactive
@@ -21,8 +32,11 @@ python scripts/tlb4_register_scanner.py --port COM4 --interactive
 # TLB4 slope calibration helper
 python scripts/tlb4_slope_helper.py
 
-# Install dependencies
+# Install Python dependencies
 pip install -r requirements.txt
+
+# Install web dependencies
+cd web && npm install
 ```
 
 ## Project Structure
@@ -37,49 +51,254 @@ noo-noo/
 │   ├── quick_test.yaml         # Short test for debugging
 │   └── ...
 ├── data/                        # Test output directory (CSV, JSON metadata)
+├── docs/                        # Documentation and reference PDFs
 ├── scripts/                     # Utility scripts
-│   ├── tlb4_register_scanner.py    # Modbus register discovery
-│   ├── tlb4_slope_helper.py        # Load cell calibration helper
-│   └── test_pressure_reading.py    # Pressure sensor debugging
-└── src/epdm_vacuum/
-    ├── app_main.py              # GUI entry point
-    ├── api_main.py              # Flask API entry point
-    ├── config/
-    │   ├── settings.py          # Config loader, factory functions
-    │   └── hardware_config.yaml # Hardware parameters (CRITICAL FILE)
-    ├── daq/                     # Hardware abstraction
-    │   ├── hardware_interface.py    # Base class for all interfaces
-    │   ├── modbus_interface.py      # TLB4 Modbus RTU driver (load cells)
-    │   ├── widgetlords_interface.py # PI-SPI-DIN module driver (SPI)
-    │   ├── relay_state_manager.py   # Global relay state (SSOT)
-    │   └── calibration.py           # Sensor calibration utilities
-    ├── gui/
-    │   ├── main_window.py       # Main Qt window with dockable panels
-    │   ├── widgets/
-    │   │   ├── display_widget.py      # Large LCD sensor displays
-    │   │   ├── plot_widget.py         # Real-time pyqtgraph plots
-    │   │   ├── control_panel.py       # Test/pump control buttons
-    │   │   ├── sequence_selector.py   # Test sequence dropdown
-    │   │   ├── test_status_panel.py   # Stage progress + IO status
-    │   │   ├── stage_progress_widget.py
-    │   │   └── io_status_widget.py    # Relay/valve state indicators
-    │   ├── threads/
-    │   │   ├── daq_thread.py          # Background sensor reading (10Hz)
-    │   │   └── control_thread.py      # Test execution thread
-    │   └── dialogs/
-    │       ├── sequence_editor.py    # Test sequence editor
-    │       ├── io_config_dialog.py   # IO device configuration
-    │       ├── spi_config_dialog.py  # Widgetlords SPI module setup
-    │       └── test_metadata_dialog.py
-    ├── control/
-    │   ├── sequence.py          # TestSequence, TestStage, IOAction dataclasses
-    │   ├── sequence_manager.py  # Load/save/validate sequences
-    │   ├── test_controller.py   # Test execution engine (IMPORTANT)
-    │   ├── pump_controller.py   # Pump control logic
-    │   └── safety_monitor.py    # Safety limit monitoring
-    └── logging/
-        ├── data_logger.py       # CSV/HDF5/JSON export
-        └── buffer.py            # In-memory data buffer
+│   ├── run_web.ps1              # Start web UI (Windows)
+│   ├── run_web.sh               # Start web UI (Linux)
+│   ├── tlb4_register_scanner.py # Modbus register discovery
+│   ├── tlb4_slope_helper.py     # Load cell calibration helper
+│   └── test_pressure_reading.py # Pressure sensor debugging
+├── src/epdm_vacuum/
+│   ├── app_main.py              # PyQt5 GUI entry point
+│   ├── api_main.py              # FastAPI server entry point
+│   ├── api/                     # Web API layer (FastAPI)
+│   │   ├── hardware_manager.py  # Singleton for thread-safe hardware access
+│   │   ├── routes.py            # REST API endpoints
+│   │   ├── websocket.py         # WebSocket manager for real-time data
+│   │   └── models.py            # API data models
+│   ├── config/
+│   │   ├── settings.py          # Config loader, factory functions
+│   │   └── hardware_config.yaml # Hardware parameters (CRITICAL FILE)
+│   ├── daq/                     # Hardware abstraction
+│   │   ├── hardware_interface.py    # Base class for all interfaces
+│   │   ├── modbus_interface.py      # TLB4 Modbus RTU driver (load cells)
+│   │   ├── widgetlords_interface.py # PI-SPI-DIN module driver (SPI)
+│   │   ├── relay_state_manager.py   # Global relay state (SSOT)
+│   │   └── calibration.py           # Sensor calibration utilities
+│   ├── gui/
+│   │   ├── main_window.py       # Main Qt window with dockable panels
+│   │   ├── widgets/
+│   │   │   ├── display_widget.py      # Large LCD sensor displays
+│   │   │   ├── plot_widget.py         # Real-time pyqtgraph plots
+│   │   │   ├── control_panel.py       # Test/pump control buttons
+│   │   │   ├── sequence_selector.py   # Test sequence dropdown
+│   │   │   ├── test_status_panel.py   # Stage progress + IO status
+│   │   │   ├── stage_progress_widget.py
+│   │   │   └── io_status_widget.py    # Relay/valve state indicators
+│   │   ├── threads/
+│   │   │   ├── daq_thread.py          # Background sensor reading (10Hz)
+│   │   │   └── control_thread.py      # Test execution thread
+│   │   └── dialogs/
+│   │       ├── sequence_editor.py     # Test sequence editor
+│   │       ├── gasket_weighing_dialog.py  # Pre-test weighing workflow
+│   │       ├── io_action_dialog.py    # I/O action editor
+│   │       ├── io_config_dialog.py    # IO device configuration
+│   │       ├── spi_config_dialog.py   # Widgetlords SPI module setup
+│   │       └── test_metadata_dialog.py
+│   ├── control/
+│   │   ├── sequence.py          # TestSequence, TestStage, IOAction dataclasses
+│   │   ├── sequence_manager.py  # Load/save/validate sequences
+│   │   ├── test_controller.py   # Test execution engine (IMPORTANT)
+│   │   ├── pump_controller.py   # Pump control logic
+│   │   └── safety_monitor.py    # Safety limit monitoring
+│   └── logging/
+│       ├── data_logger.py       # CSV/HDF5/JSON export
+│       └── buffer.py            # In-memory data buffer
+└── web/                         # Next.js Web Frontend
+    ├── package.json             # Node.js dependencies
+    ├── src/
+    │   ├── app/
+    │   │   ├── page.tsx         # Main dashboard page
+    │   │   ├── layout.tsx       # App layout
+    │   │   └── globals.css      # Tailwind styles
+    │   ├── components/
+    │   │   ├── ControlPanel.tsx      # Test controls, valve toggles
+    │   │   ├── SensorDisplay.tsx     # Pressure/force displays
+    │   │   ├── LiveChart.tsx         # Real-time Recharts graph
+    │   │   ├── StageProgress.tsx     # Stage list and progress
+    │   │   ├── TestMetadataModal.tsx # Pre-test metadata form
+    │   │   ├── GasketWeighingModal.tsx # Assembly weighing workflow
+    │   │   └── TestDataBrowser.tsx   # Download/manage test data
+    │   ├── hooks/
+    │   │   └── useWebSocket.ts  # WebSocket hook for real-time data
+    │   └── lib/
+    │       └── api.ts           # API client functions
+    └── tailwind.config.js       # Tailwind CSS configuration
+```
+
+## Dual Interface Architecture
+
+The system has two user interfaces:
+
+### 1. PyQt5 Desktop GUI (`app_main.py`)
+- For operator use on the Raspberry Pi directly
+- Full-featured with sequence editor, calibration dialogs
+- Uses PyQtGraph for real-time plotting
+- Runs DAQ thread for sensor reading
+
+### 2. Web Interface (FastAPI + Next.js)
+- For remote monitoring from any device on the network
+- React-based dashboard at `http://<pi-ip>:3000`
+- FastAPI backend at `http://<pi-ip>:8000`
+- Real-time data via WebSocket (`ws://<pi-ip>:8000/api/ws`)
+
+**Important**: Run EITHER the GUI OR the Web API, not both simultaneously (they share hardware access).
+
+## FastAPI Backend Architecture
+
+### Entry Point (`api_main.py`)
+
+```python
+# Uses uvicorn ASGI server
+uvicorn epdm_vacuum.api_main:app --host 0.0.0.0 --port 8000
+
+# Lifespan management handles:
+# - Hardware initialization
+# - Sensor broadcast thread startup
+# - WebSocket event callback setup
+# - Graceful shutdown
+```
+
+### HardwareManager Singleton (`api/hardware_manager.py`)
+
+Thread-safe singleton managing all hardware access:
+
+```python
+from epdm_vacuum.api.hardware_manager import get_hardware_manager
+
+hw = get_hardware_manager()
+hw.initialize()  # Called once at startup
+
+# Hardware control
+hw.set_pump(True)
+hw.set_valve("vacuum_valve", True)  # True = CLOSED (NO valves)
+hw.tare_load_cells()
+
+# Sensor data
+data = hw.get_sensor_data()  # Returns latest cached readings
+
+# Test control
+hw.start_test("300mbar3times", metadata={"operator": "John"})
+hw.stop_test()
+status = hw.get_test_status()
+```
+
+### REST API Endpoints (`api/routes.py`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/status` | System status (connections, test state) |
+| GET | `/api/sensors` | Current sensor readings |
+| GET | `/api/io/states` | Current relay/valve states |
+| POST | `/api/pump/on` | Turn pump ON |
+| POST | `/api/pump/off` | Turn pump OFF |
+| POST | `/api/valve/{name}/{action}` | Control valve (open/close) |
+| POST | `/api/tare` | Tare load cells |
+| GET | `/api/sequences` | List available sequences |
+| GET | `/api/sequences/{name}` | Get sequence details |
+| POST | `/api/sequences` | Create/update sequence |
+| POST | `/api/test/start` | Start test with sequence |
+| POST | `/api/test/stop` | Stop running test |
+| GET | `/api/test/status` | Get test execution status |
+| GET | `/api/data` | List test data files |
+| GET | `/api/data/{filename}` | Download test data file |
+| GET | `/api/data/{filename}/metadata` | Get test metadata |
+| DELETE | `/api/data/{filename}` | Delete test data |
+| WS | `/api/ws` | WebSocket for real-time data |
+
+### WebSocket Messages (`api/websocket.py`)
+
+The WebSocket streams these message types at 10Hz:
+
+```typescript
+// Sensor data (10Hz)
+{ type: "sensor_data", data: { vacuum_bar, pressure_psi, load_cell_1_kg, ... } }
+
+// Test events
+{ type: "status", message: "Starting stage: Evacuate" }
+{ type: "stage_change", data: { stage_index, stage_name, current_cycle, total_cycles } }
+{ type: "progress", data: { progress: 0.75, status: "Reaching setpoint..." } }
+{ type: "io_change", data: { device: "vacuum_valve", state: true } }
+{ type: "test_complete" }
+{ type: "error", message: "..." }
+
+// Connection management
+{ type: "connected", data: { ...system_status } }
+{ type: "heartbeat" }
+{ type: "pong" }
+```
+
+## Next.js Web Frontend
+
+### Key Components
+
+**Dashboard (`page.tsx`)**: Main layout with grid of panels
+
+**SensorDisplay**: LCD-style displays for vacuum and load cells
+
+**LiveChart**: Real-time Recharts line graph with vacuum and force traces
+
+**ControlPanel**: 
+- Sequence selector dropdown
+- Start/Stop test buttons  
+- Manual pump/valve toggles
+- Tare button
+- Weigh Assembly button
+
+**StageProgress**: Shows current stage, progress bar, cycle info
+
+**TestMetadataModal**: Pre-test form for operator, test name, notes
+
+**GasketWeighingModal**: Workflow for weighing assembly before test:
+- Live weight display with stability detection
+- Tare functionality
+- Assembly ID and description fields
+- Captures weight to include in test metadata
+
+**TestDataBrowser**: Modal for managing test data:
+- List all CSV/JSON files in `data/` directory
+- Download individual files
+- Delete old test data
+- View metadata summary
+
+### WebSocket Hook (`useWebSocket.ts`)
+
+```typescript
+const { 
+  isConnected, 
+  currentData,      // Latest sensor readings
+  dataHistory,      // Array for charting (last N points)
+  ioStates,         // { vacuum_pump: true, vacuum_valve: false, ... }
+  stageInfo,        // Current stage details
+  progress,         // { progress: 0.5, status: "..." }
+  testRunning,
+  clearHistory,
+} = useSensorData(600); // Keep 600 samples (1 min at 10Hz)
+```
+
+### API Client (`api.ts`)
+
+```typescript
+import * as api from '@/lib/api';
+
+// All functions return Promise with typed responses
+await api.getStatus();
+await api.pumpOn();
+await api.controlValve('vacuum_valve', 'open');
+await api.startTest('300mbar3times', { operator: 'John' });
+await api.stopTest();
+await api.listTestData();
+await api.deleteTestData('test_20241210_143022.csv');
+```
+
+### Environment Variables
+
+Create `web/.env.local` for custom API URL:
+
+```bash
+# Default: uses same host as frontend
+NEXT_PUBLIC_API_URL=http://192.168.1.100:8000
+NEXT_PUBLIC_WS_HOST=192.168.1.100:8000
 ```
 
 ## Critical Concepts
@@ -109,6 +328,10 @@ All valves are **NORMALLY-OPEN (NO)** type:
 **In Sequences (io_actions):**
 - `value: true` means "I want this valve OPEN" → relay becomes FALSE
 - `value: false` means "I want this valve CLOSED" → relay becomes TRUE
+
+**In Web API:**
+- `POST /api/valve/vacuum_valve/close` → relay ON → valve physically closed
+- `POST /api/valve/vacuum_valve/open` → relay OFF → valve physically open
 
 The inversion happens in `test_controller.py:_execute_single_io_action()`:
 ```python
@@ -141,11 +364,11 @@ relay_state_manager.add_listener(my_callback)
 ### Test Execution Architecture
 
 ```
-User clicks Start Test
+User clicks Start Test (GUI or Web)
         ↓
-MainWindow.on_start_test()
+[GUI] MainWindow.on_start_test()  OR  [API] POST /api/test/start
         ↓
-ControlThread.run() [background]
+[GUI] ControlThread.run()  OR  [API] HardwareManager._run_test() thread
         ↓
 TestController.run_test()
         ↓
@@ -198,6 +421,7 @@ class IOAction:
     timing: IOActionTiming
     delay_seconds: float = 0.0
     duration_seconds: Optional[float] = None  # For pulse
+    description: str = ""         # Optional description
 
 @dataclass
 class TestStage:
@@ -216,6 +440,9 @@ class TestSequence:
     stages: List[TestStage]
     cycles: int = 1               # Repeat entire sequence N times
     description: str = ""
+    created_date: Optional[str] = None
+    modified_date: Optional[str] = None
+    author: Optional[str] = None
 ```
 
 ### Stage Completion Conditions
@@ -278,6 +505,31 @@ hardware:
         channel_4: 56
       channel_scaling:
         kg_per_division: 72000.0    # Calibrated value
+
+# I/O Device Roles for automatic sequence validation
+io_devices:
+  digital_outputs:
+    - name: vacuum_pump
+      channel: 0
+      device_role: vacuum_pump      # Controlled by pump_mode
+      description: Main vacuum pump relay
+    
+    - name: vacuum_valve
+      channel: 1
+      device_role: vacuum_valve     # Opens to connect pump to chamber
+      description: Vacuum valve - between pump and chamber
+    
+    - name: vent_valve
+      channel: 2
+      device_role: vent_valve       # Opens to release vacuum
+      description: Vent valve - releases chamber to atmosphere
+
+# API Configuration
+api:
+  enabled: false     # Set to true to enable web API
+  host: 0.0.0.0
+  port: 8000
+  debug: false
 ```
 
 ### TLB4 Load Cell Transmitter (Modbus RTU)
@@ -442,16 +694,37 @@ Test data is saved real-time to CSV during execution. Each row contains:
 ### Metadata JSON
 Companion JSON file with same name contains:
 - Test system info
+- Test metadata (operator, test_name, test_id, notes)
+- Gasket assembly weight (if captured)
 - Sequence definition with all stages
 - Data interpretation guide (column meanings, sign conventions)
-- User-provided test description
+
+### Test Data Management via API
+```bash
+# List test files
+GET /api/data
+# Returns: { files: [{ filename, size_formatted, modified_time, test_name, ... }] }
+
+# Download file
+GET /api/data/test_20241210_143022.csv
+
+# Get metadata
+GET /api/data/test_20241210_143022.csv/metadata
+
+# Delete file (also deletes companion JSON)
+DELETE /api/data/test_20241210_143022.csv
+```
 
 ## Debugging & Troubleshooting
 
 ### Log Analysis
 ```bash
-# Run with DEBUG logging
+# Run GUI with DEBUG logging
 python -m epdm_vacuum.app_main 2>&1 | tee debug.log
+
+# Run API with logging
+python -m epdm_vacuum.api_main
+# Logs to: epdm_vacuum_api.log
 
 # Key log prefixes to search for:
 # [RUN_TEST] - Test execution flow
@@ -462,6 +735,7 @@ python -m epdm_vacuum.app_main 2>&1 | tee debug.log
 # [PUMP] - Pump control
 # [RSM] - RelayStateManager operations
 # [MODBUS DIAGNOSTIC] - Load cell readings
+# [WebSocket] - WebSocket connections (in browser console)
 ```
 
 ### Common Issues
@@ -491,6 +765,17 @@ python -m epdm_vacuum.app_main 2>&1 | tee debug.log
 - Check span scaling: low_input/low_output, high_input/high_output
 - Verify input_type matches sensor (4-20mA vs 0-10V)
 
+**WebSocket not connecting**
+- Check FastAPI backend is running on port 8000
+- Verify CORS is enabled (default: allow all origins)
+- Check browser console for connection errors
+- Verify firewall allows port 8000
+
+**Web frontend shows stale data**
+- Check WebSocket connection status (header shows Live/Offline)
+- Browser will auto-reconnect after 3 seconds
+- Clear browser cache if issues persist
+
 ### Registry/Settings Reset (Windows)
 ```powershell
 # Delete saved window state
@@ -515,10 +800,12 @@ stages:
         action_type: digital_output
         value: true                # OPEN the valve (relay will be OFF)
         timing: start_of_stage
+        description: Connect pump to chamber
       - device_name: vent_valve
         action_type: digital_output
         value: false               # CLOSE the valve (relay will be ON)
         timing: start_of_stage
+        description: Seal chamber
   
   - name: Hold
     target_vacuum_bar: null        # No setpoint - just wait
@@ -543,21 +830,88 @@ stages:
 - **Development**: Windows 10/11
 - **Deployment**: Raspberry Pi 5
 - **Python**: 3.11+ (tested with 3.14)
+- **Node.js**: 18+ (for web frontend)
 - **Remote Development**: VS Code with Remote-SSH
 
-### Key Dependencies
+### Key Python Dependencies
 - PyQt5, pyqtgraph (GUI)
 - minimalmodbus, pyserial (Modbus RTU)
 - widgetlords (Pi only, SPI modules)
 - numpy, pandas (data processing)
 - PyYAML, python-dotenv (configuration)
-- flask, flask-cors (optional API)
+- fastapi, uvicorn (Web API)
+
+### Key Web Dependencies
+- Next.js 14 (React framework)
+- Tailwind CSS (styling)
+- Recharts (charts)
+- Lucide React (icons)
+
+## Deployment on Raspberry Pi
+
+The system should run independently of SSH connections so tests continue even if your computer sleeps.
+
+### Option 1: Systemd Services (Production)
+
+Services auto-start on boot and restart on crash:
+
+```bash
+# Install services
+sudo ./scripts/install_services.sh
+
+# Useful commands
+sudo systemctl status epdm-api        # Check API status
+sudo systemctl status epdm-web        # Check web status
+sudo journalctl -u epdm-api -f        # View API logs
+sudo journalctl -u epdm-web -f        # View web logs
+sudo systemctl restart epdm-api       # Restart API
+sudo systemctl restart epdm-web       # Restart web
+sudo ./scripts/install_services.sh remove  # Uninstall
+
+# Service files are in systemd/ directory
+```
+
+### Option 2: tmux Sessions (Development)
+
+Run in detached sessions that survive SSH disconnect but not reboot:
+
+```bash
+# Start both services
+./scripts/run_detached.sh
+
+# Reconnect to see output (after SSH reconnection)
+tmux attach -t epdm-api
+tmux attach -t epdm-web
+
+# Detach from session (keeps running): Ctrl+B then D
+
+# Other commands
+./scripts/run_detached.sh stop        # Stop all
+./scripts/run_detached.sh status      # Show status
+./scripts/run_detached.sh restart     # Restart all
+```
+
+### Web Interface Access
+
+After deployment, access the web UI from any device on the same network:
+
+```
+http://<pi-ip>:3000      # Web interface
+http://<pi-ip>:8000      # API
+http://<pi-ip>:8000/docs # API documentation
+```
+
+Find Pi's IP: `hostname -I` on the Pi, or check your router.
 
 ## Future LLM Context Notes
 
 1. **When modifying IO actions**: Remember valve inversion - sequences use "desired state" (OPEN/CLOSED), code inverts for NO valves
 2. **When debugging vacuum**: Check vacuum_bar (positive magnitude) vs pressure_psig (signed gauge)
-3. **When adding new relays**: Update hardware_config.yaml, RelayStateManager interlocks if needed
-4. **When modifying test execution**: All flow goes through TestController, callbacks notify GUI
-5. **Thread safety**: DAQ thread reads continuously; Modbus writes use locks; RelayStateManager is thread-safe singleton
+3. **When adding new relays**: Update hardware_config.yaml, RelayStateManager interlocks if needed, and io_devices section
+4. **When modifying test execution**: All flow goes through TestController, callbacks notify both GUI and Web API
+5. **Thread safety**: DAQ thread reads continuously; Modbus writes use locks; RelayStateManager is thread-safe singleton; HardwareManager is singleton with sensor read thread
 6. **Logging is verbose**: Search logs by prefix for specific subsystems
+7. **Web vs GUI**: Run only one at a time - they share hardware access. Web API uses HardwareManager singleton, GUI uses direct interfaces.
+8. **WebSocket data flow**: HardwareManager._sensor_loop() → sensor_broadcaster → WebSocket clients
+9. **Test events**: TestController callbacks → HardwareManager callbacks → event_broadcaster → WebSocket → React components
+10. **Deployment**: Use systemd services (production) or tmux (development) so tests survive SSH disconnect

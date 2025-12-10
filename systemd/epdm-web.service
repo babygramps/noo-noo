@@ -1,0 +1,29 @@
+[Unit]
+Description=EPDM Vacuum Fixture Web Frontend
+Documentation=https://github.com/yourusername/noo-noo
+After=network.target epdm-api.service
+Wants=epdm-api.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/noo-noo/web
+Environment="NODE_ENV=production"
+Environment="PORT=3000"
+Environment="NEXT_PUBLIC_API_URL=http://localhost:8000"
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=epdm-web
+
+# Hardening
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+

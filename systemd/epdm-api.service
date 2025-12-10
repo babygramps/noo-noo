@@ -1,0 +1,38 @@
+[Unit]
+Description=EPDM Vacuum Fixture API Server
+Documentation=https://github.com/yourusername/noo-noo
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+# Additional groups for hardware access (SPI, GPIO, serial)
+SupplementaryGroups=spi gpio dialout
+
+WorkingDirectory=/home/pi/noo-noo
+Environment="PATH=/home/pi/noo-noo/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/pi/noo-noo/src"
+ExecStart=/home/pi/noo-noo/venv/bin/python -m uvicorn epdm_vacuum.api_main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=epdm-api
+
+# Allow device access for hardware control
+DeviceAllow=/dev/spidev* rw
+DeviceAllow=/dev/gpiochip* rw
+DeviceAllow=/dev/ttyUSB* rw
+DeviceAllow=/dev/ttyACM* rw
+DeviceAllow=/dev/serial* rw
+
+# File access
+ReadWritePaths=/home/pi/noo-noo/data /home/pi/noo-noo/sequences
+
+[Install]
+WantedBy=multi-user.target
+
