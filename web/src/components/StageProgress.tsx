@@ -1,6 +1,7 @@
 'use client';
 
 import { clsx } from 'clsx';
+import { Timer, Repeat, CheckCircle2, Circle, PlayCircle, Pause } from 'lucide-react';
 import type { StageChangeData, ProgressData } from '@/hooks/useWebSocket';
 import type { Sequence } from '@/lib/api';
 
@@ -23,11 +24,13 @@ export function StageProgress({
     return (
       <div className="panel-card">
         <h3 className="panel-header">Test Status</h3>
-        <div className="flex items-center justify-center h-32 text-gray-500">
-          <div className="text-center">
-            <div className="text-4xl mb-2">⏸️</div>
-            <div>No test running</div>
-            <div className="text-sm mt-1">{statusMessage || 'Select a sequence and click Start'}</div>
+        <div className="flex flex-col items-center justify-center py-8 text-slate-500">
+          <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-800/50 border border-slate-700/50 mb-3">
+            <Pause className="w-6 h-6 text-slate-600" />
+          </div>
+          <div className="text-sm font-medium text-slate-400">No test running</div>
+          <div className="text-xs text-slate-600 mt-1 text-center max-w-[200px]">
+            {statusMessage || 'Select a sequence and click Start to begin'}
           </div>
         </div>
       </div>
@@ -39,15 +42,18 @@ export function StageProgress({
 
   return (
     <div className="panel-card space-y-4">
-      <h3 className="panel-header flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <div className="status-indicator status-indicator-running" />
-        Test Status
-      </h3>
+        <h3 className="panel-header mb-0">Test Status</h3>
+      </div>
 
       {/* Cycle indicator */}
       {stageInfo && stageInfo.total_cycles > 1 && (
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-400">Cycle</span>
+        <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-panel-bg/50 border border-panel-border/30">
+          <div className="flex items-center gap-2">
+            <Repeat size={14} className="text-slate-500" />
+            <span className="text-sm text-slate-400">Cycle</span>
+          </div>
           <span className="lcd-value text-lg">
             {stageInfo.current_cycle + 1} / {stageInfo.total_cycles}
           </span>
@@ -55,16 +61,19 @@ export function StageProgress({
       )}
 
       {/* Stage indicator */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-400">Stage</span>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-panel-bg/50 border border-panel-border/30">
+          <div className="flex items-center gap-2">
+            <Timer size={14} className="text-slate-500" />
+            <span className="text-sm text-slate-400">Stage</span>
+          </div>
           <span className="lcd-value text-lg">
             {stageInfo ? `${stageInfo.stage_index + 1} / ${stageInfo.stages_per_cycle}` : '-'}
           </span>
         </div>
         
-        <div className="lcd-display p-3">
-          <div className="text-xs text-gray-500 mb-1">Current Stage</div>
+        <div className="lcd-display p-4">
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Current Stage</div>
           <div className="lcd-value text-xl truncate">
             {stageInfo?.stage_name || 'Initializing...'}
           </div>
@@ -73,46 +82,51 @@ export function StageProgress({
 
       {/* Progress bar */}
       <div className="space-y-2">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-400">Progress</span>
-          <span className="text-gray-300">{progressPercent}%</span>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-slate-500 uppercase tracking-wider">Progress</span>
+          <span className="text-sm font-mono text-slate-300">{progressPercent}%</span>
         </div>
-        <div className="h-3 bg-panel-bg rounded-full overflow-hidden">
+        <div className="progress-bar">
           <div
-            className="h-full bg-blue-500 transition-all duration-300"
+            className="progress-bar-fill"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
         {progress?.status && (
-          <div className="text-xs text-gray-500">{progress.status}</div>
+          <div className="text-xs text-slate-500 truncate">{progress.status}</div>
         )}
       </div>
 
       {/* Current stage details */}
       {currentStage && (
-        <div className="border-t border-panel-border pt-3 space-y-2">
-          <h4 className="text-xs text-gray-500 uppercase">Stage Settings</h4>
-          <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="pt-3 border-t border-panel-border space-y-2">
+          <h4 className="text-[10px] text-slate-500 uppercase tracking-wider">Stage Settings</h4>
+          <div className="grid grid-cols-2 gap-2">
             {currentStage.target_vacuum_bar !== null && (
-              <div>
-                <span className="text-gray-500">Target: </span>
-                <span className="text-gray-300">{Math.abs(currentStage.target_vacuum_bar)} bar</span>
+              <div className="py-1.5 px-2.5 rounded-lg bg-panel-bg/30 border border-panel-border/30">
+                <span className="text-[10px] text-slate-600 block">Target</span>
+                <span className="text-sm text-slate-300 font-mono">
+                  {Math.abs(currentStage.target_vacuum_bar)} bar
+                </span>
               </div>
             )}
             {currentStage.max_time_seconds !== null && (
-              <div>
-                <span className="text-gray-500">Max Time: </span>
-                <span className="text-gray-300">{currentStage.max_time_seconds}s</span>
+              <div className="py-1.5 px-2.5 rounded-lg bg-panel-bg/30 border border-panel-border/30">
+                <span className="text-[10px] text-slate-600 block">Max Time</span>
+                <span className="text-sm text-slate-300 font-mono">
+                  {currentStage.max_time_seconds}s
+                </span>
               </div>
             )}
-            <div>
-              <span className="text-gray-500">Pump: </span>
+            <div className="py-1.5 px-2.5 rounded-lg bg-panel-bg/30 border border-panel-border/30 col-span-2">
+              <span className="text-[10px] text-slate-600 block">Pump Mode</span>
               <span className={clsx(
-                currentStage.pump_mode === 'continuous' && 'text-green-400',
-                currentStage.pump_mode === 'off' && 'text-gray-400',
-                currentStage.pump_mode === 'maintain' && 'text-yellow-400',
+                'text-sm font-medium',
+                currentStage.pump_mode === 'continuous' && 'text-emerald-400',
+                currentStage.pump_mode === 'off' && 'text-slate-500',
+                currentStage.pump_mode === 'maintain' && 'text-amber-400',
               )}>
-                {currentStage.pump_mode}
+                {currentStage.pump_mode.charAt(0).toUpperCase() + currentStage.pump_mode.slice(1)}
               </span>
             </div>
           </div>
@@ -121,9 +135,9 @@ export function StageProgress({
 
       {/* Status message */}
       {statusMessage && (
-        <div className="border-t border-panel-border pt-3">
-          <div className="text-xs text-gray-500 mb-1">Status</div>
-          <div className="text-sm text-gray-300">{statusMessage}</div>
+        <div className="pt-3 border-t border-panel-border">
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Status</div>
+          <div className="text-sm text-slate-400">{statusMessage}</div>
         </div>
       )}
     </div>
@@ -140,53 +154,86 @@ export function StageList({ sequence, currentStageIndex }: StageListProps) {
 
   return (
     <div className="panel-card">
-      <h3 className="panel-header">Sequence: {sequence.name}</h3>
-      <div className="space-y-2 max-h-64 overflow-y-auto">
-        {sequence.stages.map((stage, index) => (
-          <div
-            key={index}
-            className={clsx(
-              'p-2 rounded-lg border transition-colors',
-              index === currentStageIndex
-                ? 'bg-blue-900/30 border-blue-600'
-                : index < currentStageIndex
-                ? 'bg-green-900/20 border-green-800/50'
-                : 'bg-panel-bg border-panel-border'
-            )}
-          >
-            <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="panel-header mb-0">Sequence: {sequence.name}</h3>
+        {sequence.cycles > 1 && (
+          <span className="badge badge-info">
+            {sequence.cycles}× cycles
+          </span>
+        )}
+      </div>
+      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+        {sequence.stages.map((stage, index) => {
+          const isActive = index === currentStageIndex;
+          const isComplete = index < currentStageIndex;
+          
+          return (
+            <div
+              key={index}
+              className={clsx(
+                'flex items-center gap-3 p-3 rounded-xl border transition-all duration-200',
+                isActive
+                  ? 'bg-teal-500/10 border-teal-500/40 shadow-[0_0_15px_rgba(20,184,166,0.1)]'
+                  : isComplete
+                  ? 'bg-emerald-500/5 border-emerald-500/20'
+                  : 'bg-panel-bg/30 border-panel-border/30'
+              )}
+            >
+              {/* Stage indicator */}
               <div
                 className={clsx(
-                  'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold',
-                  index === currentStageIndex
-                    ? 'bg-blue-600 text-white'
-                    : index < currentStageIndex
-                    ? 'bg-green-600 text-white'
-                    : 'bg-panel-border text-gray-400'
+                  'flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0',
+                  isActive
+                    ? 'bg-teal-500/20 text-teal-400'
+                    : isComplete
+                    ? 'bg-emerald-500/20 text-emerald-400'
+                    : 'bg-slate-700/50 text-slate-500'
                 )}
               >
-                {index < currentStageIndex ? '✓' : index + 1}
+                {isComplete ? (
+                  <CheckCircle2 size={16} />
+                ) : isActive ? (
+                  <PlayCircle size={16} className="animate-pulse" />
+                ) : (
+                  <Circle size={16} />
+                )}
               </div>
+              
+              {/* Stage info */}
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">{stage.name}</div>
-                <div className="text-xs text-gray-500">
-                  {stage.target_vacuum_bar !== null && `${Math.abs(stage.target_vacuum_bar)} bar`}
-                  {stage.target_vacuum_bar !== null && stage.max_time_seconds !== null && ' / '}
-                  {stage.max_time_seconds !== null && `${stage.max_time_seconds}s`}
-                  {stage.target_vacuum_bar === null && stage.max_time_seconds === null && 'Manual'}
+                <div className={clsx(
+                  'text-sm font-medium truncate',
+                  isActive ? 'text-teal-300' : isComplete ? 'text-emerald-300' : 'text-slate-300'
+                )}>
+                  {stage.name}
+                </div>
+                <div className="text-xs text-slate-500 flex items-center gap-2">
+                  {stage.target_vacuum_bar !== null && (
+                    <span>{Math.abs(stage.target_vacuum_bar)} bar</span>
+                  )}
+                  {stage.target_vacuum_bar !== null && stage.max_time_seconds !== null && (
+                    <span className="text-slate-700">•</span>
+                  )}
+                  {stage.max_time_seconds !== null && (
+                    <span>{stage.max_time_seconds}s</span>
+                  )}
+                  {stage.target_vacuum_bar === null && stage.max_time_seconds === null && (
+                    <span className="text-slate-600">Manual</span>
+                  )}
                 </div>
               </div>
+              
+              {/* Stage number */}
+              <div className={clsx(
+                'text-xs font-mono px-2 py-1 rounded',
+                isActive ? 'text-teal-400 bg-teal-500/10' : 'text-slate-600'
+              )}>
+                {index + 1}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
-      {sequence.cycles > 1 && (
-        <div className="mt-3 pt-3 border-t border-panel-border text-sm text-gray-400">
-          Repeats {sequence.cycles} times
-        </div>
-      )}
     </div>
   );
 }
-
-

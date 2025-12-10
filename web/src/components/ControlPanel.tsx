@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { clsx } from 'clsx';
-import { Play, Square, Power, Wind } from 'lucide-react';
+import { Play, Square, Power, Wind, RotateCcw, Settings2 } from 'lucide-react';
 import * as api from '@/lib/api';
 import type { IOStates, SequenceSummary } from '@/lib/api';
 
@@ -12,7 +12,7 @@ interface ControlPanelProps {
   sequences: SequenceSummary[];
   selectedSequence: string | null;
   onSequenceSelect: (name: string) => void;
-  onTestStarted?: () => void;
+  onStartTestRequest?: () => void;
   onTestStopped?: () => void;
 }
 
@@ -22,7 +22,7 @@ export function ControlPanel({
   sequences,
   selectedSequence,
   onSequenceSelect,
-  onTestStarted,
+  onStartTestRequest,
   onTestStopped,
 }: ControlPanelProps) {
   const [loading, setLoading] = useState<string | null>(null);
@@ -34,22 +34,9 @@ export function ControlPanel({
       return;
     }
 
-    setLoading('start');
-    setError(null);
-
-    try {
-      const result = await api.startTest(selectedSequence);
-      if (result.success) {
-        onTestStarted?.();
-      } else {
-        setError(result.message);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start test');
-    } finally {
-      setLoading(null);
-    }
-  }, [selectedSequence, onTestStarted]);
+    // Trigger the metadata modal instead of starting directly
+    onStartTestRequest?.();
+  }, [selectedSequence, onStartTestRequest]);
 
   const handleStopTest = useCallback(async () => {
     setLoading('stop');
@@ -121,33 +108,38 @@ export function ControlPanel({
   }, []);
 
   return (
-    <div className="panel-card space-y-4">
-      <h3 className="panel-header">Control Panel</h3>
+    <div className="panel-card space-y-5">
+      <div className="flex items-center gap-2">
+        <Settings2 className="w-4 h-4 text-slate-400" />
+        <h3 className="panel-header mb-0">Control Panel</h3>
+      </div>
 
       {/* Error display */}
       {error && (
-        <div className="bg-red-900/30 border border-red-700 rounded-lg p-3 text-sm text-red-300">
-          {error}
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/30">
+          <div className="w-1.5 h-1.5 rounded-full bg-red-400 mt-1.5 flex-shrink-0" />
+          <p className="text-sm text-red-300">{error}</p>
         </div>
       )}
 
       {/* Sequence selector */}
       <div className="space-y-2">
-        <label className="text-sm text-gray-400">Test Sequence</label>
+        <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+          Test Sequence
+        </label>
         <select
           value={selectedSequence || ''}
           onChange={(e) => onSequenceSelect(e.target.value)}
           disabled={testRunning}
           className={clsx(
-            'w-full bg-panel-bg border border-panel-border rounded-lg px-3 py-2',
-            'text-gray-100 focus:outline-none focus:border-blue-500',
-            'disabled:opacity-50 disabled:cursor-not-allowed'
+            'form-select w-full',
+            testRunning && 'opacity-60 cursor-not-allowed'
           )}
         >
           <option value="">Select a sequence...</option>
           {sequences.map((seq) => (
             <option key={seq.name} value={seq.name}>
-              {seq.name} ({seq.stages} stages, {seq.cycles}x)
+              {seq.name} ({seq.stages} stages, {seq.cycles}×)
             </option>
           ))}
         </select>
@@ -159,35 +151,53 @@ export function ControlPanel({
           onClick={handleStartTest}
           disabled={testRunning || !selectedSequence || loading !== null}
           className={clsx(
-            'flex-1 btn-success flex items-center justify-center gap-2',
-            'disabled:bg-gray-700 disabled:border-gray-600'
+            'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium transition-all duration-200',
+            !testRunning && selectedSequence && loading === null
+              ? 'bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/30 hover:border-emerald-400/60'
+              : 'bg-slate-800/50 border border-slate-700 text-slate-500 cursor-not-allowed'
           )}
         >
-          <Play size={18} />
-          {loading === 'start' ? 'Starting...' : 'Start Test'}
+          <Play size={18} className={loading === 'start' ? 'animate-pulse' : ''} />
+          <span>Start Test</span>
         </button>
         <button
           onClick={handleStopTest}
           disabled={!testRunning || loading !== null}
           className={clsx(
-            'flex-1 btn-danger flex items-center justify-center gap-2',
-            'disabled:bg-gray-700 disabled:border-gray-600'
+            'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium transition-all duration-200',
+            testRunning && loading === null
+              ? 'bg-red-500/20 border border-red-500/50 text-red-300 hover:bg-red-500/30 hover:border-red-400/60'
+              : 'bg-slate-800/50 border border-slate-700 text-slate-500 cursor-not-allowed'
           )}
         >
-          <Square size={18} />
-          {loading === 'stop' ? 'Stopping...' : 'Stop Test'}
+          <Square size={18} className={loading === 'stop' ? 'animate-pulse' : ''} />
+          <span>{loading === 'stop' ? 'Stopping...' : 'Stop Test'}</span>
         </button>
       </div>
 
       {/* Manual controls */}
-      <div className="border-t border-panel-border pt-4 space-y-3">
-        <h4 className="text-sm text-gray-400 font-medium">Manual Controls</h4>
+      <div className="space-y-4 pt-4 border-t border-panel-border">
+        <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+          Manual Controls
+        </h4>
 
         {/* Pump toggle */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Power size={16} className="text-gray-400" />
-            <span className="text-sm">Vacuum Pump</span>
+        <div className="flex items-center justify-between p-3 rounded-xl bg-panel-bg/50 border border-panel-border/50">
+          <div className="flex items-center gap-3">
+            <div className={clsx(
+              'flex items-center justify-center w-8 h-8 rounded-lg',
+              ioStates.vacuum_pump 
+                ? 'bg-emerald-500/20 text-emerald-400' 
+                : 'bg-slate-700/50 text-slate-500'
+            )}>
+              <Power size={16} />
+            </div>
+            <div>
+              <span className="text-sm font-medium text-slate-200">Vacuum Pump</span>
+              <p className="text-xs text-slate-500">
+                {ioStates.vacuum_pump ? 'Running' : 'Stopped'}
+              </p>
+            </div>
           </div>
           <ToggleButton
             isOn={ioStates.vacuum_pump ?? false}
@@ -198,10 +208,22 @@ export function ControlPanel({
         </div>
 
         {/* Vacuum valve toggle */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Wind size={16} className="text-gray-400" />
-            <span className="text-sm">Vacuum Valve</span>
+        <div className="flex items-center justify-between p-3 rounded-xl bg-panel-bg/50 border border-panel-border/50">
+          <div className="flex items-center gap-3">
+            <div className={clsx(
+              'flex items-center justify-center w-8 h-8 rounded-lg',
+              ioStates.vacuum_valve 
+                ? 'bg-blue-500/20 text-blue-400' 
+                : 'bg-slate-700/50 text-slate-500'
+            )}>
+              <Wind size={16} />
+            </div>
+            <div>
+              <span className="text-sm font-medium text-slate-200">Vacuum Valve</span>
+              <p className="text-xs text-slate-500">
+                {ioStates.vacuum_valve ? 'Open' : 'Closed'}
+              </p>
+            </div>
           </div>
           <ToggleButton
             isOn={ioStates.vacuum_valve ?? false}
@@ -213,10 +235,22 @@ export function ControlPanel({
         </div>
 
         {/* Vent valve toggle */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Wind size={16} className="text-gray-400" />
-            <span className="text-sm">Vent Valve</span>
+        <div className="flex items-center justify-between p-3 rounded-xl bg-panel-bg/50 border border-panel-border/50">
+          <div className="flex items-center gap-3">
+            <div className={clsx(
+              'flex items-center justify-center w-8 h-8 rounded-lg',
+              ioStates.vent_valve 
+                ? 'bg-amber-500/20 text-amber-400' 
+                : 'bg-slate-700/50 text-slate-500'
+            )}>
+              <Wind size={16} />
+            </div>
+            <div>
+              <span className="text-sm font-medium text-slate-200">Vent Valve</span>
+              <p className="text-xs text-slate-500">
+                {ioStates.vent_valve ? 'Open' : 'Closed'}
+              </p>
+            </div>
           </div>
           <ToggleButton
             isOn={ioStates.vent_valve ?? false}
@@ -231,9 +265,15 @@ export function ControlPanel({
         <button
           onClick={handleTare}
           disabled={loading !== null}
-          className="w-full btn-control text-sm"
+          className={clsx(
+            'w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all duration-200',
+            'bg-panel-bg border border-panel-border text-slate-300',
+            'hover:bg-panel-highlight hover:border-slate-500',
+            'disabled:opacity-50 disabled:cursor-not-allowed'
+          )}
         >
-          {loading === 'tare' ? 'Taring...' : 'Tare Load Cells'}
+          <RotateCcw size={16} className={loading === 'tare' ? 'animate-spin' : ''} />
+          <span>{loading === 'tare' ? 'Taring...' : 'Tare Load Cells'}</span>
         </button>
       </div>
     </div>
@@ -256,7 +296,8 @@ function ToggleButton({ isOn, onToggle, disabled, loading, labels = ['OFF', 'ON'
       className={clsx(
         'toggle-switch',
         isOn ? 'toggle-switch-on' : 'toggle-switch-off',
-        disabled && 'opacity-50 cursor-not-allowed'
+        disabled && 'opacity-50 cursor-not-allowed',
+        loading && 'animate-pulse'
       )}
     >
       <span
@@ -275,10 +316,10 @@ export function IOStatusDisplay({ ioStates }: IOStatusDisplayProps) {
   return (
     <div className="panel-card">
       <h3 className="panel-header">IO Status</h3>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2">
         <IOIndicator name="Pump" isOn={ioStates.vacuum_pump ?? false} />
-        <IOIndicator name="Vacuum" isOn={ioStates.vacuum_valve ?? false} label={['CLOSED', 'OPEN']} />
-        <IOIndicator name="Vent" isOn={ioStates.vent_valve ?? false} label={['CLOSED', 'OPEN']} />
+        <IOIndicator name="Vacuum" isOn={ioStates.vacuum_valve ?? false} label={['SHUT', 'OPEN']} />
+        <IOIndicator name="Vent" isOn={ioStates.vent_valve ?? false} label={['SHUT', 'OPEN']} />
       </div>
     </div>
   );
@@ -292,24 +333,22 @@ interface IOIndicatorProps {
 
 function IOIndicator({ name, isOn, label = ['OFF', 'ON'] }: IOIndicatorProps) {
   return (
-    <div className="lcd-display p-2 text-center">
-      <div className="text-xs text-gray-500 uppercase mb-1">{name}</div>
+    <div className="lcd-display p-3 text-center">
+      <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5">{name}</div>
       <div
         className={clsx(
-          'text-sm font-mono font-bold',
-          isOn ? 'text-green-400' : 'text-gray-500'
+          'text-sm font-mono font-semibold tracking-tight',
+          isOn ? 'lcd-value' : 'text-slate-600'
         )}
       >
         {isOn ? label[1] : label[0]}
       </div>
       <div
         className={clsx(
-          'w-2 h-2 rounded-full mx-auto mt-1',
-          isOn ? 'bg-green-500' : 'bg-gray-600'
+          'w-2 h-2 rounded-full mx-auto mt-2',
+          isOn ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-slate-700'
         )}
       />
     </div>
   );
 }
-
-

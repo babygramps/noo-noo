@@ -62,10 +62,15 @@ export function LiveChart({
 
   if (chartData.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-gray-500">
+      <div className="h-full flex items-center justify-center">
         <div className="text-center">
-          <div className="text-4xl mb-2">📊</div>
-          <div>Waiting for data...</div>
+          <div className="flex items-center justify-center w-16 h-16 mx-auto rounded-2xl bg-slate-800/50 border border-slate-700/50 mb-4">
+            <svg className="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+          </div>
+          <div className="text-sm text-slate-500">Waiting for data...</div>
+          <div className="text-xs text-slate-600 mt-1">Start a test to see real-time graphs</div>
         </div>
       </div>
     );
@@ -77,13 +82,13 @@ export function LiveChart({
         data={chartData}
         margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
       >
-        <CartesianGrid strokeDasharray="3 3" stroke="#363b44" />
+        <CartesianGrid strokeDasharray="3 3" stroke="#2a3140" opacity={0.5} />
         
         <XAxis
           dataKey="index"
-          tick={{ fill: '#8b949e', fontSize: 10 }}
-          tickLine={{ stroke: '#363b44' }}
-          axisLine={{ stroke: '#363b44' }}
+          tick={{ fill: '#64748b', fontSize: 10 }}
+          tickLine={{ stroke: '#2a3140' }}
+          axisLine={{ stroke: '#2a3140' }}
           tickFormatter={(value) => {
             // Show time label every N ticks
             const d = chartData[value];
@@ -98,14 +103,14 @@ export function LiveChart({
           <YAxis
             yAxisId="vacuum"
             domain={vacuumDomain}
-            tick={{ fill: '#58a6ff', fontSize: 11 }}
-            tickLine={{ stroke: '#363b44' }}
-            axisLine={{ stroke: '#363b44' }}
+            tick={{ fill: '#4fd1c5', fontSize: 11 }}
+            tickLine={{ stroke: '#2a3140' }}
+            axisLine={{ stroke: '#2a3140' }}
             label={{
               value: 'Vacuum (bar)',
               angle: -90,
               position: 'insideLeft',
-              fill: '#58a6ff',
+              fill: '#4fd1c5',
               fontSize: 11,
             }}
           />
@@ -116,14 +121,14 @@ export function LiveChart({
             yAxisId="force"
             orientation="right"
             domain={forceDomain}
-            tick={{ fill: '#3fb950', fontSize: 11 }}
-            tickLine={{ stroke: '#363b44' }}
-            axisLine={{ stroke: '#363b44' }}
+            tick={{ fill: '#3b82f6', fontSize: 11 }}
+            tickLine={{ stroke: '#2a3140' }}
+            axisLine={{ stroke: '#2a3140' }}
             label={{
               value: 'Force (kg)',
               angle: 90,
               position: 'insideRight',
-              fill: '#3fb950',
+              fill: '#3b82f6',
               fontSize: 11,
             }}
           />
@@ -131,14 +136,17 @@ export function LiveChart({
         
         <Tooltip
           contentStyle={{
-            backgroundColor: '#23272f',
-            border: '1px solid #363b44',
-            borderRadius: '8px',
+            backgroundColor: '#1a1f2a',
+            border: '1px solid #2a3140',
+            borderRadius: '12px',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)',
           }}
-          labelStyle={{ color: '#8b949e' }}
+          labelStyle={{ color: '#64748b', fontSize: 11, marginBottom: 4 }}
+          itemStyle={{ fontSize: 12 }}
           formatter={(value: number, name: string) => {
             const unit = name === 'Vacuum' ? ' bar' : ' kg';
-            return [value.toFixed(3) + unit, name];
+            const color = name === 'Vacuum' ? '#4fd1c5' : '#3b82f6';
+            return [<span key={name} style={{ color }}>{value.toFixed(3)}{unit}</span>, name];
           }}
           labelFormatter={(value) => {
             const d = chartData[value];
@@ -149,7 +157,7 @@ export function LiveChart({
         <Legend
           wrapperStyle={{ paddingTop: '10px' }}
           formatter={(value) => (
-            <span style={{ color: '#8b949e' }}>{value}</span>
+            <span style={{ color: '#94a3b8', fontSize: 12 }}>{value}</span>
           )}
         />
         
@@ -159,10 +167,10 @@ export function LiveChart({
             type="monotone"
             dataKey="vacuum"
             name="Vacuum"
-            stroke="#58a6ff"
+            stroke="#4fd1c5"
             strokeWidth={2}
             dot={false}
-            activeDot={{ r: 4, fill: '#58a6ff' }}
+            activeDot={{ r: 4, fill: '#4fd1c5', stroke: '#0f1218', strokeWidth: 2 }}
             isAnimationActive={false}
           />
         )}
@@ -173,10 +181,10 @@ export function LiveChart({
             type="monotone"
             dataKey="force"
             name="Force"
-            stroke="#3fb950"
+            stroke="#3b82f6"
             strokeWidth={2}
             dot={false}
-            activeDot={{ r: 4, fill: '#3fb950' }}
+            activeDot={{ r: 4, fill: '#3b82f6', stroke: '#0f1218', strokeWidth: 2 }}
             isAnimationActive={false}
           />
         )}
@@ -186,11 +194,12 @@ export function LiveChart({
           <ReferenceLine
             yAxisId="vacuum"
             y={Math.abs(targetVacuum)}
-            stroke="#d29922"
-            strokeDasharray="5 5"
+            stroke="#f59e0b"
+            strokeDasharray="6 4"
+            strokeWidth={1.5}
             label={{
               value: `Target: ${Math.abs(targetVacuum)} bar`,
-              fill: '#d29922',
+              fill: '#f59e0b',
               fontSize: 10,
               position: 'insideTopRight',
             }}
@@ -219,7 +228,7 @@ export function MiniChart({ data, dataKey, color, height = 60 }: MiniChartProps)
   if (chartData.length < 2) {
     return (
       <div style={{ height }} className="flex items-center justify-center">
-        <span className="text-gray-600 text-xs">No data</span>
+        <span className="text-slate-600 text-xs">No data</span>
       </div>
     );
   }
@@ -239,5 +248,3 @@ export function MiniChart({ data, dataKey, color, height = 60 }: MiniChartProps)
     </ResponsiveContainer>
   );
 }
-
-

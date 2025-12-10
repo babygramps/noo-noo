@@ -2,99 +2,178 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Import JetBrains Mono for LCD displays */
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+/* Import distinctive fonts */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
 :root {
-  --panel-bg: #1a1d23;
-  --panel-surface: #23272f;
-  --panel-border: #363b44;
-  --lcd-bg: #0d1117;
-  --lcd-text: #58a6ff;
+  --panel-bg: #0f1218;
+  --panel-surface: #1a1f2a;
+  --panel-border: #2a3140;
+  --lcd-bg: #080c12;
+  --lcd-text: #4fd1c5;
+  --lcd-glow: rgba(79, 209, 197, 0.4);
 }
 
+/* Base body styling */
 body {
-  @apply bg-panel-bg text-gray-100 font-display;
+  @apply bg-panel-bg text-slate-100;
+  font-family: 'DM Sans', system-ui, sans-serif;
   overflow-x: hidden;
 }
 
-/* LCD Display styling */
+/* Subtle grid background */
+.bg-grid {
+  background-image: 
+    linear-gradient(to right, rgba(42, 49, 64, 0.2) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(42, 49, 64, 0.2) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Radial gradient overlay */
+.bg-radial-fade {
+  background: radial-gradient(ellipse at top, rgba(79, 209, 197, 0.03) 0%, transparent 60%);
+}
+
+/* ========================================
+   LCD Display Styling
+   ======================================== */
+
 .lcd-display {
-  @apply bg-lcd-bg border border-panel-border rounded-lg;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+  @apply bg-lcd-bg rounded-xl;
+  border: 1px solid rgba(42, 49, 64, 0.6);
+  box-shadow: 
+    inset 0 2px 4px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
 .lcd-value {
-  @apply font-mono text-lcd-text;
-  text-shadow: 0 0 10px rgba(88, 166, 255, 0.5);
+  font-family: 'IBM Plex Mono', monospace;
+  @apply text-lcd-text;
+  text-shadow: 0 0 15px var(--lcd-glow);
 }
 
 .lcd-value-dim {
-  @apply font-mono text-lcd-dim;
-  text-shadow: 0 0 8px rgba(35, 134, 54, 0.4);
+  font-family: 'IBM Plex Mono', monospace;
+  @apply text-lcd-dim;
+  text-shadow: 0 0 12px rgba(45, 212, 191, 0.4);
 }
 
 .lcd-value-warn {
-  @apply font-mono text-lcd-warn;
-  text-shadow: 0 0 8px rgba(210, 153, 34, 0.4);
+  font-family: 'IBM Plex Mono', monospace;
+  @apply text-lcd-warn;
+  text-shadow: 0 0 12px rgba(251, 191, 36, 0.5);
 }
 
 .lcd-value-error {
-  @apply font-mono text-lcd-error;
-  text-shadow: 0 0 8px rgba(248, 81, 73, 0.4);
+  font-family: 'IBM Plex Mono', monospace;
+  @apply text-lcd-error;
+  text-shadow: 0 0 12px rgba(248, 113, 113, 0.5);
 }
 
-/* Control button styling */
+/* ========================================
+   Button Styling
+   ======================================== */
+
 .btn-control {
-  @apply px-4 py-2 rounded-lg font-medium transition-all duration-200;
+  @apply px-4 py-2.5 rounded-xl font-medium transition-all duration-200;
   @apply bg-panel-surface border border-panel-border;
-  @apply hover:bg-panel-highlight hover:border-gray-500;
-  @apply active:scale-95;
+  @apply hover:bg-panel-highlight hover:border-slate-500;
+  @apply active:scale-[0.98];
   @apply disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-panel-surface;
 }
 
 .btn-primary {
-  @apply btn-control bg-blue-600 border-blue-500;
-  @apply hover:bg-blue-700 hover:border-blue-400;
+  @apply btn-control bg-accent-primary/20 border-accent-primary/50 text-blue-300;
+  @apply hover:bg-accent-primary/30 hover:border-accent-primary/70;
 }
 
 .btn-danger {
-  @apply btn-control bg-red-600 border-red-500;
-  @apply hover:bg-red-700 hover:border-red-400;
+  @apply btn-control bg-red-500/15 border-red-500/40 text-red-300;
+  @apply hover:bg-red-500/25 hover:border-red-500/60;
 }
 
 .btn-success {
-  @apply btn-control bg-green-600 border-green-500;
-  @apply hover:bg-green-700 hover:border-green-400;
+  @apply btn-control bg-emerald-500/15 border-emerald-500/40 text-emerald-300;
+  @apply hover:bg-emerald-500/25 hover:border-emerald-500/60;
 }
 
-/* Card/Panel styling */
+.btn-ghost {
+  @apply px-3 py-2 rounded-lg font-medium transition-all duration-200;
+  @apply text-slate-400 hover:text-slate-200 hover:bg-slate-800;
+}
+
+/* ========================================
+   Card/Panel Styling
+   ======================================== */
+
 .panel-card {
-  @apply bg-panel-surface border border-panel-border rounded-xl p-4;
-  @apply shadow-lg;
+  @apply bg-panel-surface/80 backdrop-blur-sm rounded-2xl p-5;
+  border: 1px solid rgba(42, 49, 64, 0.7);
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+.panel-card-elevated {
+  @apply panel-card;
+  box-shadow: 
+    0 8px 30px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(79, 209, 197, 0.05);
 }
 
 .panel-header {
-  @apply text-sm font-medium text-gray-400 uppercase tracking-wider mb-3;
+  @apply text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4;
+  letter-spacing: 0.15em;
 }
 
-/* Toggle switch */
+.panel-title {
+  @apply text-lg font-semibold text-slate-100;
+}
+
+/* ========================================
+   Form Input Styling
+   ======================================== */
+
+.form-input {
+  @apply w-full px-3 py-2.5 rounded-lg text-sm transition-all duration-200;
+  @apply bg-slate-800/60 border border-slate-600/50 text-slate-100;
+  @apply placeholder:text-slate-500;
+  @apply focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500/60;
+  @apply disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.form-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+}
+
+.form-select {
+  @apply form-input cursor-pointer;
+  @apply bg-slate-800/60;
+}
+
+/* ========================================
+   Toggle Switch Styling
+   ======================================== */
+
 .toggle-switch {
-  @apply relative inline-flex h-6 w-11 items-center rounded-full;
+  @apply relative inline-flex h-7 w-12 items-center rounded-full;
   @apply transition-colors duration-200;
+  @apply cursor-pointer;
 }
 
 .toggle-switch-on {
-  @apply bg-green-600;
+  @apply bg-emerald-500/80;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
 }
 
 .toggle-switch-off {
-  @apply bg-gray-600;
+  @apply bg-slate-600;
 }
 
 .toggle-knob {
-  @apply inline-block h-4 w-4 rounded-full bg-white;
-  @apply transform transition-transform duration-200;
+  @apply inline-block h-5 w-5 rounded-full bg-white;
+  @apply transform transition-all duration-200;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .toggle-knob-on {
@@ -105,39 +184,146 @@ body {
   @apply translate-x-1;
 }
 
-/* Status indicator */
+/* ========================================
+   Status Indicator Styling
+   ======================================== */
+
 .status-indicator {
-  @apply w-3 h-3 rounded-full;
+  @apply w-2.5 h-2.5 rounded-full;
 }
 
 .status-indicator-running {
-  @apply bg-green-500 animate-pulse;
+  @apply bg-emerald-400;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.6);
+  animation: pulse 2s ease-in-out infinite;
 }
 
 .status-indicator-idle {
-  @apply bg-gray-500;
+  @apply bg-slate-500;
 }
 
 .status-indicator-error {
-  @apply bg-red-500 animate-blink;
+  @apply bg-red-400;
+  box-shadow: 0 0 8px rgba(248, 113, 113, 0.6);
+  animation: blink 1s step-end infinite;
 }
 
-/* Scrollbar styling */
+.status-indicator-warning {
+  @apply bg-amber-400;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+}
+
+/* ========================================
+   Badge/Tag Styling
+   ======================================== */
+
+.badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium;
+}
+
+.badge-success {
+  @apply badge bg-emerald-500/15 text-emerald-400 border border-emerald-500/30;
+}
+
+.badge-warning {
+  @apply badge bg-amber-500/15 text-amber-400 border border-amber-500/30;
+}
+
+.badge-error {
+  @apply badge bg-red-500/15 text-red-400 border border-red-500/30;
+}
+
+.badge-info {
+  @apply badge bg-blue-500/15 text-blue-400 border border-blue-500/30;
+}
+
+.badge-neutral {
+  @apply badge bg-slate-500/15 text-slate-400 border border-slate-500/30;
+}
+
+/* ========================================
+   Progress Bar Styling
+   ======================================== */
+
+.progress-bar {
+  @apply h-2 bg-slate-800 rounded-full overflow-hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.progress-bar-fill {
+  @apply h-full rounded-full transition-all duration-300;
+  background: linear-gradient(90deg, #14b8a6 0%, #4fd1c5 100%);
+  box-shadow: 0 0 10px rgba(79, 209, 197, 0.4);
+}
+
+/* ========================================
+   Scrollbar Styling
+   ======================================== */
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-panel-bg;
+  @apply bg-transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-panel-border rounded-full;
+  @apply bg-slate-600/50 rounded-full;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-gray-500;
+  @apply bg-slate-500/50;
 }
 
+/* ========================================
+   Animations
+   ======================================== */
 
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(79, 209, 197, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(79, 209, 197, 0.5);
+  }
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* ========================================
+   Utility Classes
+   ======================================== */
+
+.text-gradient {
+  @apply bg-clip-text text-transparent;
+  background-image: linear-gradient(135deg, #4fd1c5 0%, #3b82f6 100%);
+}
+
+.border-glow {
+  position: relative;
+}
+
+.border-glow::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(79, 209, 197, 0.3), rgba(59, 130, 246, 0.3));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Focus visible outline for accessibility */
+.focus-ring {
+  @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg;
+}

@@ -18,6 +18,7 @@ export interface SensorData {
   pressure_mA?: number;
   pressure_voltage?: number;
   gross_weight_kg: number;
+  total_force_kg?: number;
   load_cell_1_kg: number;
   load_cell_2_kg: number;
   load_cell_3_kg: number;
