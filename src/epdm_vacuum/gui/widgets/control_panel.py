@@ -41,6 +41,7 @@ class ControlPanel(QWidget):
     valve_control_requested = pyqtSignal(str, bool)  # (valve_name, relay_state) - True = energize (NO valve CLOSES), False = de-energize (NO valve OPENS)
     tare_requested = pyqtSignal()
     save_data_requested = pyqtSignal()
+    weigh_assembly_requested = pyqtSignal()  # Request to open gasket weighing dialog
     
     def __init__(self):
         """Initialize the control panel."""
@@ -216,6 +217,29 @@ class ControlPanel(QWidget):
         group = QGroupBox("Utilities")
         layout = QVBoxLayout()
         
+        # Weigh Assembly button - prominent placement
+        self.weigh_btn = QPushButton("⚖️ Weigh Assembly")
+        self.weigh_btn.setMinimumHeight(45)
+        self.weigh_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 11pt;
+                font-weight: bold;
+                background-color: #27ae60;
+                color: white;
+                border: none;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #2ecc71;
+            }
+            QPushButton:pressed {
+                background-color: #1e8449;
+            }
+        """)
+        self.weigh_btn.setToolTip("Weigh gasket + frame assembly before testing")
+        self.weigh_btn.clicked.connect(self.on_weigh_assembly)
+        layout.addWidget(self.weigh_btn)
+        
         # Tare button
         self.tare_btn = QPushButton("Tare Load Cells")
         self.tare_btn.setMinimumHeight(40)
@@ -320,6 +344,11 @@ class ControlPanel(QWidget):
         # Clear pending flag after signal handling completes
         self._pending_valve_actions.discard(valve_name)
         logger.info(f"[ControlPanel] Valve action complete for {valve_name}")
+    
+    def on_weigh_assembly(self) -> None:
+        """Handle weigh assembly button click."""
+        logger.info("Weigh assembly requested")
+        self.weigh_assembly_requested.emit()
     
     def on_tare(self) -> None:
         """Handle tare button click."""

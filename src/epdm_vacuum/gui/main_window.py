@@ -178,6 +178,7 @@ class MainWindow(QMainWindow):
         self.control_panel.valve_control_requested.connect(self.on_valve_control)
         self.control_panel.tare_requested.connect(self.on_tare)
         self.control_panel.save_data_requested.connect(self.on_save_data)
+        self.control_panel.weigh_assembly_requested.connect(self.on_weigh_assembly)
         
         # Register control panel as listener for relay state changes
         self._register_relay_state_listener()
@@ -358,6 +359,11 @@ class MainWindow(QMainWindow):
         
         test_menu.addSeparator()
         
+        weigh_action = QAction("⚖️ &Weigh Assembly", self)
+        weigh_action.setShortcut("F7")
+        weigh_action.triggered.connect(self.on_weigh_assembly)
+        test_menu.addAction(weigh_action)
+        
         tare_action = QAction("&Tare Load Cells", self)
         tare_action.triggered.connect(self.on_tare)
         test_menu.addAction(tare_action)
@@ -465,6 +471,7 @@ class MainWindow(QMainWindow):
         <table>
             <tr><td><b>F5</b></td><td>Start Test</td></tr>
             <tr><td><b>F6</b></td><td>Stop Test</td></tr>
+            <tr><td><b>F7</b></td><td>Weigh Assembly</td></tr>
         </table>
         
         <h3>File Operations</h3>
@@ -658,7 +665,16 @@ class MainWindow(QMainWindow):
             return
         
         # Step 1: Gasket Assembly Weighing (optional but recommended)
-        weighing_result = self._show_gasket_weighing_dialog()
+        # Check if we have a recent weighing result from standalone weighing
+        weighing_result = getattr(self, '_last_weighing_result', None)
+        
+        if weighing_result:
+            # Use the stored result and clear it
+            self._last_weighing_result = None
+            logger.info(f"Using previously captured weight: {weighing_result.weight_kg:.3f} kg")
+        else:
+            # Show weighing dialog
+            weighing_result = self._show_gasket_weighing_dialog()
         # weighing_result is None if user skipped, or WeighingResult if captured
         
         # Show metadata dialog to get test information and save location
@@ -1006,6 +1022,39 @@ class MainWindow(QMainWindow):
             logger.info("Registered control panel as relay state listener")
         except Exception as e:
             logger.warning(f"Could not register relay state listener: {e}")
+    
+    def on_weigh_assembly(self) -> None:
+        """Handle weigh assembly request - opens the gasket weighing dialog standalone."""
+        logger.info("Opening gasket weighing dialog...")
+        self.statusBar().showMessage("Opening assembly weighing...")
+        
+        weighing_result = self._show_gasket_weighing_dialog()
+        
+        if weighing_result:
+            # Store the result for later use when starting a test
+            self._last_weighing_result = weighing_result
+            
+            self.statusBar().showMessage(
+                f"Assembly weight captured: {weighing_result.weight_kg:.3f} kg", 
+                5000
+            )
+            
+            # Show confirmation with option to start test
+            reply = QMessageBox.question(
+                self,
+                "Weight Captured",
+                f"Gasket assembly weight: {weighing_result.weight_kg:.3f} kg\n\n"
+                f"Assembly ID: {weighing_result.assembly_id or 'Not specified'}\n\n"
+                "Would you like to start a test now?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                # Start test flow - the weighing result will be used
+                self.on_start_test()
+        else:
+            self.statusBar().showMessage("Weighing cancelled", 3000)
     
     def on_tare(self) -> None:
         """Handle tare request."""
