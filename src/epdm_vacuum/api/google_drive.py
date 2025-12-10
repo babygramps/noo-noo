@@ -90,9 +90,10 @@ class GoogleDriveUploader:
                     return None
                 
                 # Load credentials
+                # Use full drive scope to allow uploading to shared folders
                 credentials = service_account.Credentials.from_service_account_file(
                     str(self.credentials_file),
-                    scopes=['https://www.googleapis.com/auth/drive.file']
+                    scopes=['https://www.googleapis.com/auth/drive']
                 )
                 
                 # Build service
