@@ -55,6 +55,11 @@ docs/
 # .env
 # *_local.yaml
 
+# Credentials (NEVER commit these!)
+credentials/*.json
+credentials/service_account.json
+!credentials/.gitkeep
+
 # Testing
 .pytest_cache/
 .coverage

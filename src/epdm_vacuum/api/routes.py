@@ -688,6 +688,93 @@ async def delete_test_data(filename: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# === Google Drive Endpoints ===
+
+@router.get("/api/drive/status")
+async def get_drive_status():
+    """Get Google Drive uploader status."""
+    try:
+        hw = get_hardware_manager()
+        status = hw.get_drive_status()
+        
+        return APIResponse(
+            success=True,
+            message="Google Drive status retrieved",
+            data=status
+        )
+    except Exception as e:
+        logger.error(f"Error getting Drive status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/drive/pending")
+async def get_pending_uploads():
+    """Get list of pending Google Drive uploads."""
+    try:
+        hw = get_hardware_manager()
+        pending = hw.get_pending_uploads()
+        
+        return APIResponse(
+            success=True,
+            message=f"Found {len(pending)} pending uploads",
+            data={"pending": pending}
+        )
+    except Exception as e:
+        logger.error(f"Error getting pending uploads: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/drive/retry")
+async def force_drive_retry():
+    """Force immediate retry of all pending uploads."""
+    try:
+        hw = get_hardware_manager()
+        success, message = hw.force_drive_retry()
+        
+        return APIResponse(
+            success=success,
+            message=message
+        )
+    except Exception as e:
+        logger.error(f"Error forcing Drive retry: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/drive/upload/{filename}")
+async def manual_drive_upload(filename: str):
+    """
+    Manually upload a file from the data directory to Google Drive.
+    
+    Args:
+        filename: Name of file to upload (in data directory)
+    """
+    try:
+        # Sanitize filename
+        safe_filename = Path(filename).name
+        if safe_filename != filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
+        hw = get_hardware_manager()
+        success, message = hw.manual_drive_upload(safe_filename)
+        
+        if success:
+            await event_broadcaster.broadcast({
+                "type": "upload_complete",
+                "data": {"filename": safe_filename, "message": message}
+            })
+        
+        return APIResponse(
+            success=success,
+            message=message,
+            data={"filename": safe_filename}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading to Drive: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # === WebSocket Endpoint ===
 
 @router.websocket("/api/ws")

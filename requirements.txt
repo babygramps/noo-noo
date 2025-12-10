@@ -30,3 +30,7 @@ uvicorn[standard]>=0.24.0
 websockets>=12.0
 python-multipart>=0.0.6
 
+# Google Drive Integration
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+

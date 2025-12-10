@@ -245,6 +245,16 @@ api:
   debug: false  # Flask debug mode
   cors_enabled: true  # Enable CORS for browser access
 
+# Google Drive Auto-Upload
+# Automatically uploads test data (CSV + JSON) to Google Drive after each test
+google_drive:
+  enabled: true
+  folder_id: "1nQkVUHntHwN4po42FC1FFOrtWeRWyWCg"  # Target folder ID from URL
+  credentials_file: "credentials/service_account.json"  # Service account JSON key
+  retry_interval_seconds: 60  # Time between retry attempts for failed uploads
+  max_retries: 10  # Maximum retry attempts before giving up
+  data_dir: "data"  # Directory where test data is stored
+
 # GUI Configuration
 gui:
   window_width: 1280

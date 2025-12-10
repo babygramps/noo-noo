@@ -45,12 +45,14 @@ class HardwareManager:
         self.test_controller = None
         self.data_logger = None
         self.sequence_manager = None
+        self.google_drive_uploader = None
         
         # State tracking
         self._connected = False
         self._test_running = False
         self._current_sequence = None
         self._test_thread: Optional[threading.Thread] = None
+        self._current_csv_path: Optional[str] = None  # Track CSV path for upload
         
         # Config limits for sequence validation (populated during initialize)
         self._config_limits: Optional[Dict[str, Any]] = None
@@ -144,6 +146,9 @@ class HardwareManager:
             self.data_logger = DataLogger(output_dir="data")
             logger.info("Data logger initialized")
             
+            # Initialize Google Drive uploader
+            self._init_google_drive(settings)
+            
             self._connected = True
             
             # Start sensor reading thread
@@ -156,12 +161,40 @@ class HardwareManager:
             logger.error(f"Hardware initialization failed: {e}", exc_info=True)
             return False
     
+    def _init_google_drive(self, settings) -> None:
+        """Initialize Google Drive uploader from settings."""
+        try:
+            from .google_drive import create_uploader_from_config
+            
+            # Get full config as dict
+            google_drive_config = settings.get("google_drive", default={})
+            
+            if not google_drive_config.get("enabled", False):
+                logger.info("Google Drive upload disabled in config")
+                return
+            
+            self.google_drive_uploader = create_uploader_from_config({"google_drive": google_drive_config})
+            
+            if self.google_drive_uploader:
+                # Start the retry loop for failed uploads
+                self.google_drive_uploader.start_retry_loop()
+                logger.info("Google Drive uploader initialized and retry loop started")
+            else:
+                logger.warning("Google Drive uploader not configured properly")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize Google Drive uploader: {e}", exc_info=True)
+    
     def shutdown(self) -> None:
         """Shutdown all hardware interfaces gracefully."""
         logger.info("Shutting down hardware manager...")
         
         # Stop sensor thread
         self._stop_sensor_thread()
+        
+        # Stop Google Drive uploader retry loop
+        if self.google_drive_uploader:
+            self.google_drive_uploader.stop_retry_loop()
         
         # Stop any running test
         if self._test_running:
@@ -292,7 +325,7 @@ class HardwareManager:
     
     def get_status(self) -> Dict[str, Any]:
         """Get overall system status."""
-        return {
+        status = {
             "connected": self._connected,
             "widgetlords_connected": (
                 self.widgetlords_interface is not None and 
@@ -304,7 +337,15 @@ class HardwareManager:
             ),
             "test_running": self._test_running,
             "current_sequence": self._current_sequence.name if self._current_sequence else None,
+            "google_drive_enabled": self.google_drive_uploader is not None,
         }
+        
+        # Add pending uploads count if Drive is enabled
+        if self.google_drive_uploader:
+            pending = self.google_drive_uploader.get_pending_uploads()
+            status["google_drive_pending_uploads"] = len(pending)
+        
+        return status
     
     # === Hardware Control Methods ===
     
@@ -486,6 +527,7 @@ class HardwareManager:
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         csv_path = f"data/test_{timestamp}.csv"
+        self._current_csv_path = csv_path  # Store for Google Drive upload
         
         # Create test controller
         from ..control.test_controller import TestController
@@ -518,14 +560,21 @@ class HardwareManager:
     
     def _run_test(self) -> None:
         """Background thread for running test."""
+        csv_path = self._current_csv_path  # Capture before it's cleared
         try:
             success = self.test_controller.run_test()
             logger.info(f"Test completed: {'success' if success else 'failed'}")
+            
+            # Upload to Google Drive if enabled
+            if csv_path and self.google_drive_uploader:
+                self._upload_test_data(csv_path)
+                
         except Exception as e:
             logger.error(f"Test execution error: {e}", exc_info=True)
         finally:
             self._test_running = False
             self._current_sequence = None
+            self._current_csv_path = None
             # Notify completion callbacks
             for callback in self._completion_callbacks:
                 try:
@@ -627,6 +676,68 @@ class HardwareManager:
     def _on_stage_complete(self, stage_index: int, reason: str) -> None:
         """Handle stage completion from test controller."""
         logger.info(f"Stage {stage_index} completed: {reason}")
+    
+    # === Google Drive Upload Methods ===
+    
+    def _upload_test_data(self, csv_path: str) -> None:
+        """Upload test data to Google Drive (called after test completion)."""
+        if not self.google_drive_uploader:
+            return
+        
+        try:
+            logger.info(f"Uploading test data to Google Drive: {csv_path}")
+            success, message = self.google_drive_uploader.upload_test_data(csv_path)
+            if success:
+                logger.info(f"Google Drive upload successful: {message}")
+            else:
+                logger.warning(f"Google Drive upload queued for retry: {message}")
+        except Exception as e:
+            logger.error(f"Google Drive upload error: {e}", exc_info=True)
+    
+    def get_drive_status(self) -> Dict[str, Any]:
+        """Get Google Drive uploader status."""
+        if not self.google_drive_uploader:
+            return {
+                "enabled": False,
+                "message": "Google Drive upload not configured"
+            }
+        
+        return self.google_drive_uploader.get_status()
+    
+    def get_pending_uploads(self) -> List[Dict[str, Any]]:
+        """Get list of pending Google Drive uploads."""
+        if not self.google_drive_uploader:
+            return []
+        
+        return self.google_drive_uploader.get_pending_uploads()
+    
+    def force_drive_retry(self) -> tuple[bool, str]:
+        """Force immediate retry of pending Google Drive uploads."""
+        if not self.google_drive_uploader:
+            return False, "Google Drive upload not configured"
+        
+        return self.google_drive_uploader.force_retry()
+    
+    def manual_drive_upload(self, filename: str) -> tuple[bool, str]:
+        """Manually upload a file to Google Drive."""
+        if not self.google_drive_uploader:
+            return False, "Google Drive upload not configured"
+        
+        return self.google_drive_uploader.manual_upload(filename)
+    
+    def set_drive_callbacks(
+        self,
+        on_success: Optional[Callable[[str, str], None]] = None,
+        on_failure: Optional[Callable[[str, str, bool], None]] = None
+    ) -> None:
+        """Set callbacks for Google Drive upload events."""
+        if not self.google_drive_uploader:
+            return
+        
+        if on_success:
+            self.google_drive_uploader.add_success_callback(on_success)
+        if on_failure:
+            self.google_drive_uploader.add_failure_callback(on_failure)
 
 
 # Global instance accessor

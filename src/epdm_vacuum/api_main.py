@@ -102,6 +102,26 @@ def setup_event_callbacks(hardware_manager, loop: asyncio.AbstractEventLoop):
     hardware_manager.add_progress_callback(progress_callback)
     hardware_manager.add_completion_callback(completion_callback)
     
+    # Set up Google Drive upload callbacks
+    def upload_success_callback(filename: str, drive_url: str):
+        asyncio.run_coroutine_threadsafe(
+            event_broadcaster.broadcast_upload_complete(filename, drive_url),
+            loop
+        )
+        logger.info(f"Google Drive upload broadcast: {filename} -> {drive_url}")
+    
+    def upload_failure_callback(filename: str, error: str, will_retry: bool):
+        asyncio.run_coroutine_threadsafe(
+            event_broadcaster.broadcast_upload_failed(filename, error, will_retry),
+            loop
+        )
+        logger.warning(f"Google Drive upload failed broadcast: {filename} - {error} (retry={will_retry})")
+    
+    hardware_manager.set_drive_callbacks(
+        on_success=upload_success_callback,
+        on_failure=upload_failure_callback
+    )
+    
     logger.info("Event callbacks configured for WebSocket broadcasting")
 
 

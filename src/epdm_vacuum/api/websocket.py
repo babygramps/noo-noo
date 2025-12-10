@@ -234,6 +234,35 @@ class TestEventBroadcaster:
             "message": error,
             "timestamp": datetime.now().isoformat()
         })
+    
+    async def broadcast_upload_complete(self, filename: str, drive_url: str) -> None:
+        """Broadcast successful Google Drive upload."""
+        await self.manager.broadcast({
+            "type": "upload_complete",
+            "data": {
+                "filename": filename,
+                "drive_url": drive_url,
+            },
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    async def broadcast_upload_failed(self, filename: str, error: str, will_retry: bool) -> None:
+        """Broadcast failed Google Drive upload."""
+        await self.manager.broadcast({
+            "type": "upload_failed",
+            "data": {
+                "filename": filename,
+                "error": error,
+                "will_retry": will_retry,
+            },
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    async def broadcast(self, message: dict) -> None:
+        """Broadcast an arbitrary message."""
+        if "timestamp" not in message:
+            message["timestamp"] = datetime.now().isoformat()
+        await self.manager.broadcast(message)
 
 
 # Global instances
