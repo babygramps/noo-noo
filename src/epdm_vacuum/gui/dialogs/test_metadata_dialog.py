@@ -29,6 +29,9 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QDateEdit,
     QTimeEdit,
+    QCheckBox,
+    QScrollArea,
+    QSizePolicy,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QDate, QTime
 
@@ -61,7 +64,8 @@ class TestMetadataDialog(QDialog):
         """Initialize the user interface."""
         self.setWindowTitle("Test Metadata")
         self.setModal(True)
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(700)
         
         layout = QVBoxLayout(self)
         
@@ -70,6 +74,7 @@ class TestMetadataDialog(QDialog):
         self.create_material_section(layout)
         self.create_targets_section(layout)
         self.create_notes_section(layout)
+        self.create_test_description_section(layout)
         self.create_file_location_section(layout)
         
         # Add buttons
@@ -184,6 +189,154 @@ class TestMetadataDialog(QDialog):
         
         group.setLayout(layout)
         parent_layout.addWidget(group)
+    
+    def create_test_description_section(self, parent_layout: QVBoxLayout) -> None:
+        """Create test description section with checkbox and editable text."""
+        group = QGroupBox("Test Description for Data Analysis")
+        layout = QVBoxLayout()
+        
+        # Checkbox to include description
+        self.include_description_checkbox = QCheckBox("Include test description in metadata (helps LLM/AI analyze the data)")
+        self.include_description_checkbox.setChecked(True)
+        self.include_description_checkbox.stateChanged.connect(self._on_description_checkbox_changed)
+        layout.addWidget(self.include_description_checkbox)
+        
+        # Help text
+        help_label = QLabel("This description explains how the test works and how to interpret the data. "
+                           "It will be saved in the JSON metadata file alongside the CSV data.")
+        help_label.setStyleSheet("color: #666; font-size: 9pt; margin-bottom: 8px;")
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
+        
+        # Editable test description
+        self.test_description_edit = QTextEdit()
+        self.test_description_edit.setPlaceholderText("Test description will appear here...")
+        self.test_description_edit.setMinimumHeight(150)
+        self.test_description_edit.setMaximumHeight(200)
+        self.test_description_edit.setStyleSheet("""
+            QTextEdit {
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 9pt;
+                background-color: #f8f9fa;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+        """)
+        layout.addWidget(self.test_description_edit)
+        
+        # Populate with default description
+        self.test_description_edit.setPlainText(self._get_default_test_description())
+        
+        # Reset button
+        reset_btn = QPushButton("Reset to Default")
+        reset_btn.setMaximumWidth(120)
+        reset_btn.clicked.connect(self._reset_test_description)
+        layout.addWidget(reset_btn)
+        
+        group.setLayout(layout)
+        parent_layout.addWidget(group)
+    
+    def _on_description_checkbox_changed(self, state: int) -> None:
+        """Handle checkbox state change."""
+        enabled = state == Qt.Checked
+        self.test_description_edit.setEnabled(enabled)
+        if enabled:
+            self.test_description_edit.setStyleSheet("""
+                QTextEdit {
+                    font-family: 'Consolas', 'Monaco', monospace;
+                    font-size: 9pt;
+                    background-color: #f8f9fa;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                }
+            """)
+        else:
+            self.test_description_edit.setStyleSheet("""
+                QTextEdit {
+                    font-family: 'Consolas', 'Monaco', monospace;
+                    font-size: 9pt;
+                    background-color: #e9ecef;
+                    color: #6c757d;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                }
+            """)
+    
+    def _reset_test_description(self) -> None:
+        """Reset test description to default."""
+        self.test_description_edit.setPlainText(self._get_default_test_description())
+    
+    def _get_default_test_description(self) -> str:
+        """Get the default test description text."""
+        return """## EPDM Gasket Vacuum Seal Test - Operation Description
+
+### Purpose
+This test evaluates the vacuum sealing performance of EPDM gaskets by:
+1. Drawing vacuum in a sealed test chamber containing the gasket
+2. Monitoring vacuum level and force over time
+3. Detecting any vacuum loss (leak) through the gasket seal
+
+### Test Hardware Operation
+
+**Vacuum System:**
+- A vacuum pump creates negative pressure (vacuum) in the test chamber
+- A vacuum isolation valve (vacuum_valve) connects/disconnects the pump from the chamber
+- A vent valve (vent_valve) allows the chamber to return to atmospheric pressure
+
+**Measurement System:**
+- Pressure sensor measures chamber pressure (negative PSIG = vacuum)
+- Load cells measure compression force on the gasket (in kg)
+
+### Typical Test Sequence Flow
+
+**Stage 1 - Evacuation:**
+- Vent valve CLOSES (seals chamber from atmosphere)
+- Vacuum valve OPENS (connects pump to chamber)
+- Pump runs in CONTINUOUS mode
+- Vacuum increases (pressure becomes more negative)
+- Stage completes when target vacuum is reached OR time limit expires
+
+**Stage 2 - Hold/Leak Check:**
+- Vacuum valve CLOSES (isolates chamber from pump)
+- Pump turns OFF
+- Chamber remains sealed
+- Any vacuum loss indicates a leak through the gasket
+- Monitor vacuum_bar - it should remain stable if seal is good
+- Leak rate = change in vacuum over time
+
+**Stage 3 - Vent:**
+- Vent valve OPENS (allows air into chamber)
+- Chamber returns to atmospheric pressure (vacuum_bar → 0)
+- Prepares for next cycle or test completion
+
+### How to Analyze the Data
+
+**For Seal Quality Assessment:**
+1. Find the "Hold" stage data (pump_mode = "off", both valves closed)
+2. Calculate vacuum change: initial_vacuum - final_vacuum
+3. Calculate leak rate: vacuum_change / hold_time (mbar/min or bar/min)
+4. Lower leak rate = better seal
+
+**For Evacuation Performance:**
+1. Find the "Evacuate" stage data (pump_mode = "continuous")
+2. Check time to reach target vacuum (evacuation speed)
+3. Monitor force during evacuation (gasket compression)
+
+**Key Indicators:**
+- vacuum_bar increasing during evacuation = system working correctly
+- vacuum_bar stable during hold = good seal
+- vacuum_bar decreasing during hold = leak detected
+- Higher force values = more gasket compression
+
+**Multi-Cycle Tests:**
+- Tests may repeat the evacuate-hold-vent sequence multiple times
+- Compare leak rates across cycles to assess seal degradation
+- First cycle may show different behavior as gasket "seats"
+
+**Data Quality Notes:**
+- First few seconds after valve changes may show transient behavior
+- Ignore data points during stage transitions
+- Focus on steady-state portions of each stage for analysis"""
     
     def create_file_location_section(self, parent_layout: QVBoxLayout) -> None:
         """Create file save location section."""
@@ -361,6 +514,15 @@ class TestMetadataDialog(QDialog):
             "notes": self.notes_edit.toPlainText().strip(),
         }
         
+        # Include test description if checkbox is checked
+        if self.include_description_checkbox.isChecked():
+            description = self.test_description_edit.toPlainText().strip()
+            if description:
+                metadata["user_test_description"] = description
+                metadata["include_test_description"] = True
+        else:
+            metadata["include_test_description"] = False
+        
         # Remove empty optional fields
         metadata = {k: v for k, v in metadata.items() if v not in (None, "", [])}
         
@@ -432,6 +594,13 @@ class TestMetadataDialog(QDialog):
         # Notes
         if "notes" in metadata:
             self.notes_edit.setPlainText(metadata["notes"])
+        
+        # Test description
+        if "include_test_description" in metadata:
+            self.include_description_checkbox.setChecked(metadata["include_test_description"])
+        
+        if "user_test_description" in metadata:
+            self.test_description_edit.setPlainText(metadata["user_test_description"])
         
         # Update test ID based on populated values
         self.update_test_id()

@@ -1264,9 +1264,22 @@ class TestController:
             }
         
         # Add comprehensive test description for LLM analysis
-        metadata["test_description"] = self._generate_test_description()
+        # Check if user wants to include description (from metadata dialog)
+        include_description = self.test_metadata.get("include_test_description", True)
         
-        # Add data interpretation guide
+        if include_description:
+            # Use user-provided description if available, otherwise use default
+            user_description = self.test_metadata.get("user_test_description", "")
+            if user_description:
+                metadata["test_description"] = user_description
+                logger.info("Using user-provided test description")
+            else:
+                metadata["test_description"] = self._generate_test_description()
+                logger.info("Using default test description")
+        else:
+            logger.info("Test description excluded by user preference")
+        
+        # Add data interpretation guide (always included for data parsing)
         metadata["data_interpretation_guide"] = {
             "csv_columns": {
                 "timestamp": "Unix timestamp (seconds since epoch)",
