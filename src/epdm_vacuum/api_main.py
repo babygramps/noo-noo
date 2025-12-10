@@ -51,14 +51,14 @@ def setup_logging(settings):
     logger.info(f"Logging level set to {log_level}")
 
 
-def setup_event_callbacks(hardware_manager):
+def setup_event_callbacks(hardware_manager, loop: asyncio.AbstractEventLoop):
     """
     Set up callbacks to bridge hardware events to WebSocket broadcasts.
     
     Args:
         hardware_manager: The HardwareManager instance
+        loop: The running asyncio event loop (must be passed from async context)
     """
-    loop = asyncio.get_event_loop()
     
     def status_callback(status: str):
         asyncio.run_coroutine_threadsafe(
@@ -130,8 +130,10 @@ async def lifespan(app: FastAPI):
     # Set up sensor broadcaster
     sensor_broadcaster.set_hardware_manager(hw)
     
-    # Set up event callbacks
-    setup_event_callbacks(hw)
+    # Set up event callbacks - capture running loop for thread-safe coroutine scheduling
+    # Note: Must use get_running_loop() inside async context (get_event_loop() is deprecated)
+    loop = asyncio.get_running_loop()
+    setup_event_callbacks(hw, loop)
     
     # Start sensor broadcasting
     await sensor_broadcaster.start()

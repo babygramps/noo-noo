@@ -52,6 +52,9 @@ class HardwareManager:
         self._current_sequence = None
         self._test_thread: Optional[threading.Thread] = None
         
+        # Config limits for sequence validation (populated during initialize)
+        self._config_limits: Optional[Dict[str, Any]] = None
+        
         # Sensor data cache (updated by background thread)
         self._sensor_data: Dict[str, Any] = {}
         self._sensor_lock = threading.Lock()
@@ -113,14 +116,28 @@ class HardwareManager:
                 except Exception as e:
                     logger.error(f"Failed to initialize Modbus interface: {e}")
             
-            # Initialize sequence manager
-            config_limits = {
+            # Initialize sequence manager with config limits
+            # Build io_device_roles from io_devices config section
+            io_device_roles = {}
+            io_devices_config = settings.get("io_devices", default={})
+            for device in io_devices_config.get("digital_outputs", []):
+                device_name = device.get("name")
+                device_role = device.get("device_role")
+                if device_name and device_role:
+                    io_device_roles[device_name] = device_role
+            
+            self._config_limits = {
                 "max_vacuum_bar": settings.get("safety", "max_vacuum_bar", default=1.0),
                 "max_force_kg": settings.get("safety", "max_force_kg", default=800.0),
                 "max_single_cell_kg": settings.get("safety", "max_single_cell_kg", default=250.0),
+                "io_device_roles": io_device_roles,
             }
+            logger.info(f"Config limits loaded: max_vacuum={self._config_limits['max_vacuum_bar']} bar, "
+                       f"max_force={self._config_limits['max_force_kg']} kg, "
+                       f"device_roles={list(io_device_roles.keys())}")
+            
             sequences_dir = settings.get("sequences", "directory", default="sequences")
-            self.sequence_manager = SequenceManager(sequences_dir, config_limits)
+            self.sequence_manager = SequenceManager(sequences_dir, self._config_limits)
             logger.info("Sequence manager initialized")
             
             # Initialize data logger
@@ -438,10 +455,14 @@ class HardwareManager:
         if not sequence:
             return False, f"Sequence '{sequence_name}' not found"
         
-        # Validate sequence
-        is_valid, errors, warnings = sequence.validate()
+        # Validate sequence with config limits for safety checks and device role detection
+        is_valid, errors, warnings = sequence.validate(self._config_limits)
         if not is_valid:
             return False, f"Invalid sequence: {', '.join(errors)}"
+        
+        # Log warnings if any (but don't block test start)
+        for warning in warnings:
+            logger.warning(f"Sequence validation warning: {warning}")
         
         self._current_sequence = sequence
         
