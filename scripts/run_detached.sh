@@ -47,7 +47,7 @@ start_api() {
     
     log_info "Starting API server in tmux session 'epdm-api'..."
     tmux new-session -d -s epdm-api -c "$PROJECT_DIR" \
-        "source venv/bin/activate && python -m epdm_vacuum.api_main; read -p 'Press Enter to close...'"
+        "source venv/bin/activate && PYTHONPATH=$PROJECT_DIR/src python -m epdm_vacuum.api_main; read -p 'Press Enter to close...'"
     log_info "API started. View with: tmux attach -t epdm-api"
 }
 
