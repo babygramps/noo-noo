@@ -212,10 +212,12 @@ class GoogleDriveUploader:
             )
             
             # Execute upload
+            # supportsAllDrives=True tells Google to use the shared folder owner's quota
             file = service.files().create(
                 body=file_metadata,
                 media_body=media,
-                fields='id, webViewLink'
+                fields='id, webViewLink',
+                supportsAllDrives=True
             ).execute()
             
             file_id = file.get('id')
