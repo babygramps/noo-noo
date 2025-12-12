@@ -461,18 +461,20 @@ class HardwareManager:
             return []
         
         sequences = []
-        for name in self.sequence_manager.list_sequences():
+        for filename in self.sequence_manager.list_sequences():
             try:
-                seq = self.sequence_manager.load_sequence(name)
+                seq = self.sequence_manager.load_sequence(filename)
                 if seq:
+                    # Use filename as the identifier (for loading), but show display name
                     sequences.append({
-                        "name": seq.name,
+                        "name": filename,  # Use filename for API lookups
+                        "display_name": seq.name,  # Human-readable name from YAML
                         "description": seq.description,
                         "stages": len(seq.stages),
                         "cycles": seq.cycles,
                     })
             except Exception as e:
-                logger.error(f"Error loading sequence {name}: {e}")
+                logger.error(f"Error loading sequence {filename}: {e}")
         
         return sequences
     

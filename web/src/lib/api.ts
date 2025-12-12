@@ -45,7 +45,8 @@ export interface TestStatus {
 }
 
 export interface SequenceSummary {
-  name: string;
+  name: string;  // Filename used for API lookups
+  display_name?: string;  // Human-readable name from YAML
   description: string;
   stages: number;
   cycles: number;

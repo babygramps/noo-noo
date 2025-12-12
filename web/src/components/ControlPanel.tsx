@@ -176,7 +176,7 @@ export function ControlPanel({
           <option value="">Select a sequence...</option>
           {sequences.map((seq) => (
             <option key={seq.name} value={seq.name}>
-              {seq.name} ({seq.stages} stages, {seq.cycles}×)
+              {seq.display_name || seq.name} ({seq.stages} stages, {seq.cycles}×)
             </option>
           ))}
         </select>
