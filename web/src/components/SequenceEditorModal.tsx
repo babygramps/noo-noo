@@ -134,7 +134,11 @@ export function SequenceEditorModal({
   // Stage management
   const addStage = useCallback(() => {
     setStages((prev) => [...prev, createEmptyStage()]);
-    setExpandedStages((prev) => new Set([...prev, stages.length]));
+    setExpandedStages((prev) => {
+      const arr = Array.from(prev);
+      arr.push(stages.length);
+      return new Set(arr);
+    });
   }, [stages.length]);
 
   const removeStage = useCallback((index: number) => {
@@ -143,7 +147,8 @@ export function SequenceEditorModal({
       const next = new Set(prev);
       next.delete(index);
       // Shift indices
-      return new Set([...next].map((i) => (i > index ? i - 1 : i)));
+      const shifted = Array.from(next).map((i) => (i > index ? i - 1 : i));
+      return new Set(shifted);
     });
   }, []);
 
@@ -151,7 +156,11 @@ export function SequenceEditorModal({
     const stageCopy = JSON.parse(JSON.stringify(stages[index]));
     stageCopy.name = `${stageCopy.name} (copy)`;
     setStages((prev) => [...prev.slice(0, index + 1), stageCopy, ...prev.slice(index + 1)]);
-    setExpandedStages((prev) => new Set([...prev, index + 1]));
+    setExpandedStages((prev) => {
+      const arr = Array.from(prev);
+      arr.push(index + 1);
+      return new Set(arr);
+    });
   }, [stages]);
 
   const moveStage = useCallback((index: number, direction: 'up' | 'down') => {
@@ -165,14 +174,12 @@ export function SequenceEditorModal({
     });
 
     setExpandedStages((prev) => {
-      const next = new Set(
-        [...prev].map((i) => {
-          if (i === index) return newIndex;
-          if (i === newIndex) return index;
-          return i;
-        })
-      );
-      return next;
+      const mapped = Array.from(prev).map((i) => {
+        if (i === index) return newIndex;
+        if (i === newIndex) return index;
+        return i;
+      });
+      return new Set(mapped);
     });
   }, [stages.length]);
 
@@ -319,7 +326,11 @@ export function SequenceEditorModal({
       ],
     };
     setStages((prev) => [...prev, stage]);
-    setExpandedStages((prev) => new Set([...prev, stages.length]));
+    setExpandedStages((prev) => {
+      const arr = Array.from(prev);
+      arr.push(stages.length);
+      return new Set(arr);
+    });
   }, [stages.length]);
 
   const addHoldStage = useCallback(() => {
@@ -353,7 +364,11 @@ export function SequenceEditorModal({
       ],
     };
     setStages((prev) => [...prev, stage]);
-    setExpandedStages((prev) => new Set([...prev, stages.length]));
+    setExpandedStages((prev) => {
+      const arr = Array.from(prev);
+      arr.push(stages.length);
+      return new Set(arr);
+    });
   }, [stages.length]);
 
   const addVentStage = useCallback(() => {
@@ -396,7 +411,11 @@ export function SequenceEditorModal({
       ],
     };
     setStages((prev) => [...prev, stage]);
-    setExpandedStages((prev) => new Set([...prev, stages.length]));
+    setExpandedStages((prev) => {
+      const arr = Array.from(prev);
+      arr.push(stages.length);
+      return new Set(arr);
+    });
   }, [stages.length]);
 
   if (!isOpen) return null;
