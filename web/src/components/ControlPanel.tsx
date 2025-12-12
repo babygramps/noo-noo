@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { clsx } from 'clsx';
-import { Play, Square, Power, Wind, RotateCcw, Settings2, Scale } from 'lucide-react';
+import { Play, Square, Power, Wind, RotateCcw, Settings2, Scale, Plus, Edit3 } from 'lucide-react';
 import * as api from '@/lib/api';
 import type { IOStates, SequenceSummary } from '@/lib/api';
 
@@ -16,6 +16,8 @@ interface ControlPanelProps {
   onTestStopped?: () => void;
   onTareComplete?: () => void;
   onWeighAssembly?: () => void;
+  onNewSequence?: () => void;
+  onEditSequence?: () => void;
 }
 
 export function ControlPanel({
@@ -28,6 +30,8 @@ export function ControlPanel({
   onTestStopped,
   onTareComplete,
   onWeighAssembly,
+  onNewSequence,
+  onEditSequence,
 }: ControlPanelProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -131,9 +135,35 @@ export function ControlPanel({
 
       {/* Sequence selector */}
       <div className="space-y-2">
-        <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-          Test Sequence
-        </label>
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+            Test Sequence
+          </label>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onNewSequence}
+              disabled={testRunning}
+              className={clsx(
+                'p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 transition-colors',
+                testRunning && 'opacity-50 cursor-not-allowed'
+              )}
+              title="Create new sequence"
+            >
+              <Plus size={14} />
+            </button>
+            <button
+              onClick={onEditSequence}
+              disabled={testRunning || !selectedSequence}
+              className={clsx(
+                'p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 transition-colors',
+                (testRunning || !selectedSequence) && 'opacity-50 cursor-not-allowed'
+              )}
+              title="Edit selected sequence"
+            >
+              <Edit3 size={14} />
+            </button>
+          </div>
+        </div>
         <select
           value={selectedSequence || ''}
           onChange={(e) => onSequenceSelect(e.target.value)}

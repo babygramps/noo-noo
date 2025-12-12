@@ -404,6 +404,34 @@ async def create_sequence(request: SequenceCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/api/sequences/{name}")
+async def delete_sequence(name: str):
+    """Delete a sequence by name."""
+    try:
+        hw = get_hardware_manager()
+        
+        if not hw.sequence_manager:
+            raise HTTPException(status_code=500, detail="Sequence manager not initialized")
+        
+        # Use the sequence manager's delete method
+        success = hw.sequence_manager.delete_sequence(name)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Sequence '{name}' not found")
+        
+        return APIResponse(
+            success=True,
+            message=f"Sequence '{name}' deleted",
+            data={"name": name}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting sequence: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # === Test Data Management ===
 
 def get_data_directory() -> Path:

@@ -9,6 +9,7 @@ import { StageProgress, StageList } from '@/components/StageProgress';
 import { TestMetadataModal, TestMetadata } from '@/components/TestMetadataModal';
 import { TestDataBrowser } from '@/components/TestDataBrowser';
 import { GasketWeighingModal, GasketWeighingResult } from '@/components/GasketWeighingModal';
+import { SequenceEditorModal } from '@/components/SequenceEditorModal';
 import * as api from '@/lib/api';
 import type { SequenceSummary, Sequence } from '@/lib/api';
 import { Activity, Gauge, Scale, Settings, HardDrive } from 'lucide-react';
@@ -43,6 +44,10 @@ export default function Dashboard() {
   // Gasket weighing state
   const [isWeighingModalOpen, setIsWeighingModalOpen] = useState(false);
   const [gasketWeighingResult, setGasketWeighingResult] = useState<GasketWeighingResult | null>(null);
+  
+  // Sequence editor state
+  const [isSequenceEditorOpen, setIsSequenceEditorOpen] = useState(false);
+  const [sequenceToEdit, setSequenceToEdit] = useState<Sequence | null>(null);
 
   // Fetch sequences on mount
   useEffect(() => {
@@ -159,6 +164,39 @@ export default function Dashboard() {
 
   const handleSequenceSelect = useCallback((name: string) => {
     setSelectedSequenceName(name || null);
+  }, []);
+  
+  // Sequence editor handlers
+  const handleNewSequence = useCallback(() => {
+    setSequenceToEdit(null);
+    setIsSequenceEditorOpen(true);
+  }, []);
+  
+  const handleEditSequence = useCallback(() => {
+    if (selectedSequence) {
+      setSequenceToEdit(selectedSequence);
+      setIsSequenceEditorOpen(true);
+    }
+  }, [selectedSequence]);
+  
+  const handleSaveSequence = useCallback(async (sequence: Sequence): Promise<boolean> => {
+    try {
+      console.log('[Dashboard] Saving sequence:', sequence.name);
+      const result = await api.saveSequence(sequence);
+      if (result.success) {
+        // Reload sequences list
+        const seqs = await api.listSequences();
+        setSequences(seqs);
+        // Select the new/updated sequence
+        setSelectedSequenceName(sequence.name);
+        return true;
+      }
+      console.error('[Dashboard] Failed to save sequence:', result.message);
+      return false;
+    } catch (error) {
+      console.error('[Dashboard] Error saving sequence:', error);
+      return false;
+    }
   }, []);
 
   // Get target vacuum from current stage
@@ -341,6 +379,8 @@ export default function Dashboard() {
               onTestStopped={handleTestStopped}
               onTareComplete={clearHistory}
               onWeighAssembly={handleWeighAssembly}
+              onNewSequence={handleNewSequence}
+              onEditSequence={handleEditSequence}
             />
             
             {/* Current Test Metadata Summary */}
@@ -418,6 +458,18 @@ export default function Dashboard() {
       <TestDataBrowser
         isOpen={isDataBrowserOpen}
         onClose={() => setIsDataBrowserOpen(false)}
+      />
+      
+      {/* Sequence Editor Modal */}
+      <SequenceEditorModal
+        isOpen={isSequenceEditorOpen}
+        onClose={() => {
+          setIsSequenceEditorOpen(false);
+          setSequenceToEdit(null);
+        }}
+        onSave={handleSaveSequence}
+        initialSequence={sequenceToEdit}
+        existingSequenceNames={sequences.map(s => s.name)}
       />
     </div>
   );

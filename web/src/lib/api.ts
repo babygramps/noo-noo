@@ -192,6 +192,12 @@ export async function saveSequence(sequence: Sequence): Promise<APIResponse> {
   });
 }
 
+export async function deleteSequence(name: string): Promise<APIResponse> {
+  return fetchAPI(`/api/sequences/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+}
+
 // Test Data Files
 export interface TestDataFile {
   filename: string;
