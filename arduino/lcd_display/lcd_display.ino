@@ -40,9 +40,9 @@
 #define MAX_MESSAGE_LENGTH 200  // Increased for longer jokes
 
 // Scroll Configuration
-#define SCROLL_DELAY_MS 400      // Time between scroll steps
-#define SCROLL_PAUSE_START 2000  // Pause at start before scrolling
-#define SCROLL_PAUSE_END 1500    // Pause at end before restarting
+#define SCROLL_DELAY_MS 200      // Time between scroll steps (faster = lower)
+#define SCROLL_PAUSE_START 1500  // Pause at start before scrolling
+#define SCROLL_PAUSE_END 1000    // Pause at end before next line/restart
 
 // Initialize LCD
 LiquidCrystal_I2C lcd(LCD_ADDRESS, LCD_COLS, LCD_ROWS);
