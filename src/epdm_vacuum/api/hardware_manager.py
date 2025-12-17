@@ -42,6 +42,7 @@ class HardwareManager:
         
         self.widgetlords_interface = None
         self.modbus_interface = None
+        self.lcd_interface = None
         self.test_controller = None
         self.data_logger = None
         self.sequence_manager = None
@@ -56,6 +57,10 @@ class HardwareManager:
         
         # Config limits for sequence validation (populated during initialize)
         self._config_limits: Optional[Dict[str, Any]] = None
+        
+        # LCD configuration
+        self._lcd_config: Dict[str, Any] = {}
+        self._lcd_last_update: float = 0.0
         
         # Sensor data cache (updated by background thread)
         self._sensor_data: Dict[str, Any] = {}
@@ -85,7 +90,7 @@ class HardwareManager:
         """
         try:
             from ..config.settings import get_settings
-            from ..daq import WidgetLordsInterface, ModbusInterface
+            from ..daq import WidgetLordsInterface, ModbusInterface, LCDInterface
             from ..control.sequence_manager import SequenceManager
             from ..logging.data_logger import DataLogger
             
@@ -117,6 +122,9 @@ class HardwareManager:
                     logger.info(f"Modbus interface initialized on {modbus_config.get('port')}")
                 except Exception as e:
                     logger.error(f"Failed to initialize Modbus interface: {e}")
+            
+            # Initialize LCD display interface
+            self._init_lcd(settings)
             
             # Initialize sequence manager with config limits
             # Build io_device_roles from io_devices config section
@@ -185,6 +193,40 @@ class HardwareManager:
         except Exception as e:
             logger.error(f"Failed to initialize Google Drive uploader: {e}", exc_info=True)
     
+    def _init_lcd(self, settings) -> None:
+        """Initialize LCD display interface from settings."""
+        try:
+            from ..daq.lcd_interface import LCDInterface
+            
+            # Get LCD config
+            lcd_config = settings.get("lcd", default={})
+            self._lcd_config = lcd_config
+            
+            if not lcd_config.get("enabled", False):
+                logger.info("[LCD] LCD display disabled in config")
+                return
+            
+            port = lcd_config.get("port")  # Can be None for auto-detect
+            baudrate = lcd_config.get("baudrate", 115200)
+            
+            self.lcd_interface = LCDInterface(
+                port=port,
+                baudrate=baudrate,
+                auto_connect=True,
+            )
+            
+            if self.lcd_interface.is_connected():
+                logger.info(f"[LCD] LCD display initialized on {self.lcd_interface.port}")
+                # Show ready message
+                self.lcd_interface.show_idle()
+            else:
+                logger.warning("[LCD] LCD display configured but failed to connect")
+                self.lcd_interface = None
+                
+        except Exception as e:
+            logger.error(f"[LCD] Failed to initialize LCD display: {e}", exc_info=True)
+            self.lcd_interface = None
+    
     def shutdown(self) -> None:
         """Shutdown all hardware interfaces gracefully."""
         logger.info("Shutting down hardware manager...")
@@ -215,6 +257,14 @@ class HardwareManager:
             except Exception as e:
                 logger.error(f"Error disconnecting Modbus: {e}")
         
+        # Disconnect LCD display
+        if self.lcd_interface:
+            try:
+                self.lcd_interface.display("System", "Shutting down...")
+                self.lcd_interface.disconnect()
+            except Exception as e:
+                logger.error(f"Error disconnecting LCD: {e}")
+        
         self._connected = False
         logger.info("Hardware manager shutdown complete")
     
@@ -239,12 +289,25 @@ class HardwareManager:
     def _sensor_loop(self) -> None:
         """Background loop for reading sensors at 10Hz."""
         sample_interval = 0.1  # 10Hz
+        lcd_update_interval = self._lcd_config.get("update_interval_ms", 500) / 1000.0
         
         while self._sensor_thread_running:
             try:
                 data = self._read_sensors()
                 with self._sensor_lock:
                     self._sensor_data = data
+                
+                # Update LCD with vacuum reading when idle
+                if (self.lcd_interface and 
+                    self._lcd_config.get("show_vacuum_when_idle", True) and
+                    not self._test_running):
+                    
+                    now = time.time()
+                    if now - self._lcd_last_update >= lcd_update_interval:
+                        vacuum_bar = data.get("vacuum_bar", 0.0)
+                        self.lcd_interface.show_vacuum(vacuum_bar, "Ready")
+                        self._lcd_last_update = now
+                        
             except Exception as e:
                 logger.error(f"Sensor read error: {e}")
             
@@ -335,10 +398,18 @@ class HardwareManager:
                 self.modbus_interface is not None and 
                 self.modbus_interface.is_connected()
             ),
+            "lcd_connected": (
+                self.lcd_interface is not None and
+                self.lcd_interface.is_connected()
+            ),
             "test_running": self._test_running,
             "current_sequence": self._current_sequence.name if self._current_sequence else None,
             "google_drive_enabled": self.google_drive_uploader is not None,
         }
+        
+        # Add LCD port info if connected
+        if self.lcd_interface and self.lcd_interface.is_connected():
+            status["lcd_port"] = self.lcd_interface.port
         
         # Add pending uploads count if Drive is enabled
         if self.google_drive_uploader:
@@ -419,6 +490,75 @@ class HardwareManager:
                 return False, "Tare failed"
         except Exception as e:
             logger.error(f"Error taring load cells: {e}")
+            return False, str(e)
+    
+    # === LCD Display Control Methods ===
+    
+    def lcd_display(self, line1: str, line2: str = "") -> tuple[bool, str]:
+        """
+        Display custom text on the LCD.
+        
+        Args:
+            line1: Text for first line (max 16 chars)
+            line2: Text for second line (max 16 chars)
+        
+        Returns:
+            tuple: (success, message)
+        """
+        if not self.lcd_interface or not self.lcd_interface.is_connected():
+            return False, "LCD not connected"
+        
+        try:
+            success = self.lcd_interface.display(line1, line2)
+            if success:
+                return True, "Display updated"
+            else:
+                return False, "Failed to update display"
+        except Exception as e:
+            logger.error(f"[LCD] Display error: {e}")
+            return False, str(e)
+    
+    def lcd_clear(self) -> tuple[bool, str]:
+        """
+        Clear the LCD display.
+        
+        Returns:
+            tuple: (success, message)
+        """
+        if not self.lcd_interface or not self.lcd_interface.is_connected():
+            return False, "LCD not connected"
+        
+        try:
+            success = self.lcd_interface.clear()
+            if success:
+                return True, "Display cleared"
+            else:
+                return False, "Failed to clear display"
+        except Exception as e:
+            logger.error(f"[LCD] Clear error: {e}")
+            return False, str(e)
+    
+    def lcd_backlight(self, on: bool) -> tuple[bool, str]:
+        """
+        Control the LCD backlight.
+        
+        Args:
+            on: True to turn on, False to turn off
+        
+        Returns:
+            tuple: (success, message)
+        """
+        if not self.lcd_interface or not self.lcd_interface.is_connected():
+            return False, "LCD not connected"
+        
+        try:
+            success = self.lcd_interface.set_backlight(on)
+            if success:
+                return True, f"Backlight {'ON' if on else 'OFF'}"
+            else:
+                return False, "Failed to set backlight"
+        except Exception as e:
+            logger.error(f"[LCD] Backlight error: {e}")
             return False, str(e)
     
     def get_io_states(self) -> Dict[str, bool]:
@@ -572,6 +712,13 @@ class HardwareManager:
         self._test_thread = threading.Thread(target=self._run_test, daemon=True)
         self._test_thread.start()
         
+        # Show test start on LCD
+        if self.lcd_interface:
+            try:
+                self.lcd_interface.display("Starting Test", sequence.name[:16])
+            except Exception as e:
+                logger.error(f"[LCD] Test start display error: {e}")
+        
         logger.info(f"Test started with sequence: {sequence_name}")
         return True, f"Test started: {sequence_name}"
     
@@ -582,12 +729,28 @@ class HardwareManager:
             success = self.test_controller.run_test()
             logger.info(f"Test completed: {'success' if success else 'failed'}")
             
+            # Show completion on LCD
+            if self.lcd_interface:
+                try:
+                    if success:
+                        self.lcd_interface.display("Test Complete", "Success!")
+                    else:
+                        self.lcd_interface.display("Test Stopped", "Manual stop")
+                except Exception as e:
+                    logger.error(f"[LCD] Completion display error: {e}")
+            
             # Upload to Google Drive if enabled
             if csv_path and self.google_drive_uploader:
                 self._upload_test_data(csv_path)
                 
         except Exception as e:
             logger.error(f"Test execution error: {e}", exc_info=True)
+            # Show error on LCD
+            if self.lcd_interface:
+                try:
+                    self.lcd_interface.show_error("Test Error")
+                except Exception:
+                    pass
         finally:
             self._test_running = False
             self._current_sequence = None
@@ -659,6 +822,14 @@ class HardwareManager:
     
     def _on_status_update(self, status: str) -> None:
         """Handle status update from test controller."""
+        # Update LCD with status message
+        if self.lcd_interface:
+            try:
+                # Truncate status for LCD display
+                self.lcd_interface.display_line(1, status[:16])
+            except Exception as e:
+                logger.error(f"[LCD] Status update error: {e}")
+        
         for callback in self._status_callbacks:
             try:
                 callback(status)
@@ -668,6 +839,20 @@ class HardwareManager:
     def _on_stage_change(self, stage_index: int, stages_per_cycle: int, 
                          current_cycle: int, total_cycles: int, stage) -> None:
         """Handle stage change from test controller."""
+        # Update LCD with stage info
+        if self.lcd_interface and self._lcd_config.get("show_stage_progress", True):
+            try:
+                stage_name = stage.name if hasattr(stage, 'name') else str(stage)
+                self.lcd_interface.show_test_stage(
+                    stage_name=stage_name,
+                    progress=0.0,
+                    cycle=current_cycle,
+                    total_cycles=total_cycles
+                )
+                self._lcd_last_update = time.time()
+            except Exception as e:
+                logger.error(f"[LCD] Stage change error: {e}")
+        
         for callback in self._stage_callbacks:
             try:
                 callback(stage_index, stages_per_cycle, current_cycle, total_cycles, stage)
@@ -684,6 +869,22 @@ class HardwareManager:
     
     def _on_progress_update(self, progress: float, status: str) -> None:
         """Handle progress update from test controller."""
+        # Update LCD with progress (rate-limited)
+        if self.lcd_interface and self._lcd_config.get("show_stage_progress", True):
+            try:
+                lcd_update_interval = self._lcd_config.get("update_interval_ms", 500) / 1000.0
+                now = time.time()
+                if now - self._lcd_last_update >= lcd_update_interval:
+                    # Show progress bar on line 2
+                    bar_width = 10
+                    filled = int(progress * bar_width)
+                    bar = "[" + "#" * filled + "-" * (bar_width - filled) + "]"
+                    progress_text = f"{bar} {int(progress * 100):3d}%"
+                    self.lcd_interface.display_line(1, progress_text)
+                    self._lcd_last_update = now
+            except Exception as e:
+                logger.error(f"[LCD] Progress update error: {e}")
+        
         for callback in self._progress_callbacks:
             try:
                 callback(progress, status)

@@ -52,12 +52,16 @@ noo-noo/
 │   └── ...
 ├── data/                        # Test output directory (CSV, JSON metadata)
 ├── docs/                        # Documentation and reference PDFs
+├── arduino/                     # Arduino sketches
+│   └── lcd_display/             # LCD status display controller
+│       └── lcd_display.ino      # Arduino Nano + I2C 1602 LCD
 ├── scripts/                     # Utility scripts
 │   ├── run_web.ps1              # Start web UI (Windows)
 │   ├── run_web.sh               # Start web UI (Linux)
 │   ├── tlb4_register_scanner.py # Modbus register discovery
 │   ├── tlb4_slope_helper.py     # Load cell calibration helper
-│   └── test_pressure_reading.py # Pressure sensor debugging
+│   ├── test_pressure_reading.py # Pressure sensor debugging
+│   └── test_lcd.py              # LCD display test script
 ├── src/epdm_vacuum/
 │   ├── app_main.py              # PyQt5 GUI entry point
 │   ├── api_main.py              # FastAPI server entry point
@@ -73,6 +77,7 @@ noo-noo/
 │   │   ├── hardware_interface.py    # Base class for all interfaces
 │   │   ├── modbus_interface.py      # TLB4 Modbus RTU driver (load cells)
 │   │   ├── widgetlords_interface.py # PI-SPI-DIN module driver (SPI)
+│   │   ├── lcd_interface.py         # Arduino LCD display driver (USB serial)
 │   │   ├── relay_state_manager.py   # Global relay state (SSOT)
 │   │   └── calibration.py           # Sensor calibration utilities
 │   ├── gui/
@@ -596,6 +601,72 @@ The 8AI module reads voltage. For 4-20mA sensors, voltage is converted:
 current_mA = (voltage / sense_resistor_ohms) * 1000.0
 ```
 Sense resistor value (~454Ω) calibrated via GUI.
+
+### Arduino LCD Display (USB Serial)
+
+The system supports an external LCD status display using an Arduino Nano connected via USB serial to an I2C 1602 LCD (16x2 characters).
+
+**Hardware Setup:**
+- Arduino Nano connected to Pi via USB
+- I2C 1602 LCD connected to Arduino:
+  - VCC → Arduino 5V
+  - GND → Arduino GND
+  - SDA → Arduino A4
+  - SCL → Arduino A5
+
+**Arduino Sketch:** `arduino/lcd_display/lcd_display.ino`
+- Uses LiquidCrystal_I2C library (install via Arduino Library Manager)
+- Default I2C address: 0x27 (or 0x3F for some modules)
+- Baud rate: 115200
+
+**Serial Protocol:**
+```
+LINE1|LINE2           # Display text (pipe separates lines)
+LINE1:text            # Update only line 1
+LINE2:text            # Update only line 2
+CLEAR                 # Clear display
+BACKLIGHT:ON          # Turn backlight on
+BACKLIGHT:OFF         # Turn backlight off
+PING                  # Returns "PONG" (connection test)
+```
+
+**Python Interface:** `src/epdm_vacuum/daq/lcd_interface.py`
+```python
+from epdm_vacuum.daq.lcd_interface import LCDInterface
+
+lcd = LCDInterface(port=None, auto_connect=True)  # Auto-detect Arduino
+lcd.display("Hello!", "World")
+lcd.show_vacuum(0.300, "Evacuating...")
+lcd.show_test_stage("Hold", progress=0.5, cycle=1, total_cycles=3)
+lcd.clear()
+lcd.disconnect()
+```
+
+**Configuration (hardware_config.yaml):**
+```yaml
+lcd:
+  enabled: true
+  port: null  # null = auto-detect, or specify e.g., "/dev/ttyUSB1" or "COM5"
+  baudrate: 115200
+  update_interval_ms: 500
+  show_vacuum_when_idle: true
+  show_stage_progress: true
+```
+
+**Test Script:**
+```bash
+# Test LCD display
+python scripts/test_lcd.py
+
+# List available ports
+python scripts/test_lcd.py --list
+
+# Interactive mode
+python scripts/test_lcd.py --interactive
+```
+
+**Auto-detection:**
+The system automatically detects Arduino Nano by checking for common USB-serial VIDs (Arduino, CH340, FTDI, Silicon Labs).
 
 ## Code Patterns
 

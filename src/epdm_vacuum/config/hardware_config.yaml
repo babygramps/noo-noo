@@ -299,6 +299,17 @@ io_devices:
       description: Vent valve - releases chamber to atmosphere
       default_state: false
 
+# LCD Display Configuration
+# Arduino Nano connected via USB with I2C 1602 LCD display
+lcd:
+  enabled: true
+  port: null  # Serial port (null = auto-detect Arduino)
+  baudrate: 115200  # Must match Arduino sketch
+  # Auto-update settings
+  update_interval_ms: 500  # Minimum time between display updates
+  show_vacuum_when_idle: true  # Show live vacuum reading when no test running
+  show_stage_progress: true  # Show stage name and progress during tests
+
 # Calibration Files
 calibration:
   pressure_sensor_file: calibration/pressure_sensor.json
