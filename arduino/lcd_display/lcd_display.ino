@@ -40,7 +40,7 @@
 #define MAX_MESSAGE_LENGTH 200  // Increased for longer jokes
 
 // Scroll Configuration
-#define SCROLL_DELAY_MS 200      // Time between scroll steps (faster = lower)
+#define SCROLL_DELAY_MS 100      // Time between scroll steps (faster = lower)
 #define SCROLL_PAUSE_START 1500  // Pause at start before scrolling
 #define SCROLL_PAUSE_END 1000    // Pause at end before next line/restart
 
