@@ -349,6 +349,47 @@ class LCDInterface:
             logger.debug(f"[LCD] Backlight {'ON' if on else 'OFF'}")
         return success
     
+    def scroll(self, line1: str, line2: str = "") -> bool:
+        """
+        Display text with auto-scrolling for long text.
+        
+        The Arduino will scroll text that exceeds 16 characters,
+        pausing at start and end before looping.
+        
+        Args:
+            line1: Text for first line (can exceed 16 chars)
+            line2: Text for second line (can exceed 16 chars)
+        
+        Returns:
+            bool: True if sent successfully
+        """
+        # Limit to Arduino buffer size
+        line1 = line1[:180]
+        line2 = line2[:180]
+        
+        message = f"SCROLL:{line1}|{line2}"
+        success = self._send(message)
+        
+        if success:
+            # Clear cache since scrolling is dynamic
+            self._current_line1 = ""
+            self._current_line2 = ""
+            logger.debug(f"[LCD] Scroll: '{line1[:30]}...' | '{line2[:30]}...'")
+        
+        return success
+    
+    def stop_scroll(self) -> bool:
+        """
+        Stop scrolling and return to static display mode.
+        
+        Returns:
+            bool: True if sent successfully
+        """
+        success = self._send("NOSCROLL")
+        if success:
+            logger.debug("[LCD] Scroll stopped")
+        return success
+    
     # === Convenience methods for common status displays ===
     
     def show_status(self, status: str, detail: str = "") -> bool:

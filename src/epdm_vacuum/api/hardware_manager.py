@@ -236,67 +236,51 @@ class HardwareManager:
     def _fetch_joke(self) -> Optional[Dict[str, str]]:
         """
         Fetch a random joke from JokeAPI for LCD display.
-        
+
         Returns:
-            Dict with 'line1' and 'line2' keys, or None if fetch failed
+            Dict with 'line1' and 'line2' keys (full text, will scroll), or None if fetch failed
         """
         import requests
-        
+
         try:
-            # Fetch a safe, short joke
+            # Fetch a safe joke
             # Using safe-mode and blacklisting explicit content
             url = (
                 "https://v2.jokeapi.dev/joke/Any"
                 "?safe-mode"
                 "&blacklistFlags=nsfw,religious,political,racist,sexist,explicit"
             )
-            
+
             response = requests.get(url, timeout=5.0, headers={
                 "User-Agent": "EPDM-Vacuum-Test-System/1.0"
             })
-            
+
             if response.status_code != 200:
                 logger.warning(f"[LCD] JokeAPI returned status {response.status_code}")
                 return None
-            
+
             data = response.json()
-            
+
             if data.get("error"):
                 logger.warning(f"[LCD] JokeAPI error: {data.get('message')}")
                 return None
-            
+
             joke_type = data.get("type")
-            
+
             if joke_type == "single":
-                # Single joke - split across two lines if needed
+                # Single joke - put full text on line 1, Arduino will scroll if needed
                 joke = data.get("joke", "")
-                if len(joke) <= 16:
-                    return {"line1": joke, "line2": ""}
-                elif len(joke) <= 32:
-                    # Split at word boundary near middle
-                    mid = len(joke) // 2
-                    split_pos = joke.rfind(" ", 0, 17)
-                    if split_pos == -1:
-                        split_pos = 16
-                    return {
-                        "line1": joke[:split_pos].strip()[:16],
-                        "line2": joke[split_pos:].strip()[:16]
-                    }
-                else:
-                    # Too long - truncate with ellipsis
-                    return {
-                        "line1": joke[:15] + ".",
-                        "line2": joke[15:30] + "."
-                    }
-            
+                # Limit to Arduino buffer size
+                return {"line1": joke[:180], "line2": ""}
+
             elif joke_type == "twopart":
-                # Setup and delivery - one per line
-                setup = data.get("setup", "")[:16]
-                delivery = data.get("delivery", "")[:16]
+                # Setup and delivery - one per line, both can scroll
+                setup = data.get("setup", "")[:180]
+                delivery = data.get("delivery", "")[:180]
                 return {"line1": setup, "line2": delivery}
-            
+
             return None
-            
+
         except requests.exceptions.Timeout:
             logger.debug("[LCD] JokeAPI request timed out")
             return None
@@ -402,22 +386,19 @@ class HardwareManager:
                         )
                         
                         if should_fetch_new_joke:
-                            # Fetch a new joke (in background to not block sensor loop)
+                            # Fetch a new joke
                             joke = self._fetch_joke()
                             if joke:
                                 self._lcd_current_joke = joke
                                 self._lcd_joke_last_fetch = now
                                 self._lcd_showing_joke = True
-                                logger.debug(f"[LCD] Showing joke: {joke['line1']} | {joke['line2']}")
-                        
-                        # Display current joke if we have one
-                        if self._lcd_showing_joke and self._lcd_current_joke:
-                            if now - self._lcd_last_update >= lcd_update_interval:
-                                self.lcd_interface.display(
-                                    self._lcd_current_joke["line1"],
-                                    self._lcd_current_joke["line2"]
+                                # Use scroll() for long jokes - Arduino handles the animation
+                                self.lcd_interface.scroll(
+                                    joke["line1"],
+                                    joke["line2"]
                                 )
                                 self._lcd_last_update = now
+                                logger.debug(f"[LCD] Showing joke: {joke['line1'][:50]}...")
                     
                     else:
                         # Normal idle display - show vacuum reading
