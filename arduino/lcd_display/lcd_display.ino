@@ -65,9 +65,15 @@ int scrollPos2 = 0;
 int scrollLen1 = 0;
 int scrollLen2 = 0;
 unsigned long lastScrollTime = 0;
-bool scrollPauseStart = true;
-bool scrollPauseEnd = false;
 unsigned long scrollPauseTime = 0;
+
+// Sequential scroll phases
+// 0 = pause at start (show beginning)
+// 1 = scrolling line 1
+// 2 = pause between lines
+// 3 = scrolling line 2
+// 4 = pause at end before restart
+int scrollPhase = 0;
 
 // Timing
 unsigned long lastUpdate = 0;
@@ -131,46 +137,81 @@ void loop() {
 void handleScrolling() {
   unsigned long now = millis();
   
-  // Handle pause at start
-  if (scrollPauseStart) {
-    if (now - scrollPauseTime >= SCROLL_PAUSE_START) {
-      scrollPauseStart = false;
-      lastScrollTime = now;
-    }
-    return;
-  }
+  bool line1NeedsScroll = scrollLen1 > LCD_COLS;
+  bool line2NeedsScroll = scrollLen2 > LCD_COLS;
+  bool line1Done = !line1NeedsScroll || (scrollPos1 >= scrollLen1 - LCD_COLS);
+  bool line2Done = !line2NeedsScroll || (scrollPos2 >= scrollLen2 - LCD_COLS);
   
-  // Handle pause at end (before restart)
-  if (scrollPauseEnd) {
-    if (now - scrollPauseTime >= SCROLL_PAUSE_END) {
-      scrollPauseEnd = false;
-      scrollPos1 = 0;
-      scrollPos2 = 0;
-      scrollPauseStart = true;
-      scrollPauseTime = now;
-      displayScrollFrame();
-    }
-    return;
-  }
-  
-  // Time to scroll?
-  if (now - lastScrollTime >= SCROLL_DELAY_MS) {
-    lastScrollTime = now;
-    
-    bool line1Done = (scrollLen1 <= LCD_COLS) || (scrollPos1 >= scrollLen1 - LCD_COLS);
-    bool line2Done = (scrollLen2 <= LCD_COLS) || (scrollPos2 >= scrollLen2 - LCD_COLS);
-    
-    // Advance scroll positions
-    if (!line1Done) scrollPos1++;
-    if (!line2Done) scrollPos2++;
-    
-    displayScrollFrame();
-    
-    // Check if both lines are done scrolling
-    if (line1Done && line2Done) {
-      scrollPauseEnd = true;
-      scrollPauseTime = now;
-    }
+  switch (scrollPhase) {
+    case 0:  // Pause at start - show beginning of both lines
+      if (now - scrollPauseTime >= SCROLL_PAUSE_START) {
+        if (line1NeedsScroll) {
+          scrollPhase = 1;  // Start scrolling line 1
+          lastScrollTime = now;
+        } else if (line2NeedsScroll) {
+          scrollPhase = 3;  // Skip to scrolling line 2
+          lastScrollTime = now;
+        } else {
+          // Neither line needs scrolling, just pause and restart
+          scrollPhase = 4;
+          scrollPauseTime = now;
+        }
+      }
+      break;
+      
+    case 1:  // Scrolling line 1 (the setup/joke)
+      if (now - lastScrollTime >= SCROLL_DELAY_MS) {
+        lastScrollTime = now;
+        
+        if (!line1Done) {
+          scrollPos1++;
+          displayScrollFrame();
+        } else {
+          // Line 1 done scrolling
+          scrollPhase = 2;  // Pause between lines
+          scrollPauseTime = now;
+        }
+      }
+      break;
+      
+    case 2:  // Pause between line 1 and line 2
+      if (now - scrollPauseTime >= SCROLL_PAUSE_END) {
+        if (line2NeedsScroll) {
+          scrollPhase = 3;  // Start scrolling line 2
+          lastScrollTime = now;
+        } else {
+          // Line 2 doesn't need scrolling, go to end pause
+          scrollPhase = 4;
+          scrollPauseTime = now;
+        }
+      }
+      break;
+      
+    case 3:  // Scrolling line 2 (the punchline)
+      if (now - lastScrollTime >= SCROLL_DELAY_MS) {
+        lastScrollTime = now;
+        
+        if (!line2Done) {
+          scrollPos2++;
+          displayScrollFrame();
+        } else {
+          // Line 2 done scrolling
+          scrollPhase = 4;  // Pause at end
+          scrollPauseTime = now;
+        }
+      }
+      break;
+      
+    case 4:  // Pause at end before restarting
+      if (now - scrollPauseTime >= SCROLL_PAUSE_END) {
+        // Reset and start over
+        scrollPos1 = 0;
+        scrollPos2 = 0;
+        scrollPhase = 0;
+        scrollPauseTime = now;
+        displayScrollFrame();
+      }
+      break;
   }
 }
 
@@ -210,8 +251,7 @@ void startScrolling(const char* text1, const char* text2) {
   scrollPos2 = 0;
   
   scrollMode = true;
-  scrollPauseStart = true;
-  scrollPauseEnd = false;
+  scrollPhase = 0;  // Start at initial pause
   scrollPauseTime = millis();
   
   // Display initial frame
