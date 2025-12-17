@@ -309,6 +309,9 @@ lcd:
   update_interval_ms: 500  # Minimum time between display updates
   show_vacuum_when_idle: true  # Show live vacuum reading when no test running
   show_stage_progress: true  # Show stage name and progress during tests
+  # Joke display settings (when idle for extended periods)
+  idle_joke_delay_seconds: 60  # Start showing jokes after this many seconds idle
+  joke_display_seconds: 30  # Show each joke for this many seconds before fetching new one
 
 # Calibration Files
 calibration:

@@ -651,7 +651,12 @@ lcd:
   update_interval_ms: 500
   show_vacuum_when_idle: true
   show_stage_progress: true
+  idle_joke_delay_seconds: 60  # Show jokes after 1 min idle
+  joke_display_seconds: 30     # New joke every 30 seconds
 ```
+
+**Idle Joke Display:**
+When the system is idle for more than 60 seconds (configurable), the LCD will start displaying random jokes fetched from JokeAPI (https://v2.jokeapi.dev). Jokes are filtered for safe content and refresh every 30 seconds.
 
 **Test Script:**
 ```bash

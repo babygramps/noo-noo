@@ -62,6 +62,12 @@ class HardwareManager:
         self._lcd_config: Dict[str, Any] = {}
         self._lcd_last_update: float = 0.0
         
+        # Joke display for idle LCD
+        self._lcd_idle_start: float = 0.0
+        self._lcd_showing_joke: bool = False
+        self._lcd_joke_last_fetch: float = 0.0
+        self._lcd_current_joke: Optional[Dict[str, str]] = None
+        
         # Sensor data cache (updated by background thread)
         self._sensor_data: Dict[str, Any] = {}
         self._sensor_lock = threading.Lock()
@@ -227,6 +233,80 @@ class HardwareManager:
             logger.error(f"[LCD] Failed to initialize LCD display: {e}", exc_info=True)
             self.lcd_interface = None
     
+    def _fetch_joke(self) -> Optional[Dict[str, str]]:
+        """
+        Fetch a random joke from JokeAPI for LCD display.
+        
+        Returns:
+            Dict with 'line1' and 'line2' keys, or None if fetch failed
+        """
+        import requests
+        
+        try:
+            # Fetch a safe, short joke
+            # Using safe-mode and blacklisting explicit content
+            url = (
+                "https://v2.jokeapi.dev/joke/Any"
+                "?safe-mode"
+                "&blacklistFlags=nsfw,religious,political,racist,sexist,explicit"
+            )
+            
+            response = requests.get(url, timeout=5.0, headers={
+                "User-Agent": "EPDM-Vacuum-Test-System/1.0"
+            })
+            
+            if response.status_code != 200:
+                logger.warning(f"[LCD] JokeAPI returned status {response.status_code}")
+                return None
+            
+            data = response.json()
+            
+            if data.get("error"):
+                logger.warning(f"[LCD] JokeAPI error: {data.get('message')}")
+                return None
+            
+            joke_type = data.get("type")
+            
+            if joke_type == "single":
+                # Single joke - split across two lines if needed
+                joke = data.get("joke", "")
+                if len(joke) <= 16:
+                    return {"line1": joke, "line2": ""}
+                elif len(joke) <= 32:
+                    # Split at word boundary near middle
+                    mid = len(joke) // 2
+                    split_pos = joke.rfind(" ", 0, 17)
+                    if split_pos == -1:
+                        split_pos = 16
+                    return {
+                        "line1": joke[:split_pos].strip()[:16],
+                        "line2": joke[split_pos:].strip()[:16]
+                    }
+                else:
+                    # Too long - truncate with ellipsis
+                    return {
+                        "line1": joke[:15] + ".",
+                        "line2": joke[15:30] + "."
+                    }
+            
+            elif joke_type == "twopart":
+                # Setup and delivery - one per line
+                setup = data.get("setup", "")[:16]
+                delivery = data.get("delivery", "")[:16]
+                return {"line1": setup, "line2": delivery}
+            
+            return None
+            
+        except requests.exceptions.Timeout:
+            logger.debug("[LCD] JokeAPI request timed out")
+            return None
+        except requests.exceptions.RequestException as e:
+            logger.debug(f"[LCD] JokeAPI request failed: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"[LCD] Error fetching joke: {e}")
+            return None
+
     def shutdown(self) -> None:
         """Shutdown all hardware interfaces gracefully."""
         logger.info("Shutting down hardware manager...")
@@ -290,27 +370,72 @@ class HardwareManager:
         """Background loop for reading sensors at 10Hz."""
         sample_interval = 0.1  # 10Hz
         lcd_update_interval = self._lcd_config.get("update_interval_ms", 500) / 1000.0
-        
+        idle_joke_threshold = self._lcd_config.get("idle_joke_delay_seconds", 60)  # 1 minute
+        joke_display_interval = self._lcd_config.get("joke_display_seconds", 30)  # New joke every 30s
+
         while self._sensor_thread_running:
             try:
                 data = self._read_sensors()
                 with self._sensor_lock:
                     self._sensor_data = data
-                
-                # Update LCD with vacuum reading when idle
+
+                # Update LCD when idle
                 if (self.lcd_interface and 
-                    self._lcd_config.get("show_vacuum_when_idle", True) and
+                    self.lcd_interface.is_connected() and
                     not self._test_running):
                     
                     now = time.time()
-                    if now - self._lcd_last_update >= lcd_update_interval:
-                        vacuum_bar = data.get("vacuum_bar", 0.0)
-                        self.lcd_interface.show_vacuum(vacuum_bar, "Ready")
-                        self._lcd_last_update = now
+                    
+                    # Track idle start time
+                    if self._lcd_idle_start == 0:
+                        self._lcd_idle_start = now
+                        self._lcd_showing_joke = False
+                    
+                    idle_duration = now - self._lcd_idle_start
+                    
+                    # Check if we should show jokes (idle for more than threshold)
+                    if idle_duration >= idle_joke_threshold:
+                        # Time to show jokes!
+                        should_fetch_new_joke = (
+                            self._lcd_current_joke is None or
+                            now - self._lcd_joke_last_fetch >= joke_display_interval
+                        )
                         
+                        if should_fetch_new_joke:
+                            # Fetch a new joke (in background to not block sensor loop)
+                            joke = self._fetch_joke()
+                            if joke:
+                                self._lcd_current_joke = joke
+                                self._lcd_joke_last_fetch = now
+                                self._lcd_showing_joke = True
+                                logger.debug(f"[LCD] Showing joke: {joke['line1']} | {joke['line2']}")
+                        
+                        # Display current joke if we have one
+                        if self._lcd_showing_joke and self._lcd_current_joke:
+                            if now - self._lcd_last_update >= lcd_update_interval:
+                                self.lcd_interface.display(
+                                    self._lcd_current_joke["line1"],
+                                    self._lcd_current_joke["line2"]
+                                )
+                                self._lcd_last_update = now
+                    
+                    else:
+                        # Normal idle display - show vacuum reading
+                        if self._lcd_config.get("show_vacuum_when_idle", True):
+                            if now - self._lcd_last_update >= lcd_update_interval:
+                                vacuum_bar = data.get("vacuum_bar", 0.0)
+                                self.lcd_interface.show_vacuum(vacuum_bar, "Ready")
+                                self._lcd_last_update = now
+                
+                elif self._test_running:
+                    # Reset idle tracking when test is running
+                    self._lcd_idle_start = 0
+                    self._lcd_showing_joke = False
+                    self._lcd_current_joke = None
+
             except Exception as e:
                 logger.error(f"Sensor read error: {e}")
-            
+
             time.sleep(sample_interval)
     
     def _read_sensors(self) -> Dict[str, Any]:
@@ -712,6 +837,11 @@ class HardwareManager:
         self._test_thread = threading.Thread(target=self._run_test, daemon=True)
         self._test_thread.start()
         
+        # Reset LCD idle/joke tracking
+        self._lcd_idle_start = 0
+        self._lcd_showing_joke = False
+        self._lcd_current_joke = None
+
         # Show test start on LCD
         if self.lcd_interface:
             try:

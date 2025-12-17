@@ -34,3 +34,6 @@ python-multipart>=0.0.6
 google-api-python-client>=2.100.0
 google-auth>=2.23.0
 
+# HTTP Client (for JokeAPI, etc.)
+requests>=2.31.0
+
