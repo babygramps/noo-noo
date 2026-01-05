@@ -80,7 +80,8 @@ check_prerequisites() {
 }
 
 update_service_paths() {
-    log_info "Updating service files with installation paths..."
+    # Log to stderr so it doesn't get captured in the output
+    echo -e "${GREEN}[INFO]${NC} Updating service files with installation paths..." >&2
     
     # Create temp copies with correct paths
     local api_service="/tmp/epdm-api.service"
