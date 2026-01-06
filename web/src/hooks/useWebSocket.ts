@@ -320,9 +320,17 @@ export function useSensorData(maxDataPoints: number = 600) {
       console.log('[SensorData] Connected with initial data:', data);
     },
     onJoke: (data) => {
+      console.log('[WebSocket] Received joke:', {
+        line1: data.line1?.substring(0, 50),
+        line2: data.line2?.substring(0, 50),
+        testRunning,
+      });
       // Only show jokes when not testing
       if (!testRunning) {
         setCurrentJoke(data);
+        console.log('[WebSocket] Joke set to state (test not running)');
+      } else {
+        console.log('[WebSocket] Joke ignored (test is running)');
       }
     },
   });

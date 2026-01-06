@@ -53,7 +53,20 @@ export default function Dashboard() {
   const [sequenceToEdit, setSequenceToEdit] = useState<Sequence | null>(null);
   
   // User idle detection for joke ticker (60 seconds of no mouse/keyboard activity)
-  const { isIdle: isUserIdle } = useIdleDetection({ idleTimeout: 60000 });
+  const { isIdle: isUserIdle, idleTime } = useIdleDetection({ idleTimeout: 60000, debug: true });
+  
+  // Debug logging for joke ticker visibility
+  useEffect(() => {
+    const shouldShowJoke = !testRunning && currentJoke && isUserIdle;
+    console.log('[JokeTicker] Visibility check:', {
+      testRunning,
+      hasJoke: !!currentJoke,
+      jokePreview: currentJoke?.line1?.substring(0, 50),
+      isUserIdle,
+      idleTimeSeconds: Math.floor(idleTime / 1000),
+      shouldShowJoke,
+    });
+  }, [testRunning, currentJoke, isUserIdle, idleTime]);
 
   // Fetch sequences on mount
   useEffect(() => {
