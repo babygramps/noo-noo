@@ -296,18 +296,21 @@ body {
   animation: glow-pulse 2s ease-in-out infinite;
 }
 
-/* Ticker animation for joke display */
+/* Ticker animation for joke display - starts off-screen right, scrolls to left */
 @keyframes ticker-scroll {
   0% {
-    transform: translateX(0);
+    transform: translateX(100%);
   }
   100% {
-    transform: translateX(-50%);
+    transform: translateX(-100%);
   }
 }
 
-.animate-ticker {
+.ticker-scroll {
   animation: ticker-scroll linear infinite;
+  /* Start positioned at the right edge of container */
+  position: relative;
+  left: 100%;
 }
 
 /* ========================================
