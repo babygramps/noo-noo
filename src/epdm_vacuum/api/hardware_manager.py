@@ -68,6 +68,10 @@ class HardwareManager:
         self._lcd_joke_last_fetch: float = 0.0
         self._lcd_current_joke: Optional[Dict[str, str]] = None
         
+        # Web joke ticker (separate from LCD timing)
+        self._web_joke_last_fetch: float = 0.0
+        self._web_current_joke: Optional[Dict[str, str]] = None
+        
         # Sensor data cache (updated by background thread)
         self._sensor_data: Dict[str, Any] = {}
         self._sensor_lock = threading.Lock()
@@ -355,8 +359,9 @@ class HardwareManager:
         """Background loop for reading sensors at 10Hz."""
         sample_interval = 0.1  # 10Hz
         lcd_update_interval = self._lcd_config.get("update_interval_ms", 500) / 1000.0
-        idle_joke_threshold = self._lcd_config.get("idle_joke_delay_seconds", 60)  # 1 minute
+        lcd_idle_joke_threshold = self._lcd_config.get("idle_joke_delay_seconds", 60)  # LCD waits 1 minute
         joke_display_interval = self._lcd_config.get("joke_display_seconds", 30)  # New joke every 30s
+        web_joke_start_delay = 5.0  # Web ticker starts after 5 seconds idle
 
         while self._sensor_thread_running:
             try:
@@ -366,7 +371,7 @@ class HardwareManager:
 
                 now = time.time()
                 
-                # Handle idle state and joke display (works with or without LCD)
+                # Handle idle state and joke display
                 if not self._test_running:
                     # Track idle start time
                     if self._lcd_idle_start == 0:
@@ -375,17 +380,38 @@ class HardwareManager:
                     
                     idle_duration = now - self._lcd_idle_start
                     
-                    # Check if we should show jokes (idle for more than threshold)
-                    if idle_duration >= idle_joke_threshold:
-                        # Time to show jokes!
-                        should_fetch_new_joke = (
+                    # === WEB TICKER: Always show jokes after short delay ===
+                    if idle_duration >= web_joke_start_delay:
+                        should_fetch_web_joke = (
+                            self._web_current_joke is None or
+                            now - self._web_joke_last_fetch >= joke_display_interval
+                        )
+                        
+                        if should_fetch_web_joke:
+                            # Fetch a new joke for web
+                            joke = self._fetch_joke()
+                            if joke:
+                                self._web_current_joke = joke
+                                self._web_joke_last_fetch = now
+                                
+                                # Broadcast joke to web clients
+                                self._broadcast_joke(joke["line1"], joke["line2"])
+                                logger.debug(f"[WEB] Broadcasting joke: {joke['line1'][:50]}...")
+                    
+                    # === LCD: Wait longer before showing jokes ===
+                    if idle_duration >= lcd_idle_joke_threshold:
+                        # Time to show jokes on LCD!
+                        should_show_lcd_joke = (
                             self._lcd_current_joke is None or
                             now - self._lcd_joke_last_fetch >= joke_display_interval
                         )
                         
-                        if should_fetch_new_joke:
-                            # Fetch a new joke
-                            joke = self._fetch_joke()
+                        if should_show_lcd_joke:
+                            # Use the web joke if available, otherwise fetch new
+                            joke = self._web_current_joke
+                            if joke is None:
+                                joke = self._fetch_joke()
+                            
                             if joke:
                                 self._lcd_current_joke = joke
                                 self._lcd_joke_last_fetch = now
@@ -400,12 +426,9 @@ class HardwareManager:
                                     )
                                     self._lcd_last_update = now
                                     logger.debug(f"[LCD] Showing joke: {joke['line1'][:50]}...")
-                                
-                                # Broadcast joke to web clients
-                                self._broadcast_joke(joke["line1"], joke["line2"])
                     
                     else:
-                        # Normal idle display - show vacuum reading on LCD only
+                        # Normal idle display - show vacuum reading on LCD only (before joke threshold)
                         if (self.lcd_interface and 
                             self.lcd_interface.is_connected() and
                             self._lcd_config.get("show_vacuum_when_idle", True)):
@@ -419,6 +442,7 @@ class HardwareManager:
                     self._lcd_idle_start = 0
                     self._lcd_showing_joke = False
                     self._lcd_current_joke = None
+                    self._web_current_joke = None
 
             except Exception as e:
                 logger.error(f"Sensor read error: {e}")
@@ -824,10 +848,11 @@ class HardwareManager:
         self._test_thread = threading.Thread(target=self._run_test, daemon=True)
         self._test_thread.start()
         
-        # Reset LCD idle/joke tracking
+        # Reset LCD and web joke tracking
         self._lcd_idle_start = 0
         self._lcd_showing_joke = False
         self._lcd_current_joke = None
+        self._web_current_joke = None
 
         # Show test start on LCD
         if self.lcd_interface:
