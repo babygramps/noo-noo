@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 interface UseIdleDetectionOptions {
   /** Time in milliseconds before user is considered idle (default: 60000 = 60 seconds) */
@@ -11,6 +11,9 @@ interface UseIdleDetectionOptions {
   debug?: boolean;
 }
 
+// Static events array to prevent re-renders
+const DEFAULT_EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'];
+
 /**
  * Hook to detect user idle state based on mouse, keyboard, and touch activity.
  * Returns true when user has been idle for longer than the specified timeout.
@@ -18,89 +21,103 @@ interface UseIdleDetectionOptions {
 export function useIdleDetection(options: UseIdleDetectionOptions = {}) {
   const {
     idleTimeout = 60000, // 60 seconds default
-    events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'],
+    events = DEFAULT_EVENTS,
     debug = true, // Enable by default for now
   } = options;
 
   const [isIdle, setIsIdle] = useState(false);
   const [idleTime, setIdleTime] = useState(0);
+  
+  // Use refs to avoid dependency issues in callbacks
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const activityCountRef = useRef<number>(0);
+  const isIdleRef = useRef<boolean>(false);
+  const debugRef = useRef<boolean>(debug);
+  const idleTimeoutRef = useRef<number>(idleTimeout);
+  
+  // Keep refs in sync
+  debugRef.current = debug;
+  idleTimeoutRef.current = idleTimeout;
 
-  // Reset idle timer on activity
-  const handleActivity = useCallback((event?: Event) => {
-    lastActivityRef.current = Date.now();
-    activityCountRef.current += 1;
-    
-    // Log every 10th activity to avoid spam (or first few)
-    if (debug && (activityCountRef.current <= 3 || activityCountRef.current % 10 === 0)) {
-      console.log(`[IdleDetection] Activity detected: ${event?.type || 'manual'} (count: ${activityCountRef.current})`);
-    }
-    
-    // If currently idle, immediately set to not idle
-    if (isIdle) {
-      if (debug) {
-        console.log('[IdleDetection] User became ACTIVE (was idle)');
-      }
-      setIsIdle(false);
-      setIdleTime(0);
-    }
-
-    // Clear existing timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-
-    // Set new timeout
-    timeoutRef.current = setTimeout(() => {
-      if (debug) {
-        console.log(`[IdleDetection] User became IDLE after ${idleTimeout / 1000}s of inactivity`);
-      }
-      setIsIdle(true);
-    }, idleTimeout);
-  }, [idleTimeout, isIdle, debug]);
-
-  // Set up event listeners
+  // Set up event listeners - only run once on mount
   useEffect(() => {
-    if (debug) {
-      console.log(`[IdleDetection] Initializing with ${idleTimeout / 1000}s timeout, tracking events:`, events);
+    const logDebug = debugRef.current;
+    const timeout = idleTimeoutRef.current;
+    
+    if (logDebug) {
+      console.log(`[IdleDetection] Initializing with ${timeout / 1000}s timeout`);
     }
+    
+    // Handler function that uses refs to avoid stale closures
+    const handleActivity = (event?: Event) => {
+      lastActivityRef.current = Date.now();
+      activityCountRef.current += 1;
+      
+      // Log every 10th activity to avoid spam (or first few)
+      if (debugRef.current && (activityCountRef.current <= 3 || activityCountRef.current % 50 === 0)) {
+        console.log(`[IdleDetection] Activity: ${event?.type || 'manual'} (count: ${activityCountRef.current})`);
+      }
+      
+      // If currently idle, immediately set to not idle
+      if (isIdleRef.current) {
+        if (debugRef.current) {
+          console.log('[IdleDetection] User became ACTIVE (was idle)');
+        }
+        isIdleRef.current = false;
+        setIsIdle(false);
+        setIdleTime(0);
+      }
+
+      // Clear existing timeout
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+
+      // Set new timeout
+      timeoutRef.current = setTimeout(() => {
+        if (debugRef.current) {
+          console.log(`[IdleDetection] User became IDLE after ${idleTimeoutRef.current / 1000}s of inactivity`);
+        }
+        isIdleRef.current = true;
+        setIsIdle(true);
+      }, idleTimeoutRef.current);
+    };
     
     // Initial timeout setup
     timeoutRef.current = setTimeout(() => {
-      if (debug) {
-        console.log(`[IdleDetection] Initial idle timeout reached (${idleTimeout / 1000}s)`);
+      if (debugRef.current) {
+        console.log(`[IdleDetection] Initial idle timeout reached (${timeout / 1000}s)`);
       }
+      isIdleRef.current = true;
       setIsIdle(true);
-    }, idleTimeout);
+    }, timeout);
 
     // Add event listeners
-    const wrappedHandler = (event: Event) => handleActivity(event);
-    events.forEach(event => {
-      window.addEventListener(event, wrappedHandler, { passive: true });
+    events.forEach(eventName => {
+      window.addEventListener(eventName, handleActivity, { passive: true });
     });
     
-    if (debug) {
+    if (logDebug) {
       console.log('[IdleDetection] Event listeners attached');
     }
 
-    // Track idle time for display purposes
+    // Track idle time for display purposes (update every 5 seconds to reduce logs)
     intervalRef.current = setInterval(() => {
       const elapsed = Date.now() - lastActivityRef.current;
       setIdleTime(elapsed);
       
-      // Log every 10 seconds when approaching idle threshold
-      if (debug && elapsed > 0 && elapsed % 10000 < 1000) {
-        console.log(`[IdleDetection] Idle time: ${Math.floor(elapsed / 1000)}s / ${idleTimeout / 1000}s threshold`);
+      // Log every 10 seconds
+      if (debugRef.current && elapsed > 0 && Math.floor(elapsed / 1000) % 10 === 0) {
+        console.log(`[IdleDetection] Idle time: ${Math.floor(elapsed / 1000)}s / ${idleTimeoutRef.current / 1000}s threshold, isIdle: ${isIdleRef.current}`);
       }
     }, 1000);
 
     // Cleanup
     return () => {
-      if (debug) {
-        console.log('[IdleDetection] Cleaning up event listeners');
+      if (debugRef.current) {
+        console.log('[IdleDetection] Cleaning up (component unmount)');
       }
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -108,18 +125,31 @@ export function useIdleDetection(options: UseIdleDetectionOptions = {}) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
-      events.forEach(event => {
-        window.removeEventListener(event, wrappedHandler);
+      events.forEach(eventName => {
+        window.removeEventListener(eventName, handleActivity);
       });
     };
-  }, [events, handleActivity, idleTimeout, debug]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps - only run once on mount
 
-  // Log state changes
-  useEffect(() => {
-    if (debug) {
-      console.log(`[IdleDetection] State: isIdle=${isIdle}, idleTime=${Math.floor(idleTime / 1000)}s`);
+  // Manual reset function
+  const resetIdleTimer = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    if (isIdleRef.current) {
+      isIdleRef.current = false;
+      setIsIdle(false);
+      setIdleTime(0);
     }
-  }, [isIdle, idleTime, debug]);
+    
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    
+    timeoutRef.current = setTimeout(() => {
+      isIdleRef.current = true;
+      setIsIdle(true);
+    }, idleTimeoutRef.current);
+  }, []);
 
   return {
     /** Whether the user is currently idle (no activity for idleTimeout ms) */
@@ -127,7 +157,7 @@ export function useIdleDetection(options: UseIdleDetectionOptions = {}) {
     /** Time in milliseconds since last activity */
     idleTime,
     /** Manually reset the idle timer (e.g., after programmatic action) */
-    resetIdleTimer: handleActivity,
+    resetIdleTimer,
   };
 }
 
