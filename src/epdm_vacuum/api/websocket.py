@@ -258,6 +258,17 @@ class TestEventBroadcaster:
             "timestamp": datetime.now().isoformat()
         })
     
+    async def broadcast_joke(self, line1: str, line2: str) -> None:
+        """Broadcast a joke for display on web interface ticker."""
+        await self.manager.broadcast({
+            "type": "joke",
+            "data": {
+                "line1": line1,
+                "line2": line2,
+            },
+            "timestamp": datetime.now().isoformat()
+        })
+    
     async def broadcast(self, message: dict) -> None:
         """Broadcast an arbitrary message."""
         if "timestamp" not in message:

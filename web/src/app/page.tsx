@@ -10,6 +10,7 @@ import { TestMetadataModal, TestMetadata } from '@/components/TestMetadataModal'
 import { TestDataBrowser } from '@/components/TestDataBrowser';
 import { GasketWeighingModal, GasketWeighingResult } from '@/components/GasketWeighingModal';
 import { SequenceEditorModal } from '@/components/SequenceEditorModal';
+import { JokeTicker } from '@/components/JokeTicker';
 import * as api from '@/lib/api';
 import type { SequenceSummary, Sequence } from '@/lib/api';
 import { Activity, Gauge, Scale, Settings, HardDrive } from 'lucide-react';
@@ -26,6 +27,7 @@ export default function Dashboard() {
     progress,
     statusMessage,
     testRunning,
+    currentJoke,
     clearHistory,
   } = useSensorData(600); // 1 minute of data at 10Hz
 
@@ -204,6 +206,11 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-panel-bg bg-grid bg-radial-fade">
+      {/* Joke Ticker - above header when system is idle */}
+      {!testRunning && currentJoke && (
+        <JokeTicker joke={currentJoke} isConnected={isConnected} />
+      )}
+      
       {/* Header */}
       <header className="sticky top-0 z-40 backdrop-blur-xl bg-panel-bg/80 border-b border-panel-border/50">
         <div className="px-6 py-4">

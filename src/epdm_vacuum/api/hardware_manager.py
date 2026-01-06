@@ -80,6 +80,7 @@ class HardwareManager:
         self._completion_callbacks: List[Callable] = []
         self._io_callbacks: List[Callable[[str, bool], None]] = []
         self._progress_callbacks: List[Callable[[float, str], None]] = []
+        self._joke_callbacks: List[Callable[[str, str], None]] = []
         
         HardwareManager._initialized = True
         logger.info("HardwareManager singleton created")
@@ -363,13 +364,10 @@ class HardwareManager:
                 with self._sensor_lock:
                     self._sensor_data = data
 
-                # Update LCD when idle
-                if (self.lcd_interface and 
-                    self.lcd_interface.is_connected() and
-                    not self._test_running):
-                    
-                    now = time.time()
-                    
+                now = time.time()
+                
+                # Handle idle state and joke display (works with or without LCD)
+                if not self._test_running:
                     # Track idle start time
                     if self._lcd_idle_start == 0:
                         self._lcd_idle_start = now
@@ -392,23 +390,31 @@ class HardwareManager:
                                 self._lcd_current_joke = joke
                                 self._lcd_joke_last_fetch = now
                                 self._lcd_showing_joke = True
-                                # Use scroll() for long jokes - Arduino handles the animation
-                                self.lcd_interface.scroll(
-                                    joke["line1"],
-                                    joke["line2"]
-                                )
-                                self._lcd_last_update = now
-                                logger.debug(f"[LCD] Showing joke: {joke['line1'][:50]}...")
+                                
+                                # Display on LCD if connected
+                                if self.lcd_interface and self.lcd_interface.is_connected():
+                                    # Use scroll() for long jokes - Arduino handles the animation
+                                    self.lcd_interface.scroll(
+                                        joke["line1"],
+                                        joke["line2"]
+                                    )
+                                    self._lcd_last_update = now
+                                    logger.debug(f"[LCD] Showing joke: {joke['line1'][:50]}...")
+                                
+                                # Broadcast joke to web clients
+                                self._broadcast_joke(joke["line1"], joke["line2"])
                     
                     else:
-                        # Normal idle display - show vacuum reading
-                        if self._lcd_config.get("show_vacuum_when_idle", True):
+                        # Normal idle display - show vacuum reading on LCD only
+                        if (self.lcd_interface and 
+                            self.lcd_interface.is_connected() and
+                            self._lcd_config.get("show_vacuum_when_idle", True)):
                             if now - self._lcd_last_update >= lcd_update_interval:
                                 vacuum_bar = data.get("vacuum_bar", 0.0)
                                 self.lcd_interface.show_vacuum(vacuum_bar, "Ready")
                                 self._lcd_last_update = now
                 
-                elif self._test_running:
+                else:
                     # Reset idle tracking when test is running
                     self._lcd_idle_start = 0
                     self._lcd_showing_joke = False
@@ -930,6 +936,18 @@ class HardwareManager:
     def add_progress_callback(self, callback: Callable[[float, str], None]) -> None:
         """Add callback for progress updates."""
         self._progress_callbacks.append(callback)
+    
+    def add_joke_callback(self, callback: Callable[[str, str], None]) -> None:
+        """Add callback for joke updates (line1, line2)."""
+        self._joke_callbacks.append(callback)
+    
+    def _broadcast_joke(self, line1: str, line2: str) -> None:
+        """Broadcast joke to all registered callbacks."""
+        for callback in self._joke_callbacks:
+            try:
+                callback(line1, line2)
+            except Exception as e:
+                logger.error(f"Joke callback error: {e}")
     
     def _on_status_update(self, status: str) -> None:
         """Handle status update from test controller."""

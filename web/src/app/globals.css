@@ -296,6 +296,20 @@ body {
   animation: glow-pulse 2s ease-in-out infinite;
 }
 
+/* Ticker animation for joke display */
+@keyframes ticker-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-ticker {
+  animation: ticker-scroll linear infinite;
+}
+
 /* ========================================
    Utility Classes
    ======================================== */

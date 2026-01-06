@@ -96,11 +96,18 @@ def setup_event_callbacks(hardware_manager, loop: asyncio.AbstractEventLoop):
             loop
         )
     
+    def joke_callback(line1: str, line2: str):
+        asyncio.run_coroutine_threadsafe(
+            event_broadcaster.broadcast_joke(line1, line2),
+            loop
+        )
+    
     hardware_manager.add_status_callback(status_callback)
     hardware_manager.add_stage_callback(stage_callback)
     hardware_manager.add_io_callback(io_callback)
     hardware_manager.add_progress_callback(progress_callback)
     hardware_manager.add_completion_callback(completion_callback)
+    hardware_manager.add_joke_callback(joke_callback)
     
     # Set up Google Drive upload callbacks
     def upload_success_callback(filename: str, drive_url: str):

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { SensorData, IOStates } from '@/lib/api';
 
 export interface WebSocketMessage {
-  type: 'sensor_data' | 'status' | 'stage_change' | 'progress' | 'io_change' | 'test_complete' | 'error' | 'connected' | 'heartbeat' | 'pong';
+  type: 'sensor_data' | 'status' | 'stage_change' | 'progress' | 'io_change' | 'test_complete' | 'error' | 'connected' | 'heartbeat' | 'pong' | 'joke';
   data?: unknown;
   message?: string;
   timestamp?: string;
@@ -28,6 +28,11 @@ export interface IOChangeData {
   state: boolean;
 }
 
+export interface JokeData {
+  line1: string;
+  line2: string;
+}
+
 interface UseWebSocketOptions {
   onSensorData?: (data: SensorData) => void;
   onStatusMessage?: (message: string) => void;
@@ -37,6 +42,7 @@ interface UseWebSocketOptions {
   onTestComplete?: () => void;
   onError?: (error: string) => void;
   onConnected?: (data: unknown) => void;
+  onJoke?: (data: JokeData) => void;
 }
 
 export function useWebSocket(options: UseWebSocketOptions = {}) {
@@ -199,6 +205,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
             opts.onConnected?.(message.data);
             break;
 
+          case 'joke':
+            opts.onJoke?.(message.data as JokeData);
+            break;
+
           case 'heartbeat':
           case 'pong':
             // Heartbeat/pong - connection is alive
@@ -265,6 +275,7 @@ export function useSensorData(maxDataPoints: number = 600) {
   const [progress, setProgress] = useState<ProgressData | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [testRunning, setTestRunning] = useState(false);
+  const [currentJoke, setCurrentJoke] = useState<JokeData | null>(null);
 
   const { isConnected } = useWebSocket({
     onSensorData: (data) => {
@@ -286,6 +297,8 @@ export function useSensorData(maxDataPoints: number = 600) {
     },
     onStageChange: (data) => {
       setStageInfo(data);
+      // Clear joke when test starts
+      setCurrentJoke(null);
     },
     onProgress: (data) => {
       setProgress(data);
@@ -306,6 +319,12 @@ export function useSensorData(maxDataPoints: number = 600) {
     onConnected: (data) => {
       console.log('[SensorData] Connected with initial data:', data);
     },
+    onJoke: (data) => {
+      // Only show jokes when not testing
+      if (!testRunning) {
+        setCurrentJoke(data);
+      }
+    },
   });
 
   // Clear history
@@ -322,6 +341,7 @@ export function useSensorData(maxDataPoints: number = 600) {
     progress,
     statusMessage,
     testRunning,
+    currentJoke,
     clearHistory,
   };
 }
