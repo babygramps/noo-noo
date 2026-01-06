@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSensorData } from '@/hooks/useWebSocket';
+import { useIdleDetection } from '@/hooks/useIdleDetection';
 import { SensorDisplay, LoadCellGrid, PressureDisplay, ConnectionStatus } from '@/components/SensorDisplay';
 import { LiveChart } from '@/components/LiveChart';
 import { ControlPanel, IOStatusDisplay } from '@/components/ControlPanel';
@@ -50,6 +51,9 @@ export default function Dashboard() {
   // Sequence editor state
   const [isSequenceEditorOpen, setIsSequenceEditorOpen] = useState(false);
   const [sequenceToEdit, setSequenceToEdit] = useState<Sequence | null>(null);
+  
+  // User idle detection for joke ticker (60 seconds of no mouse/keyboard activity)
+  const { isIdle: isUserIdle } = useIdleDetection({ idleTimeout: 60000 });
 
   // Fetch sequences on mount
   useEffect(() => {
@@ -206,8 +210,8 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-panel-bg bg-grid bg-radial-fade">
-      {/* Joke Ticker - above header when system is idle */}
-      {!testRunning && currentJoke && (
+      {/* Joke Ticker - above header when user is idle for 60+ seconds and no test running */}
+      {!testRunning && currentJoke && isUserIdle && (
         <JokeTicker joke={currentJoke} isConnected={isConnected} />
       )}
       
